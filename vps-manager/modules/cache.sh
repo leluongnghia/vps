@@ -65,23 +65,29 @@ toggle_extension() {
         *) return ;;
     esac
     
-    read -p "Bạn muốn (on/off)? " state
+    echo -e "Trạng thái mong muốn:"
+    echo -e "1. BẬT (Enable/On)"
+    echo -e "2. TẮT (Disable/Off)"
+    read -p "Chọn [1-2]: " state_choice
+    
+    if [[ "$state_choice" == "1" || "$state_choice" == "on" || "$state_choice" == "y" || "$state_choice" == "yes" ]]; then
+        state="on"
+        action="phpenmod"
+    elif [[ "$state_choice" == "2" || "$state_choice" == "off" || "$state_choice" == "n" || "$state_choice" == "no" ]]; then
+        state="off"
+        action="phpdismod"
+    else
+        echo -e "${RED}Lựa chọn không hợp lệ!${NC}"
+        pause; return
+    fi
     
     if [[ "$ver" == "all" ]]; then
         for v in 8.1 8.2 8.3; do
-             if [[ "$state" == "off" ]]; then
-                 phpdismod -v $v $ext
-             else
-                 phpenmod -v $v $ext
-             fi
+             $action -v $v $ext
         done
         systemctl restart php*-fpm
     else
-        if [[ "$state" == "off" ]]; then
-             phpdismod -v $ver $ext
-        else
-             phpenmod -v $ver $ext
-        fi
+        $action -v $ver $ext
         systemctl restart php$ver-fpm
     fi
     
