@@ -95,9 +95,8 @@ restore_site_manual_upload() {
     
     if [ -z "$code_file" ] && [ -z "$db_file" ]; then echo -e "${RED}Không chọn file nào.${NC}"; pause; return; fi
 
-    # 4. Prompt for Source Domain (for Migration)
-    read -p "Nhập domain CŨ (Source) để thay thế link (Enter nếu không cần): " source_domain
-    
+    # 4. Confirm Restore
+    echo -e "${RED}CẢNH BÁO: Dữ liệu trên $target_domain sẽ bị ghi đè!${NC}"
     read -p "Xác nhận restore? (y/n): " confirm
     if [[ "$confirm" != "y" ]]; then return; fi
     
@@ -158,16 +157,32 @@ restore_site_manual_upload() {
         mysqlcheck --auto-repair "$target_db_name"
     fi
     
-    # SEARCH REPLACE
+    # AUTO DETECT & SEARCH REPLACE
+    log_info "Đang kiểm tra URL cũ trong Database..."
+    
+    # Ensure WP-CLI
+    if ! command -v wp &> /dev/null; then
+         curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar; chmod +x wp-cli.phar; mv wp-cli.phar /usr/local/bin/wp
+    fi
+    
+    cd "/var/www/$target_domain/public_html"
+    
+    # Get current siteurl from DB
+    old_url=$(wp option get siteurl --allow-root 2>/dev/null)
+    # Extract domain from url (remove http:// or https://)
+    source_domain=$(echo "$old_url" | sed -e 's|^[^/]*//||' -e 's|/.*$||')
+    
     if [ -n "$source_domain" ] && [ "$source_domain" != "$target_domain" ]; then
-        log_info "Thay thế URL ($source_domain -> $target_domain)..."
-        if ! command -v wp &> /dev/null; then
-             curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar; chmod +x wp-cli.phar; mv wp-cli.phar /usr/local/bin/wp
-        fi
-        cd "/var/www/$target_domain/public_html"
+        log_info "Phát hiện tên miền cũ: $source_domain -> Tên miền mới: $target_domain"
+        log_info "Tiến hành thay thế toàn bộ liên kết..."
+        
         wp search-replace "http://$source_domain" "http://$target_domain" --allow-root
         wp search-replace "https://$source_domain" "https://$target_domain" --allow-root
         wp search-replace "$source_domain" "$target_domain" --allow-root
+        
+        log_info "Đã thay thế URL xong."
+    else
+        log_info "URL trong database ($source_domain) khớp với hiện tại hoặc không tìm thấy. Bỏ qua thay thế."
     fi
     
     log_info "Restore hoàn tất!"
