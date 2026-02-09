@@ -78,6 +78,9 @@ update_self() {
         # Safe Update Strategy
         BACKUP_DIR="${INSTALL_DIR}_backup_$(date +%s)"
         
+        # Change to safe directory to avoid getcwd errors when moving install dir
+        cd /tmp
+        
         # Move current install to backup instead of deleting immediately
         if [ -d "$INSTALL_DIR" ]; then
             echo -e "${YELLOW}Backing up current version...${NC}"
@@ -119,11 +122,15 @@ update_self() {
         # Create Symlink
         ln -sf "$INSTALL_DIR/install.sh" /usr/local/bin/vps
         
+        # Remove lock file before exec (important!)
+        rm -f /var/lock/vps-manager.lock
+        
         echo -e "${GREEN}Update completed successfully!${NC}"
         echo -e "${GREEN}Type 'vps' to run the manager anytime.${NC}"
         sleep 2
         
-        # Handover execution to the NEW installed script
+        # Change to new install dir and exec
+        cd "$INSTALL_DIR"
         exec "$INSTALL_DIR/install.sh"
         exit 0
     fi
