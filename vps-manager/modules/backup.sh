@@ -155,6 +155,17 @@ restore_site_manual_upload() {
             mysql "$target_db_name" < "$search_dir/$db_file"
         fi
         mysqlcheck --auto-repair "$target_db_name"
+        
+        # Auto fix Table Prefix
+        log_info "Đang kiểm tra Table Prefix..."
+        detected_table=$(mysql -N -B -e "SHOW TABLES LIKE '%_users'" "$target_db_name" | head -n 1)
+        if [ -n "$detected_table" ]; then
+            new_prefix=${detected_table%users}
+            if [ -n "$new_prefix" ]; then
+                log_info "Prefix phát hiện: '$new_prefix'. Cập nhật wp-config.php..."
+                sed -i "s/\\\$table_prefix\s*=\s*'.*';/\\\$table_prefix = '$new_prefix';/" "/var/www/$target_domain/public_html/wp-config.php"
+            fi
+        fi
     fi
     
     # AUTO DETECT & SEARCH REPLACE
@@ -377,6 +388,17 @@ restore_site_local() {
         
         log_info "Tự động sửa lỗi Database..."
         mysqlcheck --auto-repair "$target_db_name"
+        
+        # Auto fix Table Prefix
+        log_info "Đang kiểm tra Table Prefix..."
+        detected_table=$(mysql -N -B -e "SHOW TABLES LIKE '%_users'" "$target_db_name" | head -n 1)
+        if [ -n "$detected_table" ]; then
+            new_prefix=${detected_table%users}
+            if [ -n "$new_prefix" ]; then
+                log_info "Prefix phát hiện: '$new_prefix'. Cập nhật wp-config.php..."
+                sed -i "s/\\\$table_prefix\s*=\s*'.*';/\\\$table_prefix = '$new_prefix';/" "/var/www/$target_domain/public_html/wp-config.php"
+            fi
+        fi
     fi
     
     # SEARCH & REPLACE (Migration)
