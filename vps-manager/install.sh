@@ -108,6 +108,43 @@ update_self() {
     fi
 }
 
+# Auto Install Stack
+auto_install_stack() {
+    clear
+    echo -e "${YELLOW}=================================================${NC}"
+    echo -e "${GREEN}   AUTO INSTALL: Nginx + MariaDB + PHP 8.1 + Swap${NC}"
+    echo -e "${YELLOW}=================================================${NC}"
+    echo -e "This will install the full LEMP stack, security basics, and swap."
+    read -p "Continue? [y/N]: " confirm
+    if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+        return
+    fi
+
+    # 1. Swap
+    echo -e "${BLUE}[1/4] Setting up Swap...${NC}"
+    if [ ! -f /swapfile ]; then
+        source modules/swap.sh
+        create_swap 2048 "auto"
+    else
+        echo -e "${YELLOW}Swap already exists. Skipping.${NC}"
+    fi
+
+    # 2. LEMP
+    echo -e "${BLUE}[2/4] Installing LEMP Stack...${NC}"
+    source modules/lemp.sh
+    install_nginx
+    install_mariadb
+    install_php "8.1"
+
+    # 3. Security
+    echo -e "${BLUE}[3/4] Configuring Security...${NC}"
+    source modules/security.sh
+    setup_firewall "auto"
+    
+    echo -e "${GREEN}Installation Complete! You can now add websites.${NC}"
+    read -p "Press Enter to go to Main Menu..."
+}
+
 # Main startup logic
 main() {
     check_os
@@ -127,6 +164,20 @@ main() {
     if [ -f "$MY_DIR/core/menu.sh" ]; then
         cd "$MY_DIR"
         source core/menu.sh
+        
+        # Check if first run flag exists or just ask
+        # Let's simple ask if arguments are passed or just always show menu, 
+        # but here we want to offer auto install before menu if desired.
+        # Simple approach: Ask before main menu loop
+        
+        echo -e "${BLUE}=================================================${NC}"
+        echo -e "Would you like to auto-install the recommended stack?"
+        echo -e "(Nginx, MariaDB, PHP 8.1, Swap 2GB, Firewall)"
+        read -p "Run Auto-Install? [y/N]: " auto
+        if [[ "$auto" == "y" || "$auto" == "Y" ]]; then
+            auto_install_stack
+        fi
+        
         main_menu
     else
         echo -e "${RED}Critical Error: core/menu.sh not found in $MY_DIR${NC}"

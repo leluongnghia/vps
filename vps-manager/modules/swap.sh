@@ -23,11 +23,16 @@ swap_menu() {
 }
 
 create_swap() {
-    read -p "Nhập dung lượng Swap (MB) (ví dụ 1024, 2048): " size
+    if [ -n "$1" ]; then
+        size=$1
+    else
+        read -p "Nhập dung lượng Swap (MB) (ví dụ 1024, 2048): " size
+    fi
     
     if [ -f /swapfile ]; then
         echo -e "${RED}Swapfile đã tồn tại! Vui lòng xóa trước.${NC}"
-        pause; return
+        if [ -z "$1" ]; then pause; fi
+        return
     fi
     
     log_info "Đang tạo Swapfile ${size}MB..."
@@ -37,10 +42,12 @@ create_swap() {
     swapon /swapfile
     
     # Add to fstab
-    echo "/swapfile none swap sw 0 0" >> /etc/fstab
+    if ! grep -q "/swapfile" /etc/fstab; then
+        echo "/swapfile none swap sw 0 0" >> /etc/fstab
+    fi
     
     log_info "Tạo Swap thành công."
-    pause
+    if [ -z "$1" ]; then pause; fi
 }
 
 remove_swap() {

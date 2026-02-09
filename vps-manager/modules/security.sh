@@ -50,7 +50,7 @@ secure_php() {
             systemctl restart php$ver-fpm
         fi
     done
-    pause
+    if [ -z "$1" ]; then pause; fi
 }
 
 setup_firewall() {
@@ -84,7 +84,7 @@ EOF
     systemctl restart fail2ban
     systemctl enable fail2ban
     log_info "UFW & Fail2ban đã được cài đặt."
-    pause
+    if [ -z "$1" ]; then pause; fi
 }
 
 change_ssh_port() {

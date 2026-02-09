@@ -77,16 +77,20 @@ install_php() {
     add-apt-repository -y ppa:ondrej/php
     apt-get update
 
-    echo -e "Select PHP Version:"
-    echo -e "1) PHP 8.3"
-    echo -e "2) PHP 8.2"
-    echo -e "3) PHP 8.1"
-    read -p "Choice [1-3]: " php_choice
+    if [ -n "$1" ]; then
+        php_choice=$1
+    else
+        echo -e "Select PHP Version:"
+        echo -e "1) PHP 8.3"
+        echo -e "2) PHP 8.2"
+        echo -e "3) PHP 8.1"
+        read -p "Choice [1-3]: " php_choice
+    fi
 
     case $php_choice in
-        1) ver="8.3" ;;
-        2) ver="8.2" ;;
-        3) ver="8.1" ;;
+        1|8.3) ver="8.3" ;;
+        2|8.2) ver="8.2" ;;
+        3|8.1) ver="8.1" ;;
         *) ver="8.3" ;;
     esac
 
