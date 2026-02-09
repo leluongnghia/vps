@@ -32,7 +32,10 @@ edit_nginx_conf() {
 }
 
 edit_vhost() {
-    read -p "Nhập domain cần sửa: " domain
+    # Select site from list
+    source "$(dirname "${BASH_SOURCE[0]}")/site.sh"
+    select_site || return
+    domain=$SELECTED_DOMAIN
     conf="/etc/nginx/sites-available/$domain"
     
     if [ ! -f "$conf" ]; then

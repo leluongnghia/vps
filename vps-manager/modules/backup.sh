@@ -210,7 +210,10 @@ setup_gdrive() {
 }
 
 backup_site_local() {
-    read -p "Nhập domain cần backup: " domain
+    # Select site from list
+    source "$(dirname "${BASH_SOURCE[0]}")/site.sh"
+    select_site || return
+    domain=$SELECTED_DOMAIN
     timestamp=$(date +%F_%H-%M-%S)
     backup_dir="/root/backups/$domain"
     mkdir -p "$backup_dir"
@@ -229,7 +232,10 @@ backup_site_local() {
 }
 
 backup_to_gdrive() {
-    read -p "Nhập domain cần backup: " domain
+    # Select site from list
+    source "$(dirname "${BASH_SOURCE[0]}")/site.sh"
+    select_site || return
+    domain=$SELECTED_DOMAIN
     read -p "Nhập tên remote GDrive (Mac dinh: gdrive): " remote
     remote=${remote:-gdrive}
     
@@ -428,7 +434,10 @@ restore_site_local() {
 }
 
 restore_site_gdrive() {
-    read -p "Nhập domain cần restore: " domain
+    # Select site from list
+    source "$(dirname "${BASH_SOURCE[0]}")/site.sh"
+    select_site || return
+    domain=$SELECTED_DOMAIN
     read -p "Remote name (gdrive): " remote
     remote=${remote:-gdrive}
     

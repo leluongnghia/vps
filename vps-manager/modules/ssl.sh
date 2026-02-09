@@ -5,7 +5,10 @@
 install_ssl() {
     local domain=$1
     if [ -z "$domain" ]; then
-        read -p "Nhập tên miền để cài SSL: " domain
+        # Select site from list
+        source "$(dirname "${BASH_SOURCE[0]}")/site.sh"
+        select_site || return
+        domain=$SELECTED_DOMAIN
     fi
 
     if [ ! -d "/var/www/$domain/public_html" ]; then

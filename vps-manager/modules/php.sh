@@ -63,10 +63,10 @@ install_additional_php() {
 }
 
 change_site_php() {
-    echo -e "${GREEN}Danh sách Website:${NC}"
-    ls /var/www/
-    echo ""
-    read -p "Nhập tên miền cần đổi PHP: " domain
+    # Select site from list
+    source "$(dirname "${BASH_SOURCE[0]}")/site.sh"
+    select_site || return
+    domain=$SELECTED_DOMAIN
 
     if [ ! -f "/etc/nginx/sites-available/$domain" ]; then
         echo -e "${RED}Website $domain không tồn tại config Nginx!${NC}"

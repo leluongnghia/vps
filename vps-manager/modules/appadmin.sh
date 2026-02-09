@@ -47,7 +47,10 @@ change_admin_port() {
 }
 
 optimize_images() {
-    read -p "Nhập tên miền cần tối ưu ảnh: " domain
+    # Select site from list
+    source "$(dirname "${BASH_SOURCE[0]}")/site.sh"
+    select_site || return
+    domain=$SELECTED_DOMAIN
     target="/var/www/$domain/public_html"
     
     if [ ! -d "$target" ]; then return; fi
