@@ -195,15 +195,26 @@ wp_nginx_config_menu() {
     echo "1. Apply Yoast SEO Nginx Rules"
     echo "2. Apply Rank Math SEO Nginx Rules"
     echo "3. Apply WebP Express Rules"
-    echo "4. Block User Enumeration API"
+    echo "4. Block User Enumeration API (Security)"
     echo "0. Back"
     read -p "Select: " c
     
-    conf="/etc/nginx/conf.d/$SELECTED_DOMAIN.conf"
+    # Use sites-available config
+    conf="/etc/nginx/sites-available/$SELECTED_DOMAIN"
     
+    if [ ! -f "$conf" ]; then
+        echo -e "${RED}Không tìm thấy file cấu hình Nginx cho $SELECTED_DOMAIN${NC}"
+        pause; return
+    fi
+    
+    snippet_dir="/etc/nginx/snippets"
+    mkdir -p "$snippet_dir"
+
     case $c in
         1) # Yoast
-            cat > "/etc/nginx/snippets/yoast-$SELECTED_DOMAIN.conf" <<EOF
+            snippet="$snippet_dir/yoast-$SELECTED_DOMAIN.conf"
+            log_info "Tạo cấu hình Yoast SEO..."
+            cat > "$snippet" <<EOF
 # Yoast SEO Sitemaps
 location ~ ([^/]*)sitemap(.*).x(m|s)l$ {
   rewrite ^/sitemap.xml$ /sitemap_index.xml permanent;
@@ -212,13 +223,36 @@ location ~ ([^/]*)sitemap(.*).x(m|s)l$ {
   rewrite ^/([^/]+?)-sitemap([0-9]+)?.xml$ /index.php?sitemap=\$1&sitemap_n=\$2 last;
 }
 EOF
-            log_info "Include snippets/yoast-$SELECTED_DOMAIN.conf into main config if not present."
-            # We could auto grep and insert include
+            # Auto include
+            if ! grep -q "yoast-$SELECTED_DOMAIN.conf" "$conf"; then
+                sed -i "/server_name/a \    include $snippet;" "$conf"
+                log_info "Đã thêm include vào $conf"
+            fi
+            nginx -t && systemctl reload nginx
+            log_info "Đã áp dụng Yoast SEO Rules thành công."
             ;;
+            
+        2) # Rank Math
+            snippet="$snippet_dir/rankmath-$SELECTED_DOMAIN.conf"
+            log_info "Tạo cấu hình Rank Math..."
+            cat > "$snippet" <<EOF
+# Rank Math Sitemaps
+rewrite ^/sitemap_index.xml$ /index.php?sitemap=1 last;
+rewrite ^/([^/]+?)-sitemap([0-9]+)?.xml$ /index.php?sitemap=\$1&sitemap_n=\$2 last;
+EOF
+            if ! grep -q "rankmath-$SELECTED_DOMAIN.conf" "$conf"; then
+                sed -i "/server_name/a \    include $snippet;" "$conf"
+                log_info "Đã thêm include vào $conf"
+            fi
+            nginx -t && systemctl reload nginx
+            log_info "Đã áp dụng Rank Math Rules thành công."
+            ;;
+            
         3) # WebP Express
-            log_info "Creating WebP Express rules..."
-            cat > "/etc/nginx/snippets/webp-$SELECTED_DOMAIN.conf" <<EOF
-# WebP Express
+            snippet="$snippet_dir/webp-$SELECTED_DOMAIN.conf"
+            log_info "Tạo cấu hình WebP Express..."
+            cat > "$snippet" <<EOF
+# WebP Express Rules
 location ~ ^/wp-content/(.*\.(png|jpe?g))$ {
   add_header Vary Accept;
   expires 365d;
@@ -228,23 +262,31 @@ location ~ ^/wp-content/(.*\.(png|jpe?g))$ {
   try_files /wp-content/webp-express/webp-images/doc-root/wp-content/\$1.webp \$uri =404;
 }
 EOF
-            echo -e "${YELLOW}Add 'include snippets/webp-$SELECTED_DOMAIN.conf;' to your Nginx server block.${NC}"
+            if ! grep -q "webp-$SELECTED_DOMAIN.conf" "$conf"; then
+                sed -i "/server_name/a \    include $snippet;" "$conf"
+                log_info "Đã thêm include vào $conf"
+            fi
+            nginx -t && systemctl reload nginx
+            log_info "Đã áp dụng WebP Express Rules thành công."
             ;;
+            
         4) # Block User Enum
-            if ! grep -q "Block User ID" "$conf"; then
-                sed -i '$d' "$conf"
-                cat >> "$conf" <<EOF
-    # Block User ID Enumeration
-    if (\$query_string ~ "author=([0-9]*)") {
-        return 403;
-    }
-    location ~* ^/wp-json/wp/v2/users {
-        deny all;
-    }
+            snippet="$snippet_dir/block-enum-$SELECTED_DOMAIN.conf"
+            cat > "$snippet" <<EOF
+# Block User ID Enumeration
+if (\$query_string ~ "author=([0-9]*)") {
+    return 403;
+}
+location ~* ^/wp-json/wp/v2/users {
+    deny all;
 }
 EOF
-                systemctl reload nginx
+            if ! grep -q "block-enum-$SELECTED_DOMAIN.conf" "$conf"; then
+                sed -i "/server_name/a \    include $snippet;" "$conf"
+                log_info "Đã thêm include vào $conf"
             fi
+            nginx -t && systemctl reload nginx
+            log_info "Đã chặn User Enumeration."
             ;;
     esac
     pause
