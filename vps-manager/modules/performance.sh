@@ -37,15 +37,21 @@ gzip_http_version 1.1;
 gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript image/svg+xml;
 EOF
 
-    cat > /etc/nginx/conf.d/cache_headers.conf <<EOF
-location ~* \.(jpg|jpeg|gif|png|ico|svg|css|js|woff|woff2)$ {
+    # Create snippet for browser caching (to be included in server blocks)
+    mkdir -p /etc/nginx/snippets
+    cat > /etc/nginx/snippets/browser_caching.conf <<EOF
+location ~* \.(jpg|jpeg|gif|png|ico|svg|css|js|woff|woff2|ttf|eot)$ {
     expires 365d;
     add_header Cache-Control "public, no-transform";
+    access_log off;
 }
 EOF
 
+    # Remove invalid file if exists
+    rm -f /etc/nginx/conf.d/cache_headers.conf
+
     nginx -t && systemctl reload nginx
-    log_info "Đã bật Gzip và Browser Caching (Expires 365d)."
+    log_info "Đã bật Gzip Global. Snippet Browser Caching đã tạo tại /etc/nginx/snippets/browser_caching.conf (Cần include vào vhost)."
     pause
 }
 
