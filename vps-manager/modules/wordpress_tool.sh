@@ -153,52 +153,78 @@ wp_user_menu() {
 # --- 3. Security ---
 wp_security_menu() {
     select_wp_site || return
+    ensure_wp_cli
     
     while true; do
         echo -e "\n${YELLOW}Security - $SELECTED_DOMAIN${NC}"
-        echo "1. Disable XML-RPC (Nginx)"
-        echo "2. Enable XML-RPC"
-        echo "3. Disable File Edit (Theme/Plugin)"
+        echo "1. Disable XML-RPC (Chặn tấn công Brute Force)"
+        echo "2. Enable XML-RPC (Mở lại nếu dùng App Mobile/Jetpack)"
+        echo "3. Disable File Edit (Tắt sửa code trong Admin - Khuyên dùng)"
         echo "4. Enable File Edit"
-        echo "5. Hide/Protect wp-config.php (Move UP)"
+        echo "5. Move wp-config.php (Di chuyển ra khỏi public_html)"
         echo "0. Back"
         read -p "Select: " c
         
+        conf="/etc/nginx/sites-available/$SELECTED_DOMAIN"
+        
         case $c in
             1) # Disable XMLRPC
-                conf="/etc/nginx/conf.d/$SELECTED_DOMAIN.conf"
-                if ! grep -q "xmlrpc.php" "$conf"; then
-                    # Insert before the last }
-                    sed -i '$d' "$conf"
-                    cat >> "$conf" <<EOF
-    location = /xmlrpc.php {
-        deny all;
-        access_log off;
-        log_not_found off;
-    }
-}
-EOF
-                    systemctl reload nginx
-                    log_info "Disabled XML-RPC."
+                snippet="/etc/nginx/snippets/block-xmlrpc.conf"
+                if [ ! -f "$snippet" ]; then
+                    mkdir -p /etc/nginx/snippets
+                    echo 'location = /xmlrpc.php { deny all; access_log off; log_not_found off; }' > "$snippet"
+                fi
+                
+                # Check current conf
+                if ! grep -q "block-xmlrpc.conf" "$conf"; then
+                    # Insert include
+                    sed -i "/server_name/a \    include $snippet;" "$conf"
+                    nginx -t && systemctl reload nginx
+                    log_info "Đã chặn XML-RPC thành công."
                 else
-                    log_warn "Already configured."
+                    log_warn "XML-RPC đã bị chặn trước đó."
                 fi
                 pause
                 ;;
             2) # Enable XMLRPC
-                sed -i '/location = \/xmlrpc.php/,/}/d' "/etc/nginx/conf.d/$SELECTED_DOMAIN.conf"
-                systemctl reload nginx
-                log_info "Enabled XML-RPC."
+                sed -i '/block-xmlrpc.conf/d' "$conf"
+                nginx -t && systemctl reload nginx
+                log_info "Đã mở lại XML-RPC."
                 pause
                 ;;
             3) # Disable File Edit
-                $WP_CMD config set DISALLOW_FILE_EDIT true --raw
-                log_info "Disabled File Edit."
+                $WP_CMD config set DISALLOW_FILE_EDIT true --raw --type=constant
+                log_info "Đã tắt chức năng sửa file (Editor) trong Admin."
                 pause
                 ;;
             4) # Enable File Edit
-                $WP_CMD config set DISALLOW_FILE_EDIT false --raw
-                log_info "Enabled File Edit."
+                $WP_CMD config set DISALLOW_FILE_EDIT false --raw --type=constant
+                log_info "Đã mở lại chức năng sửa file."
+                pause
+                ;;
+            5) # Move wp-config
+                current_config="$WEB_ROOT/wp-config.php"
+                parent_config="$(dirname "$WEB_ROOT")/wp-config.php"
+                
+                if [ -f "$current_config" ]; then
+                    mv "$current_config" "$parent_config"
+                    # Fix permissions just in case
+                    chmod 600 "$parent_config"
+                    chown www-data:www-data "$parent_config"
+                    
+                    log_info "Đã di chuyển wp-config.php ra khỏi public_html."
+                    echo -e "${GREEN}Vị trí mới: $parent_config${NC}"
+                    echo -e "Đây là biện pháp bảo mật khuyến nghị. WordPress sẽ tự động tìm thấy file này."
+                elif [ -f "$parent_config" ]; then
+                    log_warn "wp-config.php ĐANG nằm ngoài public_html!"
+                    read -p "Bạn có muốn di chuyển nó TRỞ LẠI public_html không? (y/n): " move_back
+                    if [[ "$move_back" == "y" ]]; then
+                        mv "$parent_config" "$WEB_ROOT/wp-config.php"
+                        log_info "Đã di chuyển wp-config.php về lại public_html."
+                    fi
+                else
+                    echo -e "${RED}Lỗi: Không tìm thấy file wp-config.php ở đâu cả!${NC}"
+                fi
                 pause
                 ;;
             0) return ;;
