@@ -208,54 +208,47 @@ install_wordpress() {
     chown -R www-data:www-data "/var/www/$domain/public_html"
 }
 
-delete_site() {
-    echo -e "${GREEN}Danh sách các website có thể xóa:${NC}"
-    
-    # Get all directories in /var/www/
+# Helper: Select Site
+select_site() {
+    echo -e "\n${CYAN}Danh sách Website trên VPS:${NC}"
     sites=()
     i=1
-    for dir in /var/www/*; do
-        if [ -d "$dir" ]; then
-            domain=$(basename "$dir")
-            # Filter out html or default if necessary, generally we keep user created ones
-            if [[ "$domain" != "html" ]]; then
-                sites+=("$domain")
-                echo -e "$i. $domain"
-                ((i++))
-            fi
+    for d in /var/www/*; do
+        if [[ -d "$d" && "$(basename "$d")" != "html" ]]; then
+            domain=$(basename "$d")
+            sites+=("$domain")
+            echo -e "$i. $domain"
+            ((i++))
         fi
     done
     
     if [ ${#sites[@]} -eq 0 ]; then
-        echo -e "${YELLOW}Không tìm thấy website nào.${NC}"
-        pause
-        return
+        echo -e "${RED}Không tìm thấy website nào!${NC}"
+        return 1
     fi
     
-    echo -e "0. Quay lại"
-    read -p "Chọn website cần xóa [1-${#sites[@]}]: " choice
-    
-    if [[ "$choice" == "0" || -z "$choice" ]]; then
-        return
-    fi
-    
-    # Validate selection
+    read -p "Chọn website [1-${#sites[@]}]: " choice
     if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt "${#sites[@]}" ]; then
-        echo -e "${RED}Lựa chọn không hợp lệ!${NC}"
-        pause
-        return
+        echo -e "${RED}Lựa chọn không hợp lệ.${NC}"
+        return 1
     fi
     
-    # Get domain from array (index start at 0, so choice-1)
-    domain="${sites[$((choice-1))]}"
+    SELECTED_DOMAIN="${sites[$((choice-1))]}"
+    echo -e "${GREEN}-> Đã chọn: $SELECTED_DOMAIN${NC}"
+    return 0
+}
+
+delete_site() {
+    echo -e "${YELLOW}--- Xóa Website ---${NC}"
+    select_site || return
+    domain="$SELECTED_DOMAIN"
     
     echo -e "${RED}CẢNH BÁO: Hành động này sẽ xóa toàn bộ mã nguồn và cơ sở dữ liệu của $domain!${NC}"
     read -p "Bạn có CHẮC CHẮN muốn xóa $domain không? (nhập 'y' để đồng ý): " confirm
     
     if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
         echo -e "${YELLOW}Đã hủy thao tác xóa.${NC}"
-        pause
-        return
+        pause; return
     fi
 
     log_info "Đang xóa website $domain..."
@@ -268,11 +261,10 @@ delete_site() {
     rm -f "/etc/nginx/sites-enabled/$domain"
     systemctl reload nginx
 
-    # Drop DB
+    # Drop DB (Auto detect simple names)
     local db_name=$(echo "$domain" | tr -d '.')
     local db_user="${db_name}_user"
     
-    # Check if mysql command works (might need password if not configured for root socket auth)
     if command -v mysql &> /dev/null; then
         mysql -e "DROP DATABASE IF EXISTS ${db_name};" 2>/dev/null
         mysql -e "DROP USER IF EXISTS '${db_user}'@'localhost';" 2>/dev/null
@@ -283,88 +275,12 @@ delete_site() {
     pause
 }
 
-list_sites() {
-    echo -e "${GREEN}Danh sách các website:${NC}"
-    # Improved listing with size
-    printf "%-30s %-15s\n" "Domain" "Size"
-    echo "----------------------------------------------"
-    for dir in /var/www/*; do
-        if [ -d "$dir" ]; then
-            domain=$(basename "$dir")
-            size=$(du -sh "$dir" | awk '{print $1}')
-            printf "%-30s %-15s\n" "$domain" "$size"
-        fi
-    done
-    pause
-}
-
-manage_redirects() {
-    echo -e "${GREEN}--- Quản lý Redirect ---${NC}"
-    echo -e "1. Thêm Redirect (Domain sang Domain/URL)"
-    echo -e "2. Xóa Redirect"
-    read -p "Chọn [1-2]: " rd_choice
-    
-    case $rd_choice in
-        1)
-            read -p "Nhập domain nguồn (đang trỏ về VPS này): " source_domain
-            read -p "Nhập URL đích (ví dụ https://newdomain.com): " target_url
-            read -p "Loại redirect (301 - Vĩnh viễn, 302 - Tạm thời): " code
-            
-            if [[ "$code" != "301" && "$code" != "302" ]]; then
-                 echo "Mã lỗi không hợp lệ. Mặc định 301."
-                 code="301"
-            fi
-            
-            conf_file="/etc/nginx/sites-available/${source_domain}_redirect"
-            cat > "$conf_file" <<EOF
-server {
-    listen 80;
-    server_name $source_domain www.$source_domain;
-    return $code $target_url\$request_uri;
-}
-EOF
-            ln -s "$conf_file" "/etc/nginx/sites-enabled/"
-            nginx -t && systemctl reload nginx
-            log_info "Đã thêm redirect: $source_domain -> $target_url ($code)"
-            ;;
-        2)
-            read -p "Nhập domain redirect muốn xóa: " del_domain
-            rm "/etc/nginx/sites-available/${del_domain}_redirect"
-            rm "/etc/nginx/sites-enabled/${del_domain}_redirect"
-            systemctl reload nginx
-            log_info "Đã xóa redirect cho $del_domain"
-            ;;
-    esac
-    pause
-}
-
-fix_permissions() {
-    read -p "Nhập domain cần phân quyền (để trống để fix tất cả): " domain
-    
-    if [ -z "$domain" ]; then
-        target="/var/www"
-    else
-        target="/var/www/$domain"
-    fi
-    
-    log_info "Đang thiết lập quyền chuẩn cho $target..."
-    chown -R www-data:www-data "$target"
-    find "$target" -type d -exec chmod 755 {} \;
-    find "$target" -type f -exec chmod 644 {} \;
-    
-    log_info "Hoàn tất phân quyền."
-    pause
-}
-
 clone_site() {
     echo -e "${YELLOW}--- Clone Website ---${NC}"
-    read -p "Nhập domain NGUỒN: " src_domain
-    read -p "Nhập domain ĐÍCH (Mới): " dest_domain
+    select_site || return
+    src_domain="$SELECTED_DOMAIN"
     
-    if [ ! -d "/var/www/$src_domain" ]; then
-        echo -e "${RED}Domain nguồn không tồn tại!${NC}"
-        pause; return
-    fi
+    read -p "Nhập domain ĐÍCH (Mới): " dest_domain
     
     if [ -d "/var/www/$dest_domain" ]; then
         echo -e "${RED}Domain đích đã tồn tại! Vui lòng xóa trước.${NC}"
@@ -436,10 +352,11 @@ clone_site() {
 
 rename_site() {
     echo -e "${YELLOW}--- Thay đổi Tên miền (Rename) ---${NC}"
-    read -p "Nhập domain CŨ: " old_domain
+    select_site || return
+    old_domain="$SELECTED_DOMAIN"
+    
     read -p "Nhập domain MỚI: " new_domain
     
-    if [ ! -d "/var/www/$old_domain" ]; then echo -e "${RED}Không tìm thấy domain cũ.${NC}"; pause; return; fi
     if [ -d "/var/www/$new_domain" ]; then echo -e "${RED}Domain mới đã tồn tại.${NC}"; pause; return; fi
     if [ -f "/etc/nginx/sites-available/$new_domain" ]; then echo -e "${RED}Config Nginx mới đã tồn tại.${NC}"; pause; return; fi
     
@@ -486,8 +403,8 @@ rename_site() {
 }
 
 rewrite_vhost_config() {
-    read -p "Nhập domain cần cấu hình lại Nginx: " domain
-    if [ ! -d "/var/www/$domain" ]; then echo -e "${RED}Site không tồn tại.${NC}"; pause; return; fi
+    select_site || return
+    domain="$SELECTED_DOMAIN"
     
     create_nginx_config "$domain"
     log_info "Đã tạo lại file cấu hình Nginx cho $domain."
@@ -495,8 +412,11 @@ rewrite_vhost_config() {
 }
 
 change_site_php() {
-    read -p "Nhập domain: " domain
-    if [ ! -f "/etc/nginx/sites-available/$domain" ]; then echo -e "${RED}Config Nginx không tồn tại.${NC}"; pause; return; fi
+    select_site || return
+    domain="$SELECTED_DOMAIN"
+    conf="/etc/nginx/sites-available/$domain"
+    
+    if [ ! -f "$conf" ]; then echo -e "${RED}Config Nginx không tồn tại.${NC}"; pause; return; fi
     
     echo -e "Chọn phiên bản PHP:"
     echo "1. PHP 8.1"
@@ -510,7 +430,6 @@ change_site_php() {
         *) return ;;
     esac
     
-    conf="/etc/nginx/sites-available/$domain"
     # Replace fastcgi_pass line
     sed -i "s|fastcgi_pass.*unix:.*|fastcgi_pass unix:/run/php/php$ver-fpm.sock;|" "$conf"
     
@@ -520,8 +439,10 @@ change_site_php() {
 }
 
 update_site_db_info() {
-    read -p "Nhập domain: " domain
+    select_site || return
+    domain="$SELECTED_DOMAIN"
     wp_conf="/var/www/$domain/public_html/wp-config.php"
+    
     if [ ! -f "$wp_conf" ]; then echo -e "${RED}Không tìm thấy wp-config.php${NC}"; pause; return; fi
     
     read -p "Database Name mới: " db_name
@@ -543,29 +464,27 @@ manage_parked_domains() {
     
     case $c in
         1)
-            read -p "Domain GỐC (Main): " main
-            read -p "Domain ALIAS (Parked): " alias
+            select_site || return
+            main="$SELECTED_DOMAIN"
             conf="/etc/nginx/sites-available/$main"
-            if [ ! -f "$conf" ]; then echo "${RED}Domain gốc sai.${NC}"; pause; return; fi
             
-            # Edit server_name line to append alias
-            # Assuming server_name line looks like "server_name a.com www.a.com;"
+            read -p "Domain ALIAS (Parked): " alias
+            
             if grep -q "server_name .*$alias" "$conf"; then
                 echo "Alias đã tồn tại."
             else
                 sed -i "/server_name/ s/;/ $alias www.$alias;/" "$conf"
                 nginx -t && systemctl reload nginx
                 log_info "Đã thêm alias $alias cho $main"
-                
-                # Setup SSL for alias if needed? 
                 echo -e "${YELLOW}Lưu ý: Bạn cần cấp lại SSL để bao gồm cả domain alias!${NC}"
-                # Could offer to run certbot --expand
             fi
             ;;
         2)
-            read -p "Domain GỐC (Main): " main
-            read -p "Domain ALIAS cần xóa: " alias
+            select_site || return
+            main="$SELECTED_DOMAIN"
             conf="/etc/nginx/sites-available/$main"
+            
+            read -p "Domain ALIAS cần xóa: " alias
             sed -i "s/ $alias//" "$conf"
             sed -i "s/ www.$alias//" "$conf"
             nginx -t && systemctl reload nginx
@@ -576,7 +495,10 @@ manage_parked_domains() {
 }
 
 protect_folder() {
-    read -p "Nhập domain muốn đặt mật khẩu: " domain
+    select_site || return
+    domain="$SELECTED_DOMAIN"
+    conf="/etc/nginx/sites-available/$domain"
+    
     read -p "Username: " user
     read -p "Password: " pass
     
@@ -585,16 +507,34 @@ protect_folder() {
     auth_file="/etc/nginx/.htpasswd_$domain"
     htpasswd -cb "$auth_file" "$user" "$pass"
     
-    conf="/etc/nginx/sites-available/$domain"
-    # Insert auth_basic into the beginning of server block or / location
-    # Simple approach: Auth whole site
+    # Add auth_basic if not present
     if ! grep -q "auth_basic" "$conf"; then
-        # Insert after "index ..." line for example
         sed -i "/index index.php/a \    auth_basic \"Restricted Area\";\n    auth_basic_user_file $auth_file;" "$conf"
         nginx -t && systemctl reload nginx
         log_info "Đã bật mật khẩu bảo vệ cho $domain"
     else
         log_info "Cập nhật mật khẩu thành công (Config đã có sẵn)."
     fi
+    pause
+}
+
+fix_permissions() {
+    echo -e "1. Chọn Website cụ thể"
+    echo -e "2. Fix tất cả (/var/www)"
+    read -p "Chọn: " c
+    
+    if [[ "$c" == "1" ]]; then
+        select_site || return
+        target="/var/www/$SELECTED_DOMAIN"
+    else
+        target="/var/www"
+    fi
+    
+    log_info "Đang thiết lập quyền chuẩn cho $target..."
+    chown -R www-data:www-data "$target"
+    find "$target" -type d -exec chmod 755 {} \;
+    find "$target" -type f -exec chmod 644 {} \;
+    
+    log_info "Hoàn tất phân quyền."
     pause
 }
