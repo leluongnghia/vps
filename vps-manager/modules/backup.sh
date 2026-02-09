@@ -10,23 +10,180 @@ backup_menu() {
     echo -e "1. Backup Website (Local)"
     echo -e "2. Backup Website (Google Drive)"
     echo -e "3. Restore Website (Local)"
-    echo -e "4. Restore Website (Google Drive)"
-    echo -e "5. Cấu hình Google Drive (rclone)"
-    echo -e "6. Quản lý bản Backup (List/Delete)"
+    echo -e "4. Restore Website (Manual Uploaded - trong public_html)"
+    echo -e "5. Restore Website (Google Drive)"
+    echo -e "6. Cấu hình Google Drive (rclone)"
+    echo -e "7. Quản lý bản Backup (List/Delete)"
     echo -e "0. Quay lại Menu chính"
     echo -e "${BLUE}=================================================${NC}"
-    read -p "Nhập lựa chọn [0-6]: " choice
+    read -p "Nhập lựa chọn [0-7]: " choice
 
     case $choice in
         1) backup_site_local ;;
         2) backup_to_gdrive ;;
         3) restore_site_local ;;
-        4) restore_site_gdrive ;;
-        5) setup_gdrive ;;
-        6) manage_backups ;;
+        4) restore_site_manual_upload ;;
+        5) restore_site_gdrive ;;
+        6) setup_gdrive ;;
+        7) manage_backups ;;
         0) return ;;
         *) echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause ;;
     esac
+}
+
+restore_site_manual_upload() {
+    # 1. Select Target Domain
+    echo -e "${YELLOW}--- Restore từ File Upload thủ công ---${NC}"
+    echo -e "Vui lòng upload file backup (.zip / .sql) vào thư mục: /var/www/TEN_MIEN/public_html"
+    
+    # List active sites
+    target_sites=()
+    i=1
+    for d in /var/www/*; do
+        if [ -d "$d" ]; then
+            domain=$(basename "$d")
+            if [[ "$domain" != "html" ]]; then
+                target_sites+=("$domain")
+                echo -e "$i. $domain"
+                ((i++))
+            fi
+        fi
+    done
+    
+    read -p "Chọn website ĐÍCH [1-${#target_sites[@]}]: " t_choice
+    if ! [[ "$t_choice" =~ ^[0-9]+$ ]] || [ "$t_choice" -lt 1 ] || [ "$t_choice" -gt "${#target_sites[@]}" ]; then echo -e "${RED}Error${NC}"; pause; return; fi
+    target_domain="${target_sites[$((t_choice-1))]}"
+    search_dir="/var/www/$target_domain/public_html"
+    
+    # Detect Source Domain (Try to guess from filename or prompt)
+    # Usually filenames are code_domain_time.zip
+    # We will prompt later if search-replace needed.
+    
+    # 2. Select Code File
+    echo -e "\n${CYAN}Tìm kiếm file .zip trong $search_dir...${NC}"
+    code_files=()
+    j=1
+    while IFS= read -r file; do
+        if [[ -f "$file" ]]; then
+            fname=$(basename "$file")
+            code_files+=("$fname")
+            echo -e "$j. $fname"
+            ((j++))
+        fi
+    done < <(find "$search_dir" -maxdepth 1 -name "*.zip" -type f)
+    
+    read -p "Chọn file Code [1-${#code_files[@]}] (Enter để bỏ qua): " c_sel
+    code_file=""
+    if [[ -n "$c_sel" && "$c_sel" =~ ^[0-9]+$ ]]; then code_file="${code_files[$((c_sel-1))]}"; fi
+
+    # 3. Select DB File
+    echo -e "\n${CYAN}Tìm kiếm file .sql / .sql.gz trong $search_dir...${NC}"
+    db_files=()
+    k=1
+    while IFS= read -r file; do
+        if [[ -f "$file" ]]; then
+            fname=$(basename "$file")
+            db_files+=("$fname")
+            echo -e "$k. $fname"
+            ((k++))
+        fi
+    done < <(find "$search_dir" -maxdepth 1 \( -name "*.sql" -o -name "*.sql.gz" \) -type f)
+    
+    read -p "Chọn file DB [1-${#db_files[@]}] (Enter để bỏ qua): " db_sel
+    db_file=""
+    if [[ -n "$db_sel" && "$db_sel" =~ ^[0-9]+$ ]]; then db_file="${db_files[$((db_sel-1))]}"; fi
+    
+    if [ -z "$code_file" ] && [ -z "$db_file" ]; then echo -e "${RED}Không chọn file nào.${NC}"; pause; return; fi
+
+    # 4. Prompt for Source Domain (for Migration)
+    read -p "Nhập domain CŨ (Source) để thay thế link (Enter nếu không cần): " source_domain
+    
+    read -p "Xác nhận restore? (y/n): " confirm
+    if [[ "$confirm" != "y" ]]; then return; fi
+    
+    # Get Target DB Creds
+    target_db_name=$(echo "$target_domain" | tr -d '.')
+    target_db_user="${target_db_name}_user"
+    target_db_pass=$(grep "DB_PASSWORD" "/var/www/$target_domain/public_html/wp-config.php" 2>/dev/null | cut -d "'" -f 4)
+
+    # RESTORE CODE
+    if [ -n "$code_file" ]; then
+        log_info "Giải nén Code..."
+        unzip -o "$search_dir/$code_file" -d "/var/www/$target_domain/public_html/" # Assuming zip structure!
+        # If zip contains 'public_html' folder or not? Standard backup has content directly effectively.
+        # Standard backup zip created by script maps /var/www/domain/public_html -> creates full path structure inside zip?
+        # "zip -r ... /var/www/$domain/public_html" -> stores full path usually.
+        # If user uploaded generic zip (e.g. from cPanel), structure varies.
+        # Let's assume standard backup or flat.
+        # If zip has full path `var/www/...`, `-d` / root will work.
+        # If flat, `-d` target works.
+        # unzip behavior is tricky without knowing zip structure.
+        # For manual upload, usually people zip the CONTENT of public_html.
+        # So unzipping into public_html is safer default for manual uploads.
+        
+        # Actually our script creates zip with full path?
+        # `zip -r "$backup_dir/code_$timestamp.zip" "/var/www/$domain/public_html"`
+        # This includes full path.
+        # If restoring manual upload that ISN'T from our script (e.g. migration), it might be inside a folder.
+        # Let's just unzip to public_html and hope.
+        
+        # Wait, if I unzip to public_html, and zip contains 'var/www...', I get 'public_html/var/www...'.
+        # Safer: Unzip to temp, then sync.
+        
+        tmp_extract="/root/restore_tmp_$target_domain"
+        rm -rf "$tmp_extract"; mkdir -p "$tmp_extract"
+        
+        unzip -o "$search_dir/$code_file" -d "$tmp_extract"
+        
+        # Move content to proper place
+        log_info "Đang di chuyển dữ liệu..."
+        # If zip has /var/www/$source, we find it.
+        # Find where wp-config.php is in extracted
+        wp_root=$(find "$tmp_extract" -name "wp-config.php" -exec dirname {} \; | head -n 1)
+        
+        if [ -n "$wp_root" ]; then
+            cp -a "$wp_root/." "/var/www/$target_domain/public_html/"
+        else
+            # Try just moving everything if empty
+            cp -a "$tmp_extract/." "/var/www/$target_domain/public_html/"
+        fi
+        
+        rm -rf "$tmp_extract"
+        chown -R www-data:www-data "/var/www/$target_domain/public_html"
+        
+        # Config patch
+        if [ -n "$target_db_pass" ]; then
+            sed -i "s/DB_NAME', '.*'/DB_NAME', '$target_db_name'/" "/var/www/$target_domain/public_html/wp-config.php"
+            sed -i "s/DB_USER', '.*'/DB_USER', '$target_db_user'/" "/var/www/$target_domain/public_html/wp-config.php"
+            sed -i "s/DB_PASSWORD', '.*'/DB_PASSWORD', '$target_db_pass'/" "/var/www/$target_domain/public_html/wp-config.php"
+        fi
+    fi
+    
+    # RESTORE DB
+    if [ -n "$db_file" ]; then
+        log_info "Import Database..."
+        if [[ "$db_file" == *.gz ]]; then
+            zcat "$search_dir/$db_file" | mysql "$target_db_name"
+        else
+            mysql "$target_db_name" < "$search_dir/$db_file"
+        fi
+        mysqlcheck --auto-repair "$target_db_name"
+    fi
+    
+    # SEARCH REPLACE
+    if [ -n "$source_domain" ] && [ "$source_domain" != "$target_domain" ]; then
+        log_info "Thay thế URL ($source_domain -> $target_domain)..."
+        if ! command -v wp &> /dev/null; then
+             curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar; chmod +x wp-cli.phar; mv wp-cli.phar /usr/local/bin/wp
+        fi
+        cd "/var/www/$target_domain/public_html"
+        wp search-replace "http://$source_domain" "http://$target_domain" --allow-root
+        wp search-replace "https://$source_domain" "https://$target_domain" --allow-root
+        wp search-replace "$source_domain" "$target_domain" --allow-root
+    fi
+    
+    log_info "Restore hoàn tất!"
+    pause
 }
 
 setup_gdrive() {
