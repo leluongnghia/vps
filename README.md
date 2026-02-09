@@ -29,6 +29,7 @@ Một script Bash toàn diện, mạnh mẽ giúp bạn quản lý VPS (Ubuntu/D
 - **Cache**:
   - Hỗ trợ Redis, Memcached, FastCGI Cache.
   - Tối ưu Nginx cho **WP Rocket**, **W3 Total Cache**, **WP Super Cache**.
+  - **Object Cache Pro Optimization**: Tối ưu Server (Redis/Sysctl) cho plugin Object Cache Pro.
 - **System Tuning**: Tạo Swap RAM ảo, Tối ưu MySQL InnoDB, PHP Opcache.
 
 ### 💾 Sao lưu & Khôi phục (Backup/Restore)
@@ -92,6 +93,7 @@ A comprehensive and powerful Bash script to automate VPS management (Ubuntu/Debi
 - **Caching**:
   - Redis, Memcached, FastCGI Cache support.
   - Nginx Optimization for **WP Rocket**, **W3 Total Cache**, **WP Super Cache**.
+  - **Object Cache Pro Optimization**: Prepare server (Redis/Sysctl) for Object Cache Pro plugin.
 - **System Tuning**: Automated Swap creation, MySQL InnoDB tuning, PHP Opcache optimization.
 
 ### 💾 Backup & Restore
