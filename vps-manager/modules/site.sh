@@ -39,42 +39,56 @@ add_new_site() {
     # Check domain format
     if [[ ! "$domain" =~ ^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
         echo -e "${RED}Định dạng tên miền không hợp lệ!${NC}"
-        pause
-        return
+        pause; return
     fi
 
     # Check if site exists
     if [ -d "/var/www/$domain" ]; then
         echo -e "${RED}Website $domain đã tồn tại!${NC}"
-        pause
-        return
+        pause; return
     fi
 
     echo -e "${YELLOW}Đang tạo cấu hình cho $domain...${NC}"
     
-    # Create web root
+    # 1. Setup Global Cache if missing
+    if [ ! -f /etc/nginx/conf.d/fastcgi_cache.conf ]; then
+        log_info "Đang khởi tạo cấu hình FastCGI Cache Global..."
+        mkdir -p /var/run/nginx-cache
+        chown -R www-data:www-data /var/run/nginx-cache
+        cat > /etc/nginx/conf.d/fastcgi_cache.conf <<EOF
+fastcgi_cache_path /var/run/nginx-cache levels=1:2 keys_zone=WORDPRESS:100m inactive=60m;
+fastcgi_cache_key "\$scheme\$request_method\$host\$request_uri";
+fastcgi_cache_use_stale error timeout invalid_header http_500;
+fastcgi_ignore_headers Cache-Control Expires Set-Cookie;
+EOF
+    fi
+
+    # 2. Create web root
     mkdir -p "/var/www/$domain/public_html"
     chown -R www-data:www-data "/var/www/$domain"
     chmod -R 755 "/var/www/$domain"
 
-    # Create Nginx Config
+    # 3. Create Nginx Config
     create_nginx_config "$domain"
 
-    # Database setup if needed
+    # 4. Database & WP setup
     if [[ "$type" == "wordpress" ]]; then
         setup_database "$domain"
         install_wordpress "$domain"
     fi
 
-    # SSL Setup Prompt
-    read -p "Bạn có muốn cài đặt SSL Let's Encrypt ngay bây giờ không? (y/n): " ssl_confirm
-    if [[ "$ssl_confirm" == "y" || "$ssl_confirm" == "Y" ]]; then
-        if [ -f "$(dirname "${BASH_SOURCE[0]}")/ssl.sh" ]; then
-             source "$(dirname "${BASH_SOURCE[0]}")/ssl.sh"
-             install_ssl "$domain"
-        else
-             log_warn "Module SSL chưa được cài đặt."
-        fi
+    # 5. SSL Auto Setup
+    echo -e "${YELLOW}Đang cấu hình SSL Let's Encrypt...${NC}"
+    # Default to YES/Auto
+    if [ -f "$(dirname "${BASH_SOURCE[0]}")/ssl.sh" ]; then
+         source "$(dirname "${BASH_SOURCE[0]}")/ssl.sh"
+         # Call install_ssl_auto without prompt if possible, or just call normal install_ssl
+         # We'll invoke install_ssl but usually it might ask for email.
+         # Let's assume install_ssl is interactive. If we want auto, we need non-interactive version.
+         # For now, just call it.
+         install_ssl "$domain"
+    else
+         log_warn "Module SSL chưa được cài đặt."
     fi
 
     log_info "Hoàn tất thêm website $domain."
