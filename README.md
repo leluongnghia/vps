@@ -79,32 +79,26 @@ A comprehensive and powerful Bash script to automate VPS management (Ubuntu/Debi
 
 ## Key Features
 
-### 🚀 Installation & Site Management
-- **Automated LEMP Stack**: Install Nginx, MariaDB, PHP (Multi-version: 8.1, 8.2, 8.3...) in one click.
-- **Site & Domain Management**: Add, Delete, **Rename Domain**, **Clone Website**, Parked Domain (Alias), Redirects.
-- **WordPress Manager**:
-  - Auto-install WordPress, Secure Database.
-  - **Advanced Tools**: Core/Plugin/User management via CLI.
-  - Reset Admin Password, Security Hardening (Disable XML-RPC, Hide wp-config).
-  - SEO Optimization (RankMath/Yoast Nginx rules).
-- **Versatile SSL Support**:
-  - **Let's Encrypt**: Automatic & Free (via Certbot).
-  - **Cloudflare Origin SSL**: Support for Cloudflare Proxied sites (Origin CA).
-  - **ZeroSSL**: Support via `acme.sh`.
-- **Convenient Shortcut**: Auto-create `/www` symlink for quick access to web roots.
-
-### 🛡️ Security
-- **Firewall**: One-click UFW & Fail2ban setup.
-- **SSH Hardening**: Change SSH Port, limit login attempts.
-- **DDoS Mitigation**: Basic Nginx Rate Limiting configuration.
-- **Auto-Fix**: Self-healing scripts for common Nginx/PHP misconfigurations.
-
-### ⚡ Performance Optimization
-- **Caching**:
-  - Redis, Memcached, FastCGI Cache support.
-  - Nginx Optimization for **WP Rocket**, **W3 Total Cache**, **WP Super Cache**.
-  - **Object Cache Pro Optimization**: Prepare server (Redis/Sysctl) for Object Cache Pro plugin.
-- **System Tuning**: Automated Swap creation, MySQL InnoDB tuning, PHP Opcache optimization.
+- **Automated installation** of LEMP Stack (Nginx, MariaDB, PHP 8.1/8.2/8.3).
+- **Advanced WordPress Manager Suite**:
+    - Manage Core/Plugins/Users via WP-CLI.
+    - WP Security Hardening (XML-RPC disable, File Edit disable).
+    - Database Optimization & Cron management.
+- **Performance & Caching**:
+    - Auto-configure Nginx for **WP Rocket** (Static HTML Serve), **W3TC**.
+    - **Object Cache Pro** optimization with Redis.
+    - PHP Opcache, FastCGI Cache tuning.
+- **Security & Firewall**:
+    - Built-in **Basic WAF** to block SQLi, XSS, Generic Exploits.
+    - **Nginx Rate Limiting** (DDoS Protection).
+    - UFW & Fail2ban setup, SSH Port change.
+- **Smart Site Management**:
+    - Interactive Menu for site selection (No manual typing).
+    - Create/Delete/Clone sites, Change PHP Versions.
+    - SSL Setup, Redirects, Domain Aliases.
+- **System Tools**:
+    - **Nginx Rescue**: Auto-fix common Nginx configuration errors.
+    - Backup/Restore, Log cleaning, Resource monitoring.
 
 ### 💾 Backup & Restore
 - **Multi-channel Backup**: Backup Code & DB to Local storage or **Google Drive** (via Rclone).
