@@ -46,8 +46,8 @@ main_menu() {
                 manage_sites_menu
                 ;;
             3)
-                source "$ROOT_DIR/modules/site.sh"
-                add_new_site "wordpress"
+                source "$ROOT_DIR/modules/wordpress_tool.sh"
+                wp_tool_menu
                 ;;
             4)
                 source "$ROOT_DIR/modules/security.sh"
