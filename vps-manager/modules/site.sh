@@ -101,6 +101,18 @@ create_nginx_config() {
     local domain=$1
     local config_file="/etc/nginx/sites-available/$domain"
     
+    # Detect PHP Version Socket
+    if [ -S /run/php/php8.3-fpm.sock ]; then
+        php_sock="unix:/run/php/php8.3-fpm.sock"
+    elif [ -S /run/php/php8.2-fpm.sock ]; then
+        php_sock="unix:/run/php/php8.2-fpm.sock"
+    elif [ -S /run/php/php8.1-fpm.sock ]; then
+        php_sock="unix:/run/php/php8.1-fpm.sock"
+    else
+        # Default fallback
+        php_sock="unix:/run/php/php8.1-fpm.sock"
+    fi
+
     # Simple PHP-FPM config
     cat > "$config_file" <<EOF
 server {
@@ -116,7 +128,7 @@ server {
 
     location ~ \.php$ {
         include snippets/fastcgi-php.conf;
-        fastcgi_pass unix:/run/php/php8.3-fpm.sock;
+        fastcgi_pass $php_sock;
         
         # FastCGI Cache Settings
         fastcgi_cache WORDPRESS;
