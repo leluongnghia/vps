@@ -50,6 +50,14 @@ clear_all_cache() {
 
 toggle_extension() {
     ext=$1
+    
+    # Check and Auto Install if missing
+    if ! dpkg -l | grep -q "php-$ext"; then
+        echo -e "${YELLOW}Extension php-$ext chưa được cài đặt. Đang cài đặt tự động...${NC}"
+        apt-get update
+        apt-get install -y php-$ext
+    fi
+
     echo -e "Chọn phiên bản PHP để cấu hình $ext:"
     echo -e "1) PHP 8.1"
     echo -e "2) PHP 8.2"
