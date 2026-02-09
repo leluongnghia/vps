@@ -12,10 +12,10 @@ cache_menu() {
     echo -e "3. Bật/Tắt Memcached PHP Extension"
     echo -e "4. Bật/Tắt Opcache"
     echo -e "5. Cấu hình Nginx cho WP Rocket"
-    echo -e "6. Cấu hình Nginx cho W3 Total Cache / Super Cache"
+    echo -e "7. Tối ưu Server cho Object Cache Pro"
     echo -e "0. Quay lại Menu chính"
     echo -e "${BLUE}=================================================${NC}"
-    read -p "Nhập lựa chọn [0-6]: " choice
+    read -p "Nhập lựa chọn [0-7]: " choice
 
     case $choice in
         1) clear_all_cache ;;
@@ -24,9 +24,49 @@ cache_menu() {
         4) toggle_extension "opcache" ;;
         5) setup_rocket_nginx ;;
         6) setup_w3tc_nginx ;;
+        7) setup_object_cache_pro ;;
         0) return ;;
         *) echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause ;;
     esac
+}
+
+setup_object_cache_pro() {
+    log_info "Đang tối ưu Server cho Object Cache Pro..."
+    
+    # 1. System Tuning (Overcommit Memory)
+    if ! grep -q "vm.overcommit_memory" /etc/sysctl.conf; then
+        echo "vm.overcommit_memory = 1" >> /etc/sysctl.conf
+        sysctl -p
+        log_info "Đã bật vm.overcommit_memory = 1"
+    fi
+    
+    # 2. Redis Tuning
+    if [ -f /etc/redis/redis.conf ]; then
+        # Backup config
+        cp /etc/redis/redis.conf /etc/redis/redis.conf.bak
+        
+        # Set maxmemory (if not set, default to 256mb or keep existing? Let's be safe 256MB)
+        # Actually better to not touch maxmemory if user set it, but ensure policy.
+        
+        # Ensure maxmemory-policy is allkeys-lru (Best for Object Cache)
+        if grep -q "^maxmemory-policy" /etc/redis/redis.conf; then
+            sed -i "s/^maxmemory-policy.*/maxmemory-policy allkeys-lru/" /etc/redis/redis.conf
+        else
+            echo "maxmemory-policy allkeys-lru" >> /etc/redis/redis.conf
+        fi
+        
+        systemctl restart redis-server
+        log_info "Đã cấu hình Redis: maxmemory-policy allkeys-lru"
+    else
+        log_warn "Không tìm thấy file cấu hình Redis (/etc/redis/redis.conf)."
+    fi
+    
+    # 3. Check PHP Redis
+    toggle_extension "redis" "on" # Ensure enabled
+    
+    echo -e "${GREEN}Hoàn tất tối ưu cho Object Cache Pro!${NC}"
+    echo -e "Lưu ý: Bạn cần cài đặt plugin Object Cache Pro trong WordPress và điền key bản quyền."
+    pause
 }
 
 clear_all_cache() {
