@@ -51,13 +51,14 @@ clear_all_cache() {
 toggle_extension() {
     ext=$1
     
-    # Check and Auto Install if missing
-    if ! dpkg -l | grep -q "php-$ext"; then
-        echo -e "${YELLOW}Extension php-$ext chưa được cài đặt. Đang cài đặt tự động...${NC}"
-        apt-get update
+    # Check if module exists for common versions or install
+    # Just force install generic meta-package which usually triggers config generation
+    if ! dpkg -s php-$ext &> /dev/null; then
+        echo -e "${YELLOW}Extension php-$ext chưa được cài đặt. Đang cài đặt...${NC}"
+        apt-get update -qq
         apt-get install -y php-$ext
     fi
-
+    
     echo -e "Chọn phiên bản PHP để cấu hình $ext:"
     echo -e "1) PHP 8.1"
     echo -e "2) PHP 8.2"
@@ -72,6 +73,17 @@ toggle_extension() {
         4) ver="all" ;;
         *) return ;;
     esac
+    
+    # Ensure package for specific version exists
+    if [[ "$ver" != "all" ]]; then
+       if ! dpkg -s php$ver-$ext &> /dev/null && ! [ -f "/etc/php/$ver/mods-available/$ext.ini" ]; then
+           echo -e "${YELLOW}Cài đặt thêm php$ver-$ext...${NC}"
+           apt-get install -y php$ver-$ext
+       fi
+    else
+       # For ALL, ensure for all versions if possible
+       apt-get install -y php8.1-$ext php8.2-$ext php8.3-$ext 2>/dev/null
+    fi
     
     echo -e "Trạng thái mong muốn:"
     echo -e "1. BẬT (Enable/On)"
