@@ -167,27 +167,77 @@ install_wordpress() {
 }
 
 delete_site() {
-    read -p "Nhập tên miền cần xóa: " domain
-    if [ -z "$domain" ]; then return; fi
+    echo -e "${GREEN}Danh sách các website có thể xóa:${NC}"
     
-    read -p "Bạn có chắc chắn muốn xóa $domain không? (y/n): " confirm
-    if [[ "$confirm" != "y" ]]; then return; fi
+    # Get all directories in /var/www/
+    sites=()
+    i=1
+    for dir in /var/www/*; do
+        if [ -d "$dir" ]; then
+            domain=$(basename "$dir")
+            # Filter out html or default if necessary, generally we keep user created ones
+            if [[ "$domain" != "html" ]]; then
+                sites+=("$domain")
+                echo -e "$i. $domain"
+                ((i++))
+            fi
+        fi
+    done
+    
+    if [ ${#sites[@]} -eq 0 ]; then
+        echo -e "${YELLOW}Không tìm thấy website nào.${NC}"
+        pause
+        return
+    fi
+    
+    echo -e "0. Quay lại"
+    read -p "Chọn website cần xóa [1-${#sites[@]}]: " choice
+    
+    if [[ "$choice" == "0" || -z "$choice" ]]; then
+        return
+    fi
+    
+    # Validate selection
+    if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt "${#sites[@]}" ]; then
+        echo -e "${RED}Lựa chọn không hợp lệ!${NC}"
+        pause
+        return
+    fi
+    
+    # Get domain from array (index start at 0, so choice-1)
+    domain="${sites[$((choice-1))]}"
+    
+    echo -e "${RED}CẢNH BÁO: Hành động này sẽ xóa toàn bộ mã nguồn và cơ sở dữ liệu của $domain!${NC}"
+    read -p "Bạn có CHẮC CHẮN muốn xóa $domain không? (nhập 'y' để đồng ý): " confirm
+    
+    if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+        echo -e "${YELLOW}Đã hủy thao tác xóa.${NC}"
+        pause
+        return
+    fi
+
+    log_info "Đang xóa website $domain..."
 
     # Remove files
     rm -rf "/var/www/$domain"
     
     # Remove Nginx config
-    rm "/etc/nginx/sites-available/$domain"
-    rm "/etc/nginx/sites-enabled/$domain"
+    rm -f "/etc/nginx/sites-available/$domain"
+    rm -f "/etc/nginx/sites-enabled/$domain"
     systemctl reload nginx
 
-    # Drop DB (Optional - simplistic approach)
+    # Drop DB
     local db_name=$(echo "$domain" | tr -d '.')
     local db_user="${db_name}_user"
-    mysql -e "DROP DATABASE IF EXISTS ${db_name};"
-    mysql -e "DROP USER IF EXISTS '${db_user}'@'localhost';"
+    
+    # Check if mysql command works (might need password if not configured for root socket auth)
+    if command -v mysql &> /dev/null; then
+        mysql -e "DROP DATABASE IF EXISTS ${db_name};" 2>/dev/null
+        mysql -e "DROP USER IF EXISTS '${db_user}'@'localhost';" 2>/dev/null
+        mysql -e "FLUSH PRIVILEGES;" 2>/dev/null
+    fi
 
-    log_info "Đã xóa website $domain."
+    log_info "Đã xóa hoàn toàn website $domain."
     pause
 }
 
