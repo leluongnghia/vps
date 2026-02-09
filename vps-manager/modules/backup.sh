@@ -60,7 +60,7 @@ restore_site_manual_upload() {
     # We will prompt later if search-replace needed.
     
     # 2. Select Code File
-    echo -e "\n${CYAN}Tìm kiếm file .zip trong $search_dir...${NC}"
+    echo -e "\n${CYAN}Tìm kiếm file .zip / .tar.gz trong $search_dir...${NC}"
     code_files=()
     j=1
     while IFS= read -r file; do
@@ -70,7 +70,7 @@ restore_site_manual_upload() {
             echo -e "$j. $fname"
             ((j++))
         fi
-    done < <(find "$search_dir" -maxdepth 1 -name "*.zip" -type f)
+    done < <(find "$search_dir" -maxdepth 1 \( -name "*.zip" -o -name "*.tar.gz" \) -type f)
     
     read -p "Chọn file Code [1-${#code_files[@]}] (Enter để bỏ qua): " c_sel
     code_file=""
@@ -109,31 +109,19 @@ restore_site_manual_upload() {
     # RESTORE CODE
     if [ -n "$code_file" ]; then
         log_info "Giải nén Code..."
-        unzip -o "$search_dir/$code_file" -d "/var/www/$target_domain/public_html/" # Assuming zip structure!
-        # If zip contains 'public_html' folder or not? Standard backup has content directly effectively.
-        # Standard backup zip created by script maps /var/www/domain/public_html -> creates full path structure inside zip?
-        # "zip -r ... /var/www/$domain/public_html" -> stores full path usually.
-        # If user uploaded generic zip (e.g. from cPanel), structure varies.
-        # Let's assume standard backup or flat.
-        # If zip has full path `var/www/...`, `-d` / root will work.
-        # If flat, `-d` target works.
-        # unzip behavior is tricky without knowing zip structure.
-        # For manual upload, usually people zip the CONTENT of public_html.
-        # So unzipping into public_html is safer default for manual uploads.
-        
-        # Actually our script creates zip with full path?
-        # `zip -r "$backup_dir/code_$timestamp.zip" "/var/www/$domain/public_html"`
-        # This includes full path.
-        # If restoring manual upload that ISN'T from our script (e.g. migration), it might be inside a folder.
-        # Let's just unzip to public_html and hope.
-        
-        # Wait, if I unzip to public_html, and zip contains 'var/www...', I get 'public_html/var/www...'.
-        # Safer: Unzip to temp, then sync.
         
         tmp_extract="/root/restore_tmp_$target_domain"
         rm -rf "$tmp_extract"; mkdir -p "$tmp_extract"
         
-        unzip -o "$search_dir/$code_file" -d "$tmp_extract"
+        if [[ "$code_file" == *.zip ]]; then
+            unzip -o "$search_dir/$code_file" -d "$tmp_extract"
+        elif [[ "$code_file" == *.tar.gz ]]; then
+            tar -xzf "$search_dir/$code_file" -C "$tmp_extract"
+        else
+            log_error "Định dạng file code không hỗ trợ (.zip, .tar.gz)"
+            rm -rf "$tmp_extract"
+            return
+        fi
         
         # Move content to proper place
         log_info "Đang di chuyển dữ liệu..."
