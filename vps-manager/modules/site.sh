@@ -61,6 +61,8 @@ fastcgi_cache_key "\$scheme\$request_method\$host\$request_uri";
 fastcgi_cache_use_stale error timeout invalid_header http_500;
 fastcgi_ignore_headers Cache-Control Expires Set-Cookie;
 EOF
+        # Reload to apply global cache config first!
+        nginx -t && systemctl reload nginx
     fi
 
     # 2. Create web root
