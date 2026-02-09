@@ -158,10 +158,11 @@ toggle_extension() {
 setup_rocket_nginx() {
     log_info "Đang tạo cấu hình Nginx cho WP Rocket..."
     mkdir -p /etc/nginx/snippets
+    snippet="/etc/nginx/snippets/wp-rocket.conf"
     
-    # WP Rocket Nginx Configuration
-    cat > /etc/nginx/snippets/wp-rocket.conf <<EOF
-# WP Rocket Nginx Config
+    # 1. Create Safe Snippet (Headers & Expiry) - NO location /
+    cat > "$snippet" <<EOF
+# WP Rocket Headers
 location ~ /wp-content/cache/wp-rocket/.*html$ {
     etag on;
     add_header Vary "Accept-Encoding, Cookie";
@@ -175,17 +176,66 @@ location ~ /wp-content/cache/min/.*(js|css)$ {
     add_header Cache-Control "max-age=31536000, public";
 }
 EOF
-    log_info "Đã tạo snippet WP Rocket tại /etc/nginx/snippets/wp-rocket.conf"
-    echo -e "${YELLOW}Vui lòng thêm dòng sau vào block server {} của website:${NC}"
-    echo -e "include snippets/wp-rocket.conf;"
+
+    echo -e "${YELLOW}Bạn có muốn tự động áp dụng cấu hình này cho website không?${NC}"
+    echo -e "1. Áp dụng cho TẤT CẢ website"
+    echo -e "2. Chọn website cụ thể"
+    echo -e "0. Không (Chỉ tạo file)"
+    read -p "Chọn: " c
+    
+    if [[ "$c" == "0" ]]; then return; fi
+    
+    apply_rocket() {
+        local domain=$1
+        local conf="/etc/nginx/sites-available/$domain"
+        if [ -f "$conf" ]; then
+            # 1. Include Config
+            if ! grep -q "wp-rocket.conf" "$conf"; then
+                sed -i "/server_name/a \    include $snippet;" "$conf"
+                log_info "Đã thêm include wp-rocket.conf cho $domain"
+            fi
+            
+            # 2. Optimize try_files (Serve Static HTML directly)
+            # This makes site EXTREMELY fast by bypassing PHP
+            if grep -q "try_files \$uri \$uri/ /index.php?\$args;" "$conf"; then
+                # Backup first
+                cp "$conf" "$conf.bak_rocket"
+                # Replace standard try_files with Rocket try_files
+                # Using | delimiter for sed because path contains /
+                # We want to insert the cache path check BEFORE $uri
+                rocket_path="/wp-content/cache/wp-rocket/\$http_host\$request_uri/index-https.html /wp-content/cache/wp-rocket/\$http_host\$request_uri/index.html"
+                
+                sed -i "s|try_files \$uri \$uri/ /index.php?\$args;|try_files $rocket_path \$uri \$uri/ /index.php?\$args;|" "$conf"
+                log_info "Đã tối ưu try_files (Static Serve) cho $domain"
+            fi
+        fi
+    }
+    
+    if [[ "$c" == "1" ]]; then
+        for conf in /etc/nginx/sites-available/*; do
+            d=$(basename "$conf")
+            if [[ "$d" != "default" && "$d" != "html" ]]; then
+                apply_rocket "$d"
+            fi
+        done
+        nginx -t && systemctl reload nginx
+        log_info "Hoàn tất setup WP Rocket cho toàn bộ hệ thống."
+    elif [[ "$c" == "2" ]]; then
+        source "$(dirname "${BASH_SOURCE[0]}")/site.sh"
+        select_site || return
+        apply_rocket "$SELECTED_DOMAIN"
+        nginx -t && systemctl reload nginx
+        log_info "Hoàn tất setup WP Rocket cho $SELECTED_DOMAIN."
+    fi
     pause
 }
 
 setup_w3tc_nginx() {
     log_info "Đang tạo cấu hình Nginx cho W3 Total Cache..."
     mkdir -p /etc/nginx/snippets
+    snippet="/etc/nginx/snippets/w3tc.conf"
     
-    cat > /etc/nginx/snippets/w3tc.conf <<EOF
+    cat > "$snippet" <<EOF
 # W3TC Nginx Config
 location ~ /wp-content/cache/.*(html|xml|json)$ {
     add_header Vary "Accept-Encoding, Cookie";
@@ -197,8 +247,41 @@ location ~ /wp-content/cache/minify/.*(js|css)$ {
     add_header Vary "Accept-Encoding";
 }
 EOF
-    log_info "Đã tạo snippet W3TC tại /etc/nginx/snippets/w3tc.conf"
-    echo -e "${YELLOW}Vui lòng thêm dòng sau vào block server {} của website:${NC}"
-    echo -e "include snippets/w3tc.conf;"
+    
+    echo -e "${YELLOW}Bạn có muốn tự động áp dụng cho website?${NC}"
+    echo -e "1. Áp dụng cho TẤT CẢ website"
+    echo -e "2. Chọn website cụ thể"
+    echo -e "0. Không"
+    read -p "Chọn: " c
+    
+    if [[ "$c" == "0" ]]; then return; fi
+    
+    apply_w3tc() {
+        local domain=$1
+        local conf="/etc/nginx/sites-available/$domain"
+        if [ -f "$conf" ]; then
+            if ! grep -q "w3tc.conf" "$conf"; then
+                sed -i "/server_name/a \    include $snippet;" "$conf"
+                log_info "Đã áp dụng W3TC cho $domain"
+            fi
+        fi
+    }
+    
+    if [[ "$c" == "1" ]]; then
+        for conf in /etc/nginx/sites-available/*; do
+            d=$(basename "$conf")
+            if [[ "$d" != "default" && "$d" != "html" ]]; then
+                apply_w3tc "$d"
+            fi
+        done
+        nginx -t && systemctl reload nginx
+        log_info "Đã áp dụng W3TC toàn hệ thống."
+    elif [[ "$c" == "2" ]]; then
+        source "$(dirname "${BASH_SOURCE[0]}")/site.sh"
+        select_site || return
+        apply_w3tc "$SELECTED_DOMAIN"
+        nginx -t && systemctl reload nginx
+        log_info "Đã áp dụng W3TC cho $SELECTED_DOMAIN."
+    fi
     pause
 }
