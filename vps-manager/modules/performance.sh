@@ -26,6 +26,13 @@ performance_menu() {
 enable_gzip_cache() {
     log_info "Đang cấu hình Gzip & Cache Headers..."
     
+    # 1. Disable default Gzip in nginx.conf to avoid duplicate error
+    if grep -q "^[[:space:]]*gzip on;" /etc/nginx/nginx.conf; then
+        sed -i 's/^[[:space:]]*gzip on;/#gzip on;/' /etc/nginx/nginx.conf
+        log_info "Đã tắt cấu hình Gzip mặc định trong nginx.conf"
+    fi
+    
+    # 2. Create optimized Gzip config
     cat > /etc/nginx/conf.d/gzip.conf <<EOF
 gzip on;
 gzip_disable "msie6";
