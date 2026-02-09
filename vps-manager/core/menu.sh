@@ -30,9 +30,10 @@ main_menu() {
         echo -e "14. AppAdmin & System Tools"
         echo -e "15. Nginx Management"
         echo -e "16. Performance Tuning (NEW)"
+        echo -e "17. Update Script (From GitHub)"
         echo -e "0. Exit"
         echo -e "${BLUE}=================================================${NC}"
-        read -p "Enter your choice [0-16]: " choice
+        read -p "Enter your choice [0-17]: " choice
 
         case $choice in
             1)
@@ -98,6 +99,10 @@ main_menu() {
             16)
                 source "$ROOT_DIR/modules/performance.sh"
                 performance_menu
+                ;;
+            17)
+                source "$ROOT_DIR/modules/update.sh"
+                do_update
                 ;;
             0)
                 echo -e "${GREEN}Exiting... Goodbye!${NC}"
