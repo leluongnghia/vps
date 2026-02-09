@@ -374,7 +374,6 @@ clone_site() {
     # 1. Clone Files
     log_info "Đang copy mã nguồn..."
     mkdir -p "/var/www/$dest_domain"
-    # Use rsync to preserve permissions/symlinks
     rsync -av --exclude 'wp-config.php' "/var/www/$src_domain/" "/var/www/$dest_domain/"
     
     # 2. Config Nginx for Dest
@@ -392,7 +391,13 @@ clone_site() {
     mysql -e "FLUSH PRIVILEGES;"
     
     # 4. Export & Import DB
-    src_db_name=$(grep "DB_NAME" "/var/www/$src_domain/public_html/wp-config.php" 2>/dev/null | cut -d "'" -f 4)
+    # Attempt to extract DB name using PHP for reliability (compatible with ' or " quotes)
+    src_db_name=$(php -r "include '/var/www/$src_domain/public_html/wp-config.php'; echo DB_NAME;" 2>/dev/null)
+    
+    # Fallback to grep if PHP fails
+    if [ -z "$src_db_name" ]; then
+        src_db_name=$(grep "DB_NAME" "/var/www/$src_domain/public_html/wp-config.php" 2>/dev/null | cut -d "'" -f 4)
+    fi
     
     if [ -n "$src_db_name" ]; then
         log_info "Đang clone database ($src_db_name -> $new_db_name)..."
@@ -420,7 +425,7 @@ clone_site() {
         
         log_info "Đã clone xong Database & Config."
     else
-        log_warn "Không tìm thấy cấu hình DB nguồn. Chỉ copy code."
+        log_warn "Không tìm thấy cấu hình DB nguồn (hoặc không thể đọc wp-config.php). Chỉ copy code."
     fi
     
     chown -R www-data:www-data "/var/www/$dest_domain"
@@ -436,14 +441,33 @@ rename_site() {
     
     if [ ! -d "/var/www/$old_domain" ]; then echo -e "${RED}Không tìm thấy domain cũ.${NC}"; pause; return; fi
     if [ -d "/var/www/$new_domain" ]; then echo -e "${RED}Domain mới đã tồn tại.${NC}"; pause; return; fi
+    if [ -f "/etc/nginx/sites-available/$new_domain" ]; then echo -e "${RED}Config Nginx mới đã tồn tại.${NC}"; pause; return; fi
     
     log_info "Đổi tên thư mục..."
     mv "/var/www/$old_domain" "/var/www/$new_domain"
     
     log_info "Cập nhật Nginx..."
-    rm -f "/etc/nginx/sites-enabled/$old_domain"
-    rm -f "/etc/nginx/sites-available/$old_domain"
-    create_nginx_config "$new_domain"
+    # Config file rename to preserve custom snippets
+    old_conf="/etc/nginx/sites-available/$old_domain"
+    new_conf="/etc/nginx/sites-available/$new_domain"
+    
+    if [ -f "$old_conf" ]; then
+        mv "$old_conf" "$new_conf"
+        # Update server_name old.com www.old.com -> new.com www.new.com
+        # Update root /var/www/old -> /var/www/new
+        # Use delimiter | to avoid slash issues
+        sed -i "s|root.*/var/www/$old_domain|root /var/www/$new_domain|" "$new_conf"
+        sed -i "s|server_name.*$old_domain.*|server_name $new_domain www.$new_domain;|" "$new_conf"
+        
+        # Re-link
+        rm -f "/etc/nginx/sites-enabled/$old_domain"
+        ln -s "$new_conf" "/etc/nginx/sites-enabled/"
+        
+        nginx -t && systemctl reload nginx
+    else
+        log_warn "Không tìm thấy Nginx config cũ. Tạo mới..."
+        create_nginx_config "$new_domain"
+    fi
     
     log_info "Cập nhật URL trong Database (nếu là WP)..."
     if [ -f "/var/www/$new_domain/public_html/wp-config.php" ]; then
