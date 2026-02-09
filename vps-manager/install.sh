@@ -172,16 +172,15 @@ main() {
             # echo -e "${GREEN}Created shortcut /www -> /var/www${NC}"
         fi
         
-        # Check if first run flag exists or just ask
-        # Let's simple ask if arguments are passed or just always show menu, 
-        # but here we want to offer auto install before main menu loop
-        
-        echo -e "${BLUE}=================================================${NC}"
-        echo -e "Would you like to auto-install the recommended stack?"
-        echo -e "(Nginx, MariaDB, PHP 8.1, Swap 2GB, Firewall)"
-        read -p "Run Auto-Install? [y/N]: " auto
-        if [[ "$auto" == "y" || "$auto" == "Y" ]]; then
-            auto_install_stack
+        # Check if installed to skip auto-install prompt
+        if ! command -v nginx &> /dev/null || ! command -v php &> /dev/null; then
+            echo -e "${BLUE}=================================================${NC}"
+            echo -e "Would you like to auto-install the recommended stack?"
+            echo -e "(Nginx, MariaDB, PHP 8.1, Swap 2GB, Firewall)"
+            read -p "Run Auto-Install? [y/N]: " auto
+            if [[ "$auto" == "y" || "$auto" == "Y" ]]; then
+                auto_install_stack
+            fi
         fi
         
         main_menu
