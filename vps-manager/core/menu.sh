@@ -32,9 +32,10 @@ main_menu() {
         echo -e "16. Tối ưu hóa Hiệu năng (High Performance)"
         echo -e "17. Cập nhật Script (Từ GitHub)"
         echo -e "18. Chẩn đoán Hệ thống (Health Check)"
+        echo -e "19. 🚀 Tối ưu WordPress Performance (Chuyên sâu)"
         echo -e "0. Thoát"
         echo -e "${BLUE}=================================================${NC}"
-        read -p "Nhập lựa chọn của bạn [0-18]: " choice
+        read -p "Nhập lựa chọn của bạn [0-19]: " choice
 
         case $choice in
             1)
@@ -108,6 +109,10 @@ main_menu() {
             18)
                 source "$ROOT_DIR/modules/diagnose.sh"
                 diagnose_system
+                ;;
+            19)
+                source "$ROOT_DIR/modules/wordpress_performance.sh"
+                wp_performance_menu
                 ;;
             0)
                 echo -e "${GREEN}Exiting... Goodbye!${NC}"
