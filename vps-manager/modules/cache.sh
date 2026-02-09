@@ -11,15 +11,19 @@ cache_menu() {
     echo -e "2. Bật/Tắt Redis PHP Extension"
     echo -e "3. Bật/Tắt Memcached PHP Extension"
     echo -e "4. Bật/Tắt Opcache"
+    echo -e "5. Cấu hình Nginx cho WP Rocket"
+    echo -e "6. Cấu hình Nginx cho W3 Total Cache / Super Cache"
     echo -e "0. Quay lại Menu chính"
     echo -e "${BLUE}=================================================${NC}"
-    read -p "Nhập lựa chọn [0-4]: " choice
+    read -p "Nhập lựa chọn [0-6]: " choice
 
     case $choice in
         1) clear_all_cache ;;
         2) toggle_extension "redis" ;;
         3) toggle_extension "memcached" ;;
         4) toggle_extension "opcache" ;;
+        5) setup_rocket_nginx ;;
+        6) setup_w3tc_nginx ;;
         0) return ;;
         *) echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause ;;
     esac
@@ -82,5 +86,53 @@ toggle_extension() {
     fi
     
     log_info "Đã cấu hình $ext -> $state."
+    pause
+}
+
+setup_rocket_nginx() {
+    log_info "Đang tạo cấu hình Nginx cho WP Rocket..."
+    mkdir -p /etc/nginx/snippets
+    
+    # WP Rocket Nginx Configuration
+    cat > /etc/nginx/snippets/wp-rocket.conf <<EOF
+# WP Rocket Nginx Config
+location ~ /wp-content/cache/wp-rocket/.*html$ {
+    etag on;
+    add_header Vary "Accept-Encoding, Cookie";
+    add_header Cache-Control "no-cache, no-store, must-revalidate";
+    add_header X-WP-Rocket "Served";
+}
+
+location ~ /wp-content/cache/min/.*(js|css)$ {
+    etag on;
+    add_header Vary "Accept-Encoding";
+    add_header Cache-Control "max-age=31536000, public";
+}
+EOF
+    log_info "Đã tạo snippet WP Rocket tại /etc/nginx/snippets/wp-rocket.conf"
+    echo -e "${YELLOW}Vui lòng thêm dòng sau vào block server {} của website:${NC}"
+    echo -e "include snippets/wp-rocket.conf;"
+    pause
+}
+
+setup_w3tc_nginx() {
+    log_info "Đang tạo cấu hình Nginx cho W3 Total Cache..."
+    mkdir -p /etc/nginx/snippets
+    
+    cat > /etc/nginx/snippets/w3tc.conf <<EOF
+# W3TC Nginx Config
+location ~ /wp-content/cache/.*(html|xml|json)$ {
+    add_header Vary "Accept-Encoding, Cookie";
+    add_header Cache-Control "max-age=3600, must-revalidate";
+}
+
+location ~ /wp-content/cache/minify/.*(js|css)$ {
+    add_header Cache-Control "max-age=31536000, public";
+    add_header Vary "Accept-Encoding";
+}
+EOF
+    log_info "Đã tạo snippet W3TC tại /etc/nginx/snippets/w3tc.conf"
+    echo -e "${YELLOW}Vui lòng thêm dòng sau vào block server {} của website:${NC}"
+    echo -e "include snippets/w3tc.conf;"
     pause
 }
