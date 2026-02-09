@@ -83,23 +83,123 @@ backup_to_gdrive() {
 }
 
 restore_site_local() {
-    read -p "Nhập domain cần restore: " domain
-    backup_dir="/root/backups/$domain"
+    # 1. Select Domain
+    echo -e "${YELLOW}Danh sách các bản backup Local:${NC}"
+    local backup_root="/root/backups"
     
-    echo "Files available:"
-    ls -lh "$backup_dir"
-    
-    read -p "File Code (zip): " code_file
-    read -p "File DB (sql.gz): " db_file
-    
-    if [[ -f "$backup_dir/$code_file" && -f "$backup_dir/$db_file" ]]; then
-        log_info "Restoring..."
-        unzip -o "$backup_dir/$code_file" -d "/var/www/$domain/"
-        zcat "$backup_dir/$db_file" | mysql $(echo "$domain" | tr -d '.')
-        log_info "Done."
-    else
-        echo -e "${RED}File not found.${NC}"
+    if [ ! -d "$backup_root" ] || [ -z "$(ls -A $backup_root)" ]; then
+        echo -e "${RED}Chưa có bản backup nào trên Local.${NC}"
+        pause
+        return
     fi
+
+    # List domains in backup dir
+    domains=()
+    i=1
+    for d in "$backup_root"/*; do
+        if [ -d "$d" ]; then
+            domain_name=$(basename "$d")
+            domains+=("$domain_name")
+            echo -e "$i. $domain_name"
+            ((i++))
+        fi
+    done
+    
+    read -p "Chọn domain cần restore [1-${#domains[@]}]: " d_choice
+    
+    if ! [[ "$d_choice" =~ ^[0-9]+$ ]] || [ "$d_choice" -lt 1 ] || [ "$d_choice" -gt "${#domains[@]}" ]; then
+        echo -e "${RED}Lựa chọn không hợp lệ!${NC}"
+        pause
+        return
+    fi
+    
+    domain="${domains[$((d_choice-1))]}"
+    backup_dir="$backup_root/$domain"
+    
+    # 2. Select Backup Code File
+    echo -e "${CYAN}--- Chọn bản Backup Code (Source) ---${NC}"
+    code_files=()
+    j=1
+    # Find zip files
+    while IFS= read -r file; do
+        if [[ -f "$file" ]]; then
+            fname=$(basename "$file")
+            code_files+=("$fname")
+            echo -e "$j. $fname ($(du -h "$file" | cut -f1))"
+            ((j++))
+        fi
+    done < <(find "$backup_dir" -maxdepth 1 -name "code_*.zip" -type f | sort -r)
+    
+    if [ ${#code_files[@]} -eq 0 ]; then
+        echo -e "${YELLOW}Không tìm thấy file backup Code nào.${NC}"
+        # Ask if want to continue restore DB only?
+    else
+        read -p "Chọn file Code [1-${#code_files[@]}] (Enter để bỏ qua): " c_choice
+        if [[ -n "$c_choice" && "$c_choice" =~ ^[0-9]+$ ]]; then
+             code_file="${code_files[$((c_choice-1))]}"
+        fi
+    fi
+
+    # 3. Select Backup DB File
+    echo -e "${CYAN}--- Chọn bản Backup Database ---${NC}"
+    db_files=()
+    k=1
+    while IFS= read -r file; do
+        if [[ -f "$file" ]]; then
+            fname=$(basename "$file")
+            db_files+=("$fname")
+            echo -e "$k. $fname ($(du -h "$file" | cut -f1))"
+            ((k++))
+        fi
+    done < <(find "$backup_dir" -maxdepth 1 -name "db_*.sql*" -type f | sort -r)
+    
+    if [ ${#db_files[@]} -eq 0 ]; then
+        echo -e "${YELLOW}Không tìm thấy file backup DB nào.${NC}"
+    else
+        read -p "Chọn file DB [1-${#db_files[@]}] (Enter để bỏ qua): " db_choice
+        if [[ -n "$db_choice" && "$db_choice" =~ ^[0-9]+$ ]]; then
+             db_file="${db_files[$((db_choice-1))]}"
+        fi
+    fi
+    
+    if [ -z "$code_file" ] && [ -z "$db_file" ]; then
+        echo -e "${RED}Chưa chọn file nào để restore.${NC}"
+        pause; return
+    fi
+    
+    echo -e "${YELLOW}Chuẩn bị Restore cho $domain...${NC}"
+    echo -e "Code: ${code_file:-Không restore}"
+    echo -e "DB:   ${db_file:-Không restore}"
+    read -p "Xác nhận restore? Dữ liệu hiện tại sẽ bị ghi đè! (y/n): " confirm
+    
+    if [[ "$confirm" != "y" ]]; then return; fi
+    
+    # Execute Restore Code
+    if [ -n "$code_file" ]; then
+        log_info "Đang giải nén mã nguồn..."
+        # Backup current html just in case? Maybe simplistic restore simply overwrites.
+        # Clean current dir to avoid mixing?
+        # rm -rf "/var/www/$domain/public_html/*"  <-- Risk
+        # Unzip overwrites
+        unzip -o "$backup_dir/$code_file" -d "/var/www/$domain/"
+        # Fix permissions
+        chown -R www-data:www-data "/var/www/$domain/public_html"
+    fi
+    
+    # Execute Restore DB
+    if [ -n "$db_file" ]; then
+        log_info "Đang import database..."
+        # Detect compression
+        db_name=$(echo "$domain" | tr -d '.')
+        
+        if [[ "$db_file" == *.gz ]]; then
+            zcat "$backup_dir/$db_file" | mysql "$db_name"
+        else
+            mysql "$db_name" < "$backup_dir/$db_file"
+        fi
+    fi
+    
+    log_info "Restore hoàn tất!"
     pause
 }
 
