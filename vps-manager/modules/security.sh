@@ -143,29 +143,119 @@ set_max_auth_tries() {
 }
 
 setup_nginx_dos() {
-    log_info "Đang cấu hình Nginx Rate Limiting..."
+    log_info "Đang cấu hình Nginx Rate Limiting (Chống DDoS cơ bản)..."
     
-    # Cleanup possible broken config from previous versions
-    rm -f /etc/nginx/conf.d/cache_headers.conf
-    
+    # 1. Create Zone Global
     cat > /etc/nginx/conf.d/ddos_limit.conf <<EOF
 limit_req_zone \$binary_remote_addr zone=one:10m rate=10r/s;
 EOF
-    nginx -t && systemctl reload nginx
-    log_info "Đã tạo zone limit. Cần cấu hình vào từng site để áp dụng."
+    
+    echo -e "${YELLOW}Bạn có muốn áp dụng giới hạn này cho website không?${NC}"
+    echo -e "1. Áp dụng cho TẤT CẢ website (Khuyên dùng)"
+    echo -e "2. Chọn website cụ thể"
+    echo -e "0. Không, chỉ tạo Zone (Cần Config tay)"
+    read -p "Chọn: " c
+    
+    if [[ "$c" == "0" ]]; then return; fi
+    
+    # Function to apply limit
+    apply_limit() {
+        local domain=$1
+        local conf="/etc/nginx/sites-available/$domain"
+        if [ -f "$conf" ]; then
+            if ! grep -q "limit_req zone=one" "$conf"; then
+                # Insert after server_name
+                sed -i "/server_name/a \    limit_req zone=one burst=20 nodelay;" "$conf"
+                log_info "Đã áp dụng cho $domain"
+            else
+                log_warn "$domain đã có cấu hình limit."
+            fi
+        fi
+    }
+    
+    if [[ "$c" == "1" ]]; then
+        for conf in /etc/nginx/sites-available/*; do
+            d=$(basename "$conf")
+            if [[ "$d" != "default" && "$d" != "html" ]]; then
+                apply_limit "$d"
+            fi
+        done
+        nginx -t && systemctl reload nginx
+        log_info "Đã áp dụng Rate Limit cho toàn bộ website."
+        
+    elif [[ "$c" == "2" ]]; then
+        # Ensure site.sh is sourced for select_site
+        source "$(dirname "${BASH_SOURCE[0]}")/site.sh"
+        select_site || return
+        apply_limit "$SELECTED_DOMAIN"
+        nginx -t && systemctl reload nginx
+        log_info "Đã áp dụng Rate Limit cho $SELECTED_DOMAIN."
+    fi
     pause
 }
 
 setup_7g_firewall() {
-    log_info "Đang tải 7G Firewall..."
-    mkdir -p /etc/nginx/7g-firewall
-    wget -qO /etc/nginx/7g-firewall/7g-nginx.conf https://perishablepress.com/downloads/7g-firewall/7g-nginx.conf
-    # This URL might be a zip usually, simplified for example or check correct url
-    # Actually most reliable way is manual or unzip if zip.
-    # Let's assume zip logic or simple file.
-    # Real 7G is complex. Let's place a placeholder guide.
+    log_info "Đang cài đặt Basic WAF (Tường lửa ứng dụng web)..."
     
-    echo -e "${YELLOW}Vui lòng tải 7G Firewall từ perishablepress.com và giải nén vào /etc/nginx/7g-firewall/${NC}"
-    echo -e "Sau đó include vào nginx config."
+    mkdir -p /etc/nginx/snippets
+    waf_file="/etc/nginx/snippets/basic_waf.conf"
+    
+    # Create Basic WAF Rules (Common Bad Bots & Exploits)
+    cat > "$waf_file" <<EOF
+# Basic WAF Rules
+# Block SQL Injection & XSS
+location ~* "(eval\()" { deny all; }
+location ~* "(127\.0\.0\.1)" { deny all; }
+location ~* "([a-z0-9]{2000})" { deny all; }
+location ~* "(javascript:)(.*)(;)" { deny all; }
+location ~* "(base64_encode)(.*)(\()" { deny all; }
+location ~* "(GLOBALS|REQUEST)(=|\[|%)" { deny all; }
+location ~* "(<|%3C).*script.*(>|%3E)" { deny all; }
+location ~ "(\\|\.\.\.|\.\./|~|`|<|>|\|)" { deny all; }
+
+# Block Sensitive Files
+location ~* "(boot\.ini|etc/passwd|self/environ)" { deny all; }
+location ~* "(thumbs?(_editor|db)?\.db|DS_Store|__MACOSX)" { deny all; }
+location ~* "(\.bak|\.config|\.sql|\.ini|\.log|\.sh|\.inc|\.swp|\.dist)$" { deny all; }
+EOF
+
+    echo -e "${YELLOW}Bạn có muốn áp dụng WAF cho website không?${NC}"
+    echo -e "1. Áp dụng cho TẤT CẢ website"
+    echo -e "2. Chọn website cụ thể"
+    echo -e "0. Không"
+    read -p "Chọn: " c
+    
+    if [[ "$c" == "0" ]]; then return; fi
+
+    apply_waf() {
+        local domain=$1
+        local conf="/etc/nginx/sites-available/$domain"
+        if [ -f "$conf" ]; then
+            if ! grep -q "basic_waf.conf" "$conf"; then
+                # Insert include
+                sed -i "/server_name/a \    include /etc/nginx/snippets/basic_waf.conf;" "$conf"
+                log_info "Đã kích hoạt WAF cho $domain"
+            else
+                log_warn "$domain đã kích hoạt WAF."
+            fi
+        fi
+    }
+
+    if [[ "$c" == "1" ]]; then
+        for conf in /etc/nginx/sites-available/*; do
+            d=$(basename "$conf")
+            if [[ "$d" != "default" && "$d" != "html" ]]; then
+                apply_waf "$d"
+            fi
+        done
+        nginx -t && systemctl reload nginx
+        log_info "Đã áp dụng WAF cho toàn bộ website."
+    elif [[ "$c" == "2" ]]; then
+        source "$(dirname "${BASH_SOURCE[0]}")/site.sh"
+        select_site || return
+        apply_waf "$SELECTED_DOMAIN"
+        nginx -t && systemctl reload nginx
+        log_info "Đã áp dụng WAF cho $SELECTED_DOMAIN."
+    fi
     pause
 }
