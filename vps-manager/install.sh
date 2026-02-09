@@ -67,7 +67,7 @@ update_self() {
         
         TEMP_DIR=$(mktemp -d)
         echo -e "${YELLOW}Cloning repository...${NC}"
-        git clone -b "$BRANCH" --depth 1 "$REPO_URL" "$TEMP_DIR/vps-repo" > /dev/null 2>&1
+        git clone -b "$BRANCH" --depth 1 "$REPO_URL" "$TEMP_DIR/vps-repo"
         
         if [ $? -ne 0 ]; then
             echo -e "${RED}Failed to clone repository. Check internet connection.${NC}"
