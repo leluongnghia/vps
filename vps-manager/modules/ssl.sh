@@ -15,21 +15,16 @@ install_ssl() {
     fi
 
     echo -e "${YELLOW}Chọn loại SSL:${NC}"
-    echo -e "1. Let's Encrypt (Tự động, Free, cần trỏ DNS)"
-    echo -e "2. Cloudflare Origin SSL (Bảo mật cao, dùng cho site đã qua Cloudflare)"
-    read -p "Lựa chọn [1-2]: " ssl_type
+    echo -e "1. Let's Encrypt (Certbot - Khuyên dùng)"
+    echo -e "2. Cloudflare Origin SSL (Cần copy key từ Cloudflare)"
+    echo -e "3. ZeroSSL (Sử dụng acme.sh)"
+    read -p "Lựa chọn [1-3]: " ssl_type
 
     case $ssl_type in
-        1)
-            install_letsencrypt "$domain"
-            ;;
-        2)
-            install_cloudflare_ssl "$domain"
-            ;;
-        *)
-            echo -e "${RED}Lựa chọn mặc định Let's Encrypt...${NC}"
-            install_letsencrypt "$domain"
-            ;;
+        1) install_letsencrypt "$domain" ;;
+        2) install_cloudflare_ssl "$domain" ;;
+        3) install_zerossl "$domain" ;;
+        *) echo -e "${RED}Lựa chọn mặc định Let's Encrypt...${NC}"; install_letsencrypt "$domain" ;;
     esac
     
     if [ -z "$1" ]; then pause; fi
@@ -51,6 +46,66 @@ install_letsencrypt() {
     else
         echo -e "${RED}Lỗi: Kiểm tra lại DNS hoặc Port 80.${NC}"
     fi
+}
+
+install_zerossl() {
+    local domain=$1
+    log_info "Đang cài đặt acme.sh cho ZeroSSL..."
+    
+    # Install acme.sh
+    if [ ! -f ~/.acme.sh/acme.sh ]; then
+        curl https://get.acme.sh | sh -s email=my@example.com
+    fi
+    
+    # Register ZeroSSL
+    ~/.acme.sh/acme.sh --register-account -m my@example.com --server zerossl
+    
+    log_info "Đang request chứng chỉ ZeroSSL cho $domain..."
+    
+    # Issue cert (using webroot mode /var/www/$domain/public_html or nginx mode)
+    # Nginx mode is easier if nginx is running
+    ~/.acme.sh/acme.sh --issue --nginx -d "$domain" -d "www.$domain" --server zerossl
+    
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Lỗi cấp chứng chỉ ZeroSSL. Kiểm tra DNS!${NC}"
+        return
+    fi
+    
+    # Install cert to nginx location
+    mkdir -p "/etc/nginx/ssl/$domain"
+    
+    ~/.acme.sh/acme.sh --install-cert -d "$domain" \
+        --key-file       "/etc/nginx/ssl/$domain/server.key"  \
+        --fullchain-file "/etc/nginx/ssl/$domain/server.crt" \
+        --reloadcmd     "service nginx force-reload"
+        
+    log_info "Đang cấu hình Nginx..."
+    
+    conf_file="/etc/nginx/sites-available/$domain"
+    # Backup
+    cp "$conf_file" "${conf_file}.bak"
+    
+    # Configure SSL in Nginx (Similar logic to Cloudflare, switch port and paths)
+    sed -i 's/listen 80;/listen 443 ssl http2;/g' "$conf_file"
+    sed -i 's/listen \[::\]:80;/listen [::]:443 ssl http2;/g' "$conf_file"
+    
+    # Add SSL block
+    sed -i "/server_name .*/a \    ssl_certificate /etc/nginx/ssl/$domain/server.crt;\n    ssl_certificate_key /etc/nginx/ssl/$domain/server.key;\n    ssl_protocols TLSv1.2 TLSv1.3;" "$conf_file"
+    
+    # Add Redirect Block (Prepend)
+    tmp_file=$(mktemp)
+    cat <<EOF > "$tmp_file"
+server {
+    listen 80;
+    server_name $domain www.$domain;
+    return 301 https://\$host\$request_uri;
+}
+EOF
+    cat "$conf_file" >> "$tmp_file"
+    mv "$tmp_file" "$conf_file"
+    
+    nginx -t && systemctl reload nginx
+    echo -e "${GREEN}Cài đặt ZeroSSL thành công!${NC}"
 }
 
 install_cloudflare_ssl() {
