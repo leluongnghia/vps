@@ -2,6 +2,29 @@
 
 # modules/wordpress_performance.sh - WordPress Performance Optimization
 
+# Helper: Get installed PHP version with fallback
+get_installed_php_version() {
+    local php_ver=$(php -r "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;" 2>/dev/null)
+    
+    # Check if config exists for detected version
+    if [ -d "/etc/php/${php_ver}" ]; then
+        echo "$php_ver"
+        return 0
+    fi
+    
+    # Fallback: Find installed PHP versions
+    for ver in 8.4 8.3 8.2 8.1 8.0 7.4; do
+        if [ -d "/etc/php/${ver}" ]; then
+            echo "$ver"
+            return 0
+        fi
+    done
+    
+    # Last resort: return detected version anyway
+    echo "$php_ver"
+    return 1
+}
+
 wp_performance_menu() {
     clear
     echo -e "${BLUE}=================================================${NC}"
@@ -80,7 +103,7 @@ tune_php_fpm() {
     log_info "Tuning PHP-FPM for WordPress..."
     
     # Detect PHP version
-    local php_ver=$(php -r "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;")
+    local php_ver=$(get_installed_php_version)
     local fpm_conf="/etc/php/${php_ver}/fpm/pool.d/www.conf"
     
     if [ ! -f "$fpm_conf" ]; then
@@ -126,7 +149,7 @@ optimize_opcache() {
     local auto_mode=$1
     log_info "Optimizing OPcache for maximum performance..."
     
-    local php_ver=$(php -r "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;")
+    local php_ver=$(get_installed_php_version)
     local opcache_ini="/etc/php/${php_ver}/fpm/conf.d/10-opcache.ini"
     
     # Aggressive OPcache settings for WordPress
@@ -300,7 +323,7 @@ setup_object_cache() {
             fi
             
             # Install PHP Redis extension
-            local php_ver=$(php -r "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;")
+            local php_ver=$(get_installed_php_version)
             apt-get install -y php${php_ver}-redis
             phpenmod -v ${php_ver} redis
             systemctl restart php${php_ver}-fpm
@@ -319,7 +342,7 @@ setup_object_cache() {
             fi
             
             # Install PHP Memcached extension
-            local php_ver=$(php -r "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;")
+            local php_ver=$(get_installed_php_version)
             apt-get install -y php${php_ver}-memcached
             phpenmod -v ${php_ver} memcached
             systemctl restart php${php_ver}-fpm
@@ -388,7 +411,7 @@ setup_image_optimization() {
     echo -e "${YELLOW}Server-side WebP support:${NC}"
     
     # Install WebP support
-    local php_ver=$(php -r "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;")
+    local php_ver=$(get_installed_php_version)
     apt-get install -y php${php_ver}-gd webp
     
     log_info "WebP support installed"
