@@ -125,8 +125,12 @@ wp_user_menu() {
         case $c in
             1) $WP_CMD user list; pause ;;
             2) 
-                read -p "Nhập ID hoặc Username: " u
+                echo -e "${YELLOW}Danh sách User:${NC}"
+                $WP_CMD user list
+                echo ""
+                read -p "Nhập ID hoặc Username cần reset: " u
                 read -p "Nhập Password mới: " p
+                echo "Đang cập nhật..."
                 $WP_CMD user update "$u" --user_pass="$p"
                 pause 
                 ;;
