@@ -26,15 +26,27 @@ performance_menu() {
 enable_gzip_cache() {
     log_info "Đang cấu hình Gzip & Cache Headers..."
     
-    # 0. Clean up old/conflict files FIRST
+    # 0. Emergency Cleanup & Recovery
+    # Remove files known to cause issues
     rm -f /etc/nginx/conf.d/cache_headers.conf
     rm -f /etc/nginx/conf.d/gzip.conf
     rm -f /etc/nginx/conf.d/browser_caching.conf
     
-    # 1. Disable default Gzip in nginx.conf to avoid duplicate error
-    if grep -q "^[[:space:]]*gzip on;" /etc/nginx/nginx.conf; then
-        sed -i 's/^[[:space:]]*gzip on;/#gzip on;/' /etc/nginx/nginx.conf
-        log_info "Đã tắt cấu hình Gzip mặc định trong nginx.conf"
+    # Check if nginx is dead, try to revive
+    if ! systemctl is-active --quiet nginx; then
+        log_warn "Nginx đang lỗi. Đang cố gắng khôi phục..."
+        systemctl restart nginx
+    fi
+
+    # 1. Aggressively remove default gzip from nginx.conf
+    if [ -f /etc/nginx/nginx.conf ]; then
+        cp /etc/nginx/nginx.conf /etc/nginx/nginx.conf.bak
+        # Remove 'gzip on;' line (delete line containing gzip on;)
+        sed -i '/^\s*gzip\s\+on;/d' /etc/nginx/nginx.conf
+        # Also comment out gzip_disable if present default
+        sed -i 's/^\s*gzip_disable/#gzip_disable/' /etc/nginx/nginx.conf
+        
+        log_info "Đã loại bỏ cấu hình Gzip mặc định (Backup tại nginx.conf.bak)"
     fi
     
     # 2. Create optimized Gzip config
@@ -66,13 +78,11 @@ EOF
         log_info "Đã kích hoạt Gzip & Cache thành công!"
     else
         log_warn "Cấu hình Nginx lỗi! Đang khôi phục..."
-        # If gzip conf failed, maybe revert? 
-        # But usually removing files is safe.
+        # Restore main config
+        cp /etc/nginx/nginx.conf.bak /etc/nginx/nginx.conf
         rm -f /etc/nginx/conf.d/gzip.conf
-        # Re-enable default gzip?
-        sed -i 's/^#gzip on;/gzip on;/' /etc/nginx/nginx.conf
-        systemctl reload nginx
-        echo -e "${RED}Đã khôi phục trạng thái cũ do lỗi config.${NC}"
+        systemctl restart nginx
+        echo -e "${RED}Đã khôi phục trạng thái cũ do lỗi config. Vui lòng kiểm tra log.${NC}"
     fi
     
     log_info "Snippet Browser Caching tại: /etc/nginx/snippets/browser_caching.conf"
