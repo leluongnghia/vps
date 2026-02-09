@@ -63,11 +63,21 @@ select_wp_site() {
 }
 
 ensure_wp_cli() {
+    # 1. Install WP-CLI if missing
     if ! command -v wp &> /dev/null; then
         echo -e "${YELLOW}Installing WP-CLI...${NC}"
         curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
         chmod +x wp-cli.phar
         mv wp-cli.phar /usr/local/bin/wp
+    fi
+    
+    # 2. Check PHP MySQL Extension for CLI
+    if ! php -m | grep -q "mysql"; then
+        echo -e "${YELLOW}Phát hiện thiếu PHP MySQL Extension cho CLI. Đang cài đặt tự động...${NC}"
+        apt-get update -qq
+        # Install for default PHP and all common versions to be safe
+        apt-get install -y php-mysql php8.1-mysql php8.2-mysql php8.3-mysql
+        echo -e "${GREEN}Đã cài đặt php-mysql.${NC}"
     fi
 }
 
