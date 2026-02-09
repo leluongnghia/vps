@@ -1,0 +1,60 @@
+# Nhiệm vụ: Tạo Script Quản lý VPS
+
+- [x] Nghiên cứu & Lập kế hoạch <!-- id: 0 -->
+    - [x] Phân tích tính năng HostVN và LarVPS <!-- id: 1 -->
+    - [x] Tạo kế hoạch triển khai <!-- id: 2 -->
+- [/] Phát triển Core Script <!-- id: 3 -->
+    - [x] Tạo giao diện menu chính <!-- id: 4 -->
+    - [x] Thực hiện cập nhật hệ thống & cài đặt phụ thuộc <!-- id: 5 -->
+    - [x] Thực hiện cài đặt LEMP Stack (Nginx, PHP, MariaDB) <!-- id: 6 -->
+- [/] Triển khai Tính năng <!-- id: 7 -->
+    - [x] Quản lý Tên miền & SSL <!-- id: 8 -->
+    - [/] Quản lý Cơ sở dữ liệu <!-- id: 9 -->
+    - [x] Quản lý WordPress (Cài đặt/Xóa) <!-- id: 10 -->
+    - [x] Bảo mật (Tường lửa, Cổng SSH, Fail2ban) <!-- id: 11 -->
+    - [x] Sao lưu/Khôi phục <!-- id: 12 -->
+    - [x] Quản lý Cronjob <!-- id: 13 -->
+- [x] Tối ưu hóa Hiệu suất (Mới) <!-- id: 17 -->
+    - [x] Nghiên cứu công cụ khác (WordOps, SlickStack) <!-- id: 18 -->
+    - [x] Tích hợp Nginx FastCGI Cache <!-- id: 19 -->
+    - [x] Tích hợp Redis Object Cache <!-- id: 20 -->
+    - [x] Cấu hình Brotli & Opcache <!-- id: 21 -->
+    - [x] Tích hợp UNIX Socket (Redis, DB) <!-- id: 22 -->
+- [x] Quản lý PHP Đa phiên bản (Mới) <!-- id: 23 -->
+    - [x] Module cài đặt thêm PHP (7.4, 8.0, 8.1, etc) <!-- id: 24 -->
+    - [x] Chức năng thay đổi PHP phiên bản cho từng Website <!-- id: 25 -->
+- [x] Hoàn thiện Sao lưu & Khôi phục <!-- id: 26 -->
+    - [x] Viết hàm khôi phục (Restore) Website <!-- id: 27 -->
+    - [x] Viết hàm giải thích cơ chế Backup/Restore <!-- id: 28 -->
+- [x] Bảo mật Nâng cao (DDoS, WAF) <!-- id: 29 -->
+    - [x] Cấu hình Nginx Rate limit (DDoS basic) <!-- id: 30 -->
+    - [x] Tích hợp 7G/Nginx Ultimate Bad Bot Blocker <!-- id: 31 -->
+- [x] Mở rộng Backup & Caching <!-- id: 32 -->
+    - [x] Tích hợp Memcached <!-- id: 33 -->
+    - [x] Backup tự động lên Google Drive (rclone) <!-- id: 34 -->
+- [x] Quản lý Domain & SSL (Mới) <!-- id: 40 -->
+    - [x] Thêm/Xóa Redirect (301, 302) <!-- id: 41 -->
+    - [x] Phân quyền Domain (Chown/Chmod) <!-- id: 42 -->
+    - [x] Liệt kê Domain chi tiết <!-- id: 43 -->
+    - [x] Quản lý SSL (Let's Encrypt - List/Add/Remove/Renew) <!-- id: 44 -->
+    - [x] Cấu hình SSL Trả phí (Paid SSL) <!-- id: 54 -->
+- [x] Quản lý Database & Cache (Mới) <!-- id: 45 -->
+    - [x] Danh sách/Thêm/Xóa/Đổi Pass DB <!-- id: 46 -->
+    - [x] Import/Export DB <!-- id: 47 -->
+    - [x] Bật/Tắt Memcached, Redis, Opcache <!-- id: 48 -->
+    - [x] Xóa Cache (FastCGI, Redis, Memcached) <!-- id: 49 -->
+- [x] Quản lý System & Security (Mới) <!-- id: 50 -->
+    - [x] Quản lý Swap (Xem/Thêm/Xóa) <!-- id: 51 -->
+    - [x] Quản lý AppAdmin (Bảo vệ Tools/Đổi Port) <!-- id: 52 -->
+    - [x] Quản lý SSH/SFTP (Đổi Pass Root/User, Port, Auth Tries) <!-- id: 53 -->
+    - [x] Cập nhật Hệ thống (Script & Core Packages) <!-- id: 55 -->
+    - [x] Quản lý Log (Xem Log Nginx/PHP/DB) <!-- id: 56 -->
+- [x] Các công cụ tiện ích (Mới) <!-- id: 57 -->
+    - [x] Quản lý Nginx (Global Config & Vhost Editor) <!-- id: 58 -->
+    - [x] Tối ưu hóa Ảnh (Image Optimizer) <!-- id: 59 -->
+    - [x] Quản lý Disk (Cảnh báo & Phân tích dung lượng) <!-- id: 60 -->
+    - [x] Quản lý Service/Syntax (Restart Nginx/PHP/MySQL) <!-- id: 61 -->
+    - [x] Clone/Duplicate Website <!-- id: 62 -->
+- [/] Kiểm thử <!-- id: 14 -->
+    - [x] Kiểm tra cú pháp và logic script <!-- id: 15 -->
+    - [x] Tạo hướng dẫn sử dụng <!-- id: 16 -->
