@@ -26,6 +26,11 @@ performance_menu() {
 enable_gzip_cache() {
     log_info "Đang cấu hình Gzip & Cache Headers..."
     
+    # 0. Clean up old/conflict files FIRST
+    rm -f /etc/nginx/conf.d/cache_headers.conf
+    rm -f /etc/nginx/conf.d/gzip.conf
+    rm -f /etc/nginx/conf.d/browser_caching.conf
+    
     # 1. Disable default Gzip in nginx.conf to avoid duplicate error
     if grep -q "^[[:space:]]*gzip on;" /etc/nginx/nginx.conf; then
         sed -i 's/^[[:space:]]*gzip on;/#gzip on;/' /etc/nginx/nginx.conf
@@ -54,11 +59,23 @@ location ~* \.(jpg|jpeg|gif|png|ico|svg|css|js|woff|woff2|ttf|eot)$ {
 }
 EOF
 
-    # Remove invalid file if exists
-    rm -f /etc/nginx/conf.d/cache_headers.conf
-
-    nginx -t && systemctl reload nginx
-    log_info "Đã bật Gzip Global. Snippet Browser Caching đã tạo tại /etc/nginx/snippets/browser_caching.conf (Cần include vào vhost)."
+    # Test & Reload
+    log_info "Kiểm tra cấu hình Nginx..."
+    if nginx -t; then
+        systemctl reload nginx
+        log_info "Đã kích hoạt Gzip & Cache thành công!"
+    else
+        log_warn "Cấu hình Nginx lỗi! Đang khôi phục..."
+        # If gzip conf failed, maybe revert? 
+        # But usually removing files is safe.
+        rm -f /etc/nginx/conf.d/gzip.conf
+        # Re-enable default gzip?
+        sed -i 's/^#gzip on;/gzip on;/' /etc/nginx/nginx.conf
+        systemctl reload nginx
+        echo -e "${RED}Đã khôi phục trạng thái cũ do lỗi config.${NC}"
+    fi
+    
+    log_info "Snippet Browser Caching tại: /etc/nginx/snippets/browser_caching.conf"
     pause
 }
 
