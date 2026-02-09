@@ -182,10 +182,14 @@ main() {
     fi
     
     # If we are here, we expect core/menu.sh to exist relative to us
-    # If we are here, we expect core/menu.sh to exist relative to us
     if [ -f "$MY_DIR/core/menu.sh" ]; then
         cd "$MY_DIR"
         source core/menu.sh
+        
+        # Prevent concurrent execution
+        if ! acquire_lock; then
+            exit 1
+        fi
         
         # Create WWW Shortcut for easier access (On every run to ensure it exists)
         if [ ! -L /www ] && [ -d /var/www ]; then

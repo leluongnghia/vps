@@ -50,9 +50,13 @@ add_new_site() {
     echo -e "${GREEN}--- Thêm Website Mới ($type) ---${NC}"
     read -p "Nhập tên miền (ví dụ: example.com): " domain
     
-    # Check domain format
-    if [[ ! "$domain" =~ ^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
-        echo -e "${RED}Định dạng tên miền không hợp lệ!${NC}"
+    # Validate domain format
+    if ! validate_domain "$domain"; then
+        pause; return
+    fi
+    
+    # Check disk space (require 2GB free for WordPress)
+    if ! check_disk_space "/var/www" 2048; then
         pause; return
     fi
 
@@ -115,19 +119,16 @@ create_nginx_config() {
     local domain=$1
     local config_file="/etc/nginx/sites-available/$domain"
     
-    # Detect PHP Version Socket
-    if [ -S /run/php/php8.3-fpm.sock ]; then
-        php_sock="unix:/run/php/php8.3-fpm.sock"
-    elif [ -S /run/php/php8.2-fpm.sock ]; then
-        php_sock="unix:/run/php/php8.2-fpm.sock"
-    elif [ -S /run/php/php8.1-fpm.sock ]; then
-        php_sock="unix:/run/php/php8.1-fpm.sock"
-    else
-        # Default fallback
-        php_sock="unix:/run/php/php8.1-fpm.sock"
+    # Dynamic PHP Version Socket Detection
+    local php_sock=$(detect_php_socket)
+    if [ -z "$php_sock" ]; then
+        log_error "No PHP-FPM socket found. Please install PHP first."
+        return 1
     fi
-
-    # Simple PHP-FPM config
+    
+    log_info "Using PHP socket: $php_sock"
+    
+    # Create Nginx configuration
     cat > "$config_file" <<EOF
 server {
     listen 80;
@@ -170,23 +171,22 @@ setup_database() {
     local db_user="${db_name}_user"
     local db_pass=$(openssl rand -base64 12)
 
-    log_info "Đang tạo cơ sở dữ liệu..."
+    log_info "Creating database..."
     
-    # This requires .my.cnf or root access without password, or prompting. 
-    # For script simplicity, we assume root setup or use 'mysql' command if unix_socket auth is on.
-    mysql -e "CREATE DATABASE ${db_name};"
-    mysql -e "CREATE USER '${db_user}'@'localhost' IDENTIFIED BY '${db_pass}';"
-    mysql -e "GRANT ALL PRIVILEGES ON ${db_name}.* TO '${db_user}'@'localhost';"
-    mysql -e "FLUSH PRIVILEGES;"
-
-    echo -e "${GREEN}DB Name: $db_name${NC}"
-    echo -e "${GREEN}DB User: $db_user${NC}"
-    echo -e "${GREEN}DB Pass: $db_pass${NC}"
-    
-    # Save these credentials for WP config
-    export WP_DB_NAME="$db_name"
-    export WP_DB_USER="$db_user"
-    export WP_DB_PASS="$db_pass"
+    # Use new MySQL helper with proper credential handling
+    if create_database "$db_name" "$db_user" "$db_pass"; then
+        echo -e "${GREEN}DB Name: $db_name${NC}"
+        echo -e "${GREEN}DB User: $db_user${NC}"
+        echo -e "${GREEN}DB Pass: $db_pass${NC}"
+        
+        # Save these credentials for WP config
+        export WP_DB_NAME="$db_name"
+        export WP_DB_USER="$db_user"
+        export WP_DB_PASS="$db_pass"
+    else
+        log_error "Failed to create database"
+        return 1
+    fi
 }
 
 install_wordpress() {

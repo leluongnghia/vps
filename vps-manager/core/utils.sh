@@ -2,6 +2,20 @@
 
 # core/utils.sh - Utility functions
 
+# Get script directory
+UTILS_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+# Source helper modules
+if [ -f "$UTILS_DIR/nginx_helpers.sh" ]; then
+    source "$UTILS_DIR/nginx_helpers.sh"
+fi
+if [ -f "$UTILS_DIR/mysql_helpers.sh" ]; then
+    source "$UTILS_DIR/mysql_helpers.sh"
+fi
+if [ -f "$UTILS_DIR/system_helpers.sh" ]; then
+    source "$UTILS_DIR/system_helpers.sh"
+fi
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
