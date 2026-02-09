@@ -31,9 +31,10 @@ main_menu() {
         echo -e "15. Quản lý Nginx (Cấu hình)"
         echo -e "16. Tối ưu hóa Hiệu năng (High Performance)"
         echo -e "17. Cập nhật Script (Từ GitHub)"
+        echo -e "18. Chẩn đoán Hệ thống (Health Check)"
         echo -e "0. Thoát"
         echo -e "${BLUE}=================================================${NC}"
-        read -p "Nhập lựa chọn của bạn [0-17]: " choice
+        read -p "Nhập lựa chọn của bạn [0-18]: " choice
 
         case $choice in
             1)
@@ -103,6 +104,10 @@ main_menu() {
             17)
                 source "$ROOT_DIR/modules/update.sh"
                 do_update
+                ;;
+            18)
+                source "$ROOT_DIR/modules/diagnose.sh"
+                diagnose_system
                 ;;
             0)
                 echo -e "${GREEN}Exiting... Goodbye!${NC}"
