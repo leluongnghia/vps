@@ -75,20 +75,41 @@ update_self() {
             exit 1
         fi
 
-        # Remove old install dir
-        rm -rf "$INSTALL_DIR"
+        # Safe Update Strategy
+        BACKUP_DIR="${INSTALL_DIR}_backup_$(date +%s)"
+        
+        # Move current install to backup instead of deleting immediately
+        if [ -d "$INSTALL_DIR" ]; then
+            echo -e "${YELLOW}Backing up current version...${NC}"
+            mv "$INSTALL_DIR" "$BACKUP_DIR"
+        fi
+        
         mkdir -p "$INSTALL_DIR"
 
         # Move vps-manager content to INSTALL_DIR
         if [ -d "$TEMP_DIR/vps-repo/vps-manager" ]; then
             cp -r "$TEMP_DIR/vps-repo/vps-manager/"* "$INSTALL_DIR/"
+            
+            # Verify critical file exists
+            if [ ! -f "$INSTALL_DIR/install.sh" ]; then
+                 echo -e "${RED}Update failed: install.sh missing! Restoring backup...${NC}"
+                 rm -rf "$INSTALL_DIR"
+                 mv "$BACKUP_DIR" "$INSTALL_DIR"
+                 rm -rf "$TEMP_DIR"
+                 exit 1
+            fi
+            
+            # Update successful - Remove backup
+            rm -rf "$BACKUP_DIR"
         else
-            echo -e "${RED}Error: vps-manager directory not found in repository!${NC}"
+            echo -e "${RED}Error: vps-manager directory not found in repo! Restoring backup...${NC}"
+            rm -rf "$INSTALL_DIR"
+            mv "$BACKUP_DIR" "$INSTALL_DIR"
             rm -rf "$TEMP_DIR"
             exit 1
         fi
         
-        # Cleanup
+        # Cleanup temp
         rm -rf "$TEMP_DIR"
         
         # Set permissions
@@ -98,11 +119,11 @@ update_self() {
         # Create Symlink
         ln -sf "$INSTALL_DIR/install.sh" /usr/local/bin/vps
         
-        echo -e "${GREEN}Installation complete!${NC}"
+        echo -e "${GREEN}Update completed successfully!${NC}"
         echo -e "${GREEN}Type 'vps' to run the manager anytime.${NC}"
         sleep 2
         
-        # Handover execution to the installed script
+        # Handover execution to the NEW installed script
         exec "$INSTALL_DIR/install.sh"
         exit 0
     fi

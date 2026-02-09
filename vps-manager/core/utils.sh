@@ -9,17 +9,39 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-# Logger
+# Logger config
+LOG_FILE="/var/log/vps-manager.log"
+# Ensure log file exists and is writable (if running as root)
+if [ "$EUID" -eq 0 ]; then
+    touch "$LOG_FILE" 2>/dev/null
+    chmod 644 "$LOG_FILE" 2>/dev/null
+fi
+
+log() {
+    local level=$1
+    local msg=$2
+    local color=$3
+    local timestamp=$(date "+%Y-%m-%d %H:%M:%S")
+    
+    # Print to screen
+    echo -e "${color}[${level}] ${msg}${NC}"
+    
+    # Log to file if writable
+    if [ -w "$LOG_FILE" ]; then
+        echo "[$timestamp] [${level}] $msg" >> "$LOG_FILE"
+    fi
+}
+
 log_info() {
-    echo -e "${GREEN}[INFO] $1${NC}"
+    log "INFO" "$1" "$GREEN"
 }
 
 log_warn() {
-    echo -e "${YELLOW}[WARN] $1${NC}"
+    log "WARN" "$1" "$YELLOW"
 }
 
 log_error() {
-    echo -e "${RED}[ERROR] $1${NC}"
+    log "ERROR" "$1" "$RED"
 }
 
 # Check if a package is installed
