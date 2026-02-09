@@ -71,13 +71,18 @@ ensure_wp_cli() {
         mv wp-cli.phar /usr/local/bin/wp
     fi
     
-    # 2. Check PHP MySQL Extension for CLI
+    # 2. Force Install & Enable PHP MySQL Extensions
+    # Check if mysql module is missing in CLI
     if ! php -m | grep -q "mysql"; then
-        echo -e "${YELLOW}Phát hiện thiếu PHP MySQL Extension cho CLI. Đang cài đặt tự động...${NC}"
+        echo -e "${YELLOW}Đang cài đặt PHP MySQL Extensions (Bắt buộc cho WP-CLI)...${NC}"
         apt-get update -qq
-        # Install for default PHP and all common versions to be safe
         apt-get install -y php-mysql php8.1-mysql php8.2-mysql php8.3-mysql
-        echo -e "${GREEN}Đã cài đặt php-mysql.${NC}"
+        
+        # 3. Enable modules properly
+        if command -v phpenmod &> /dev/null; then
+            phpenmod -v ALL mysql mysqli pdo_mysql
+        fi
+        echo -e "${GREEN}Đã cài đặt và kích hoạt php-mysql.${NC}"
     fi
 }
 
