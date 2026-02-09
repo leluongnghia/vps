@@ -7,25 +7,39 @@ manage_sites_menu() {
     echo -e "${BLUE}=================================================${NC}"
     echo -e "${GREEN}          Quản lý Website & Tên miền${NC}"
     echo -e "${BLUE}=================================================${NC}"
-    echo -e "1. Thêm Website mới (WordPress)"
-    echo -e "2. Thêm Website mới (PHP thuan/Static)"
-    echo -e "3. Xóa Website"
-    echo -e "4. Danh sách Website"
-    echo -e "5. Quản lý Redirect (301/302)"
-    echo -e "6. Fix Permissions (Phân quyền)"
-    echo -e "7. Clone/Nhân bản Website"
+    echo -e "1. Danh sách Tên miền"
+    echo -e "2. Thêm Tên miền mới"
+    echo -e "3. Xóa Tên miền"
+    echo -e "4. Thay đổi Tên miền (Rename Domain)"
+    echo -e "5. Cấu hình lại Nginx (Rewrite Vhost)"
+    echo -e "6. Parked/Alias Domain"
+    echo -e "7. Redirect Domain"
+    echo -e "8. Đổi phiên bản PHP cho Website"
+    echo -e "9. Clone/Nhân bản Website"
+    echo -e "10. Đổi thông tin Database (wp-config)"
+    echo -e "11. Đặt mật khẩu bảo vệ thư mục"
+    echo -e "12. Fix Permissions"
     echo -e "0. Quay lại Menu chính"
     echo -e "${BLUE}=================================================${NC}"
-    read -p "Nhập lựa chọn [0-7]: " choice
+    read -p "Nhập lựa chọn [0-12]: " choice
 
     case $choice in
-        1) add_new_site "wordpress" ;;
-        2) add_new_site "php" ;;
+        1) list_sites ;;
+        2) 
+            echo -e "1. WordPress\n2. PHP Thuần"
+            read -p "Chọn loại: " t
+            if [[ "$t" == "1" ]]; then add_new_site "wordpress"; else add_new_site "php"; fi
+            ;;
         3) delete_site ;;
-        4) list_sites ;;
-        5) manage_redirects ;;
-        6) fix_permissions ;;
-        7) clone_site ;;
+        4) rename_site ;;
+        5) rewrite_vhost_config ;;
+        6) manage_parked_domains ;;
+        7) manage_redirects ;;
+        8) change_site_php ;;
+        9) clone_site ;;
+        10) update_site_db_info ;;
+        11) protect_folder ;;
+        12) fix_permissions ;;
         0) return ;;
         *) echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause ;;
     esac
@@ -360,6 +374,7 @@ clone_site() {
     # 1. Clone Files
     log_info "Đang copy mã nguồn..."
     mkdir -p "/var/www/$dest_domain"
+    # Use rsync to preserve permissions/symlinks
     rsync -av --exclude 'wp-config.php' "/var/www/$src_domain/" "/var/www/$dest_domain/"
     
     # 2. Config Nginx for Dest
@@ -377,22 +392,13 @@ clone_site() {
     mysql -e "FLUSH PRIVILEGES;"
     
     # 4. Export & Import DB
-    # Need to find source DB creds? Or just dump if we have root/socket access
-    # Parsing wp-config.php of source to get DB Name
-    src_db_name=$(grep "DB_NAME" "/var/www/$src_domain/public_html/wp-config.php" | cut -d "'" -f 4)
+    src_db_name=$(grep "DB_NAME" "/var/www/$src_domain/public_html/wp-config.php" 2>/dev/null | cut -d "'" -f 4)
     
     if [ -n "$src_db_name" ]; then
         log_info "Đang clone database ($src_db_name -> $new_db_name)..."
         mysqldump "$src_db_name" | mysql "$new_db_name"
         
         # 5. Search & Replace URL
-        # Using WP-CLI if available, else sed on dump?
-        # Recommend installing WP-CLI in setup??
-        # Simple sed on DB dump is risky for serialized data. 
-        # But for script simplicity without WP-CLI:
-        # A better way: Use a php script or just warn user.
-        # Let's try installing wp-cli locally if not present?
-        
         if ! command -v wp &> /dev/null; then
              curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
              chmod +x wp-cli.phar
@@ -408,7 +414,6 @@ clone_site() {
         sed -i "s/DB_USER', '.*'/DB_USER', '$new_db_user'/" wp-config.php
         sed -i "s/DB_PASSWORD', '.*'/DB_PASSWORD', '$new_db_pass'/" wp-config.php
         
-        # Allow root wp-cli
         wp search-replace "http://$src_domain" "http://$dest_domain" --allow-root
         wp search-replace "https://$src_domain" "https://$dest_domain" --allow-root
         wp search-replace "$src_domain" "$dest_domain" --allow-root
@@ -418,9 +423,154 @@ clone_site() {
         log_warn "Không tìm thấy cấu hình DB nguồn. Chỉ copy code."
     fi
     
-    # Fix Permissions
     chown -R www-data:www-data "/var/www/$dest_domain"
-    
     log_info "Clone hoàn tất! Domain mới: $dest_domain"
+    echo -e "DB Name: $new_db_name | User: $new_db_user | Pass: $new_db_pass"
+    pause
+}
+
+rename_site() {
+    echo -e "${YELLOW}--- Thay đổi Tên miền (Rename) ---${NC}"
+    read -p "Nhập domain CŨ: " old_domain
+    read -p "Nhập domain MỚI: " new_domain
+    
+    if [ ! -d "/var/www/$old_domain" ]; then echo -e "${RED}Không tìm thấy domain cũ.${NC}"; pause; return; fi
+    if [ -d "/var/www/$new_domain" ]; then echo -e "${RED}Domain mới đã tồn tại.${NC}"; pause; return; fi
+    
+    log_info "Đổi tên thư mục..."
+    mv "/var/www/$old_domain" "/var/www/$new_domain"
+    
+    log_info "Cập nhật Nginx..."
+    rm -f "/etc/nginx/sites-enabled/$old_domain"
+    rm -f "/etc/nginx/sites-available/$old_domain"
+    create_nginx_config "$new_domain"
+    
+    log_info "Cập nhật URL trong Database (nếu là WP)..."
+    if [ -f "/var/www/$new_domain/public_html/wp-config.php" ]; then
+        cd "/var/www/$new_domain/public_html"
+        if ! command -v wp &> /dev/null; then
+             curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar; chmod +x wp-cli.phar; mv wp-cli.phar /usr/local/bin/wp
+        fi
+        
+        wp search-replace "http://$old_domain" "http://$new_domain" --allow-root
+        wp search-replace "https://$old_domain" "https://$new_domain" --allow-root
+        wp search-replace "$old_domain" "$new_domain" --allow-root
+    fi
+    
+    log_info "Đổi tên thành công: $old_domain -> $new_domain"
+    pause
+}
+
+rewrite_vhost_config() {
+    read -p "Nhập domain cần cấu hình lại Nginx: " domain
+    if [ ! -d "/var/www/$domain" ]; then echo -e "${RED}Site không tồn tại.${NC}"; pause; return; fi
+    
+    create_nginx_config "$domain"
+    log_info "Đã tạo lại file cấu hình Nginx cho $domain."
+    pause
+}
+
+change_site_php() {
+    read -p "Nhập domain: " domain
+    if [ ! -f "/etc/nginx/sites-available/$domain" ]; then echo -e "${RED}Config Nginx không tồn tại.${NC}"; pause; return; fi
+    
+    echo -e "Chọn phiên bản PHP:"
+    echo "1. PHP 8.1"
+    echo "2. PHP 8.2"
+    echo "3. PHP 8.3"
+    read -p "Chọn [1-3]: " v
+    case $v in
+        1) ver="8.1" ;;
+        2) ver="8.2" ;;
+        3) ver="8.3" ;;
+        *) return ;;
+    esac
+    
+    conf="/etc/nginx/sites-available/$domain"
+    # Replace fastcgi_pass line
+    sed -i "s|fastcgi_pass.*unix:.*|fastcgi_pass unix:/run/php/php$ver-fpm.sock;|" "$conf"
+    
+    nginx -t && systemctl reload nginx
+    log_info "Đã chuyển $domain sang PHP $ver"
+    pause
+}
+
+update_site_db_info() {
+    read -p "Nhập domain: " domain
+    wp_conf="/var/www/$domain/public_html/wp-config.php"
+    if [ ! -f "$wp_conf" ]; then echo -e "${RED}Không tìm thấy wp-config.php${NC}"; pause; return; fi
+    
+    read -p "Database Name mới: " db_name
+    read -p "Database User mới: " db_user
+    read -p "Database Password mới: " db_pass
+    
+    sed -i "s/DB_NAME', '.*'/DB_NAME', '$db_name'/" "$wp_conf"
+    sed -i "s/DB_USER', '.*'/DB_USER', '$db_user'/" "$wp_conf"
+    sed -i "s/DB_PASSWORD', '.*'/DB_PASSWORD', '$db_pass'/" "$wp_conf"
+    
+    log_info "Đã cập nhật thông tin Database."
+    pause
+}
+
+manage_parked_domains() {
+    echo -e "1. Thêm Parked Domain (Alias)"
+    echo -e "2. Xóa Parked Domain"
+    read -p "Chọn: " c
+    
+    case $c in
+        1)
+            read -p "Domain GỐC (Main): " main
+            read -p "Domain ALIAS (Parked): " alias
+            conf="/etc/nginx/sites-available/$main"
+            if [ ! -f "$conf" ]; then echo "${RED}Domain gốc sai.${NC}"; pause; return; fi
+            
+            # Edit server_name line to append alias
+            # Assuming server_name line looks like "server_name a.com www.a.com;"
+            if grep -q "server_name .*$alias" "$conf"; then
+                echo "Alias đã tồn tại."
+            else
+                sed -i "/server_name/ s/;/ $alias www.$alias;/" "$conf"
+                nginx -t && systemctl reload nginx
+                log_info "Đã thêm alias $alias cho $main"
+                
+                # Setup SSL for alias if needed? 
+                echo -e "${YELLOW}Lưu ý: Bạn cần cấp lại SSL để bao gồm cả domain alias!${NC}"
+                # Could offer to run certbot --expand
+            fi
+            ;;
+        2)
+            read -p "Domain GỐC (Main): " main
+            read -p "Domain ALIAS cần xóa: " alias
+            conf="/etc/nginx/sites-available/$main"
+            sed -i "s/ $alias//" "$conf"
+            sed -i "s/ www.$alias//" "$conf"
+            nginx -t && systemctl reload nginx
+            log_info "Đã gỡ alias."
+            ;;
+    esac
+    pause
+}
+
+protect_folder() {
+    read -p "Nhập domain muốn đặt mật khẩu: " domain
+    read -p "Username: " user
+    read -p "Password: " pass
+    
+    if ! command -v htpasswd &> /dev/null; then apt-get install -y apache2-utils; fi
+    
+    auth_file="/etc/nginx/.htpasswd_$domain"
+    htpasswd -cb "$auth_file" "$user" "$pass"
+    
+    conf="/etc/nginx/sites-available/$domain"
+    # Insert auth_basic into the beginning of server block or / location
+    # Simple approach: Auth whole site
+    if ! grep -q "auth_basic" "$conf"; then
+        # Insert after "index ..." line for example
+        sed -i "/index index.php/a \    auth_basic \"Restricted Area\";\n    auth_basic_user_file $auth_file;" "$conf"
+        nginx -t && systemctl reload nginx
+        log_info "Đã bật mật khẩu bảo vệ cho $domain"
+    else
+        log_info "Cập nhật mật khẩu thành công (Config đã có sẵn)."
+    fi
     pause
 }

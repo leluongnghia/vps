@@ -16,7 +16,7 @@ main_menu() {
         echo -e "${BLUE}=================================================${NC}"
         echo -e "1. Cài đặt LEMP Stack (Nginx, MariaDB, PHP)"
         echo -e "2. Quản lý Domain & Website"
-        echo -e "3. Cài đặt WordPress (Mới)"
+        echo -e "3. Quản lý WordPress (User, Plugins, Security...)"
         echo -e "4. Bảo mật & Tối ưu hóa"
         echo -e "5. Sao lưu & Khôi phục (Backup/Restore)"
         echo -e "6. Công cụ Hệ thống (Update, Logs)"
