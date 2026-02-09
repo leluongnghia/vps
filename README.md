@@ -10,9 +10,14 @@ Một script Bash toàn diện, mạnh mẽ giúp bạn quản lý VPS (Ubuntu/D
 
 ## Tính năng Nổi bật
 
-### 🚀 Cài đặt & Quản lý
+### 🚀 Cài đặt & Quản lý Website
 - **LEMP Stack Tự động**: Cài đặt Nginx, MariaDB, PHP (Hỗ trợ đa phiên bản: 8.1, 8.2, 8.3...) chỉ với 1 click.
-- **WordPress**: Cài đặt Web WordPress tự động, thiết lập Database, Nginx Config chuẩn.
+- **Quản lý Domain Toàn diện**: Thêm, Xóa, **Đổi tên miền (Rename)**, **Clone Website**, Parked Domain, Redirect.
+- **WordPress Manager**:
+  - Cài đặt WordPress tự động, Database an toàn.
+  - **Công cụ WP Chuyên sâu**: Quản lý Core/Plugin/User từ dòng lệnh.
+  - Reset mật khẩu Admin, Bảo mật (Tắt XML-RPC, Giấu wp-config).
+  - Tối ưu SEO (RankMath/Yoast Nginx rules).
 - **Quản lý SSL Đa năng**:
   - **Let's Encrypt**: Tự động, miễn phí (Certbot).
   - **Cloudflare Origin SSL**: Hỗ trợ cài đặt chứng chỉ gốc Cloudflare (cho site dùng Proxy đám mây vàng).
@@ -74,9 +79,14 @@ A comprehensive and powerful Bash script to automate VPS management (Ubuntu/Debi
 
 ## Key Features
 
-### 🚀 Installation & Management
+### 🚀 Installation & Site Management
 - **Automated LEMP Stack**: Install Nginx, MariaDB, PHP (Multi-version: 8.1, 8.2, 8.3...) in one click.
-- **WordPress Manager**: Auto-install WordPress, setup Database, and generate optimized Nginx Config.
+- **Site & Domain Management**: Add, Delete, **Rename Domain**, **Clone Website**, Parked Domain (Alias), Redirects.
+- **WordPress Manager**:
+  - Auto-install WordPress, Secure Database.
+  - **Advanced Tools**: Core/Plugin/User management via CLI.
+  - Reset Admin Password, Security Hardening (Disable XML-RPC, Hide wp-config).
+  - SEO Optimization (RankMath/Yoast Nginx rules).
 - **Versatile SSL Support**:
   - **Let's Encrypt**: Automatic & Free (via Certbot).
   - **Cloudflare Origin SSL**: Support for Cloudflare Proxied sites (Origin CA).
