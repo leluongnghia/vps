@@ -161,14 +161,20 @@ main() {
     fi
     
     # If we are here, we expect core/menu.sh to exist relative to us
+    # If we are here, we expect core/menu.sh to exist relative to us
     if [ -f "$MY_DIR/core/menu.sh" ]; then
         cd "$MY_DIR"
         source core/menu.sh
         
+        # Create WWW Shortcut for easier access (On every run to ensure it exists)
+        if [ ! -L /www ] && [ -d /var/www ]; then
+            ln -sfn /var/www /www
+            # echo -e "${GREEN}Created shortcut /www -> /var/www${NC}"
+        fi
+        
         # Check if first run flag exists or just ask
         # Let's simple ask if arguments are passed or just always show menu, 
-        # but here we want to offer auto install before menu if desired.
-        # Simple approach: Ask before main menu loop
+        # but here we want to offer auto install before main menu loop
         
         echo -e "${BLUE}=================================================${NC}"
         echo -e "Would you like to auto-install the recommended stack?"
