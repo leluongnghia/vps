@@ -144,6 +144,10 @@ set_max_auth_tries() {
 
 setup_nginx_dos() {
     log_info "Đang cấu hình Nginx Rate Limiting..."
+    
+    # Cleanup possible broken config from previous versions
+    rm -f /etc/nginx/conf.d/cache_headers.conf
+    
     cat > /etc/nginx/conf.d/ddos_limit.conf <<EOF
 limit_req_zone \$binary_remote_addr zone=one:10m rate=10r/s;
 EOF
