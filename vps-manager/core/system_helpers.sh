@@ -7,16 +7,25 @@ LOCK_FILE="/var/lock/vps-manager.lock"
 # Acquire lock to prevent concurrent execution
 acquire_lock() {
     if [ -f "$LOCK_FILE" ]; then
-        local pid=$(cat "$LOCK_FILE" 2>/dev/null)
+        local pid
+        pid=$(cat "$LOCK_FILE" 2>/dev/null)
         if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-            log_error "Another instance is running (PID: $pid)"
-            return 1
+            # Verify it's actually a vps-manager process (not just any PID reuse)
+            local cmdline
+            cmdline=$(cat "/proc/$pid/cmdline" 2>/dev/null | tr '\0' ' ')
+            if echo "$cmdline" | grep -q "vps\|install.sh\|vps-manager"; then
+                log_error "Another instance is running (PID: $pid)"
+                return 1
+            else
+                # PID reused by different process - stale lock
+                rm -f "$LOCK_FILE"
+            fi
         else
-            # Stale lock file
+            # Process dead - stale lock
             rm -f "$LOCK_FILE"
         fi
     fi
-    
+
     echo $$ > "$LOCK_FILE"
     trap "rm -f $LOCK_FILE" EXIT INT TERM
     return 0

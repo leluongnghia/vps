@@ -89,6 +89,7 @@ do_update() {
             find "$INSTALL_DIR" -name "*.sh" -exec chmod +x {} \;
             echo -e "${GREEN}✅ Cập nhật thành công qua git pull!${NC}"
             sleep 1
+            rm -f /var/lock/vps-manager.lock
             cd /root
             exec /usr/local/bin/vps
         else
@@ -145,6 +146,7 @@ do_update() {
 
     echo -e "${GREEN}✅ Cập nhật thành công!${NC}"
     sleep 1
+    rm -f /var/lock/vps-manager.lock
     cd /root
     exec /usr/local/bin/vps
 }
