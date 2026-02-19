@@ -115,6 +115,8 @@ EOF
 
     # Check if default site exists
     if [ -f "/etc/nginx/sites-available/default" ]; then
+        # Ensure include is present inside server block
+        # We look for 'server_name _;' as a reliable anchor
         if ! grep -q "include snippets/phpmyadmin.conf;" "/etc/nginx/sites-available/default"; then
              sed -i '/server_name _;/a \    include snippets/phpmyadmin.conf;' /etc/nginx/sites-available/default
         fi
@@ -140,7 +142,11 @@ server {
     }
 }
 EOF
-        ln -s /etc/nginx/sites-available/default /etc/nginx/sites-enabled/ 2>/dev/null
+    fi
+    
+    # Ensure default site is enabled
+    if [ ! -L "/etc/nginx/sites-enabled/default" ]; then
+        ln -s /etc/nginx/sites-available/default /etc/nginx/sites-enabled/
     fi
 
     nginx -t && systemctl reload nginx
