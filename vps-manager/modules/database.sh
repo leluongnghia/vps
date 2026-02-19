@@ -14,9 +14,10 @@ database_menu() {
     echo -e "5. Import Database (.sql)"
     echo -e "6. Export Database (Dump)"
     echo -e "7. 🔍 Xem DB theo Website (WordPress)"
+    echo -e "8. Quản lý phpMyAdmin"
     echo -e "0. Quay lại Menu chính"
     echo -e "${BLUE}=================================================${NC}"
-    read -p "Nhập lựa chọn [0-7]: " choice
+    read -p "Nhập lựa chọn [0-8]: " choice
 
     case $choice in
         1) list_databases ;;
@@ -26,6 +27,10 @@ database_menu() {
         5) import_database ;;
         6) export_database ;;
         7) view_db_by_website ;;
+        8) 
+            source "$ROOT_DIR/modules/phpmyadmin.sh"
+            phpmyadmin_menu 
+            ;;
         0) return ;;
         *) echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause ;;
     esac

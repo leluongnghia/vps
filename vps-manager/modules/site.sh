@@ -94,7 +94,22 @@ EOF
     # 4. Database & WP setup
     if [[ "$type" == "wordpress" ]]; then
         setup_database "$domain"
-        install_wordpress "$domain"
+        
+        echo -e "${YELLOW}Bạn có muốn cài đặt WordPress Core mặc định không?${NC}"
+        echo -e "1. Có (Tải bản mới nhất từ WordPress.org)"
+        echo -e "2. Không (Tôi sẽ tự upload code hoặc restore backup)"
+        read -p "Chọn [1-2]: " wp_choice
+        
+        if [[ "$wp_choice" == "1" ]]; then
+            install_wordpress "$domain"
+        else
+            echo -e "${GREEN}Đã bỏ qua bước cài đặt WordPress.${NC}"
+            echo -e "Thư mục root: /var/www/$domain/public_html"
+            echo -e "Thông tin Database đã tạo (dùng để cấu hình wp-config.php):"
+            echo -e "DB Name: $WP_DB_NAME"
+            echo -e "DB User: $WP_DB_USER"
+            echo -e "DB Pass: $WP_DB_PASS"
+        fi
     fi
 
     # 5. SSL Auto Setup
@@ -166,10 +181,11 @@ EOF
 
 setup_database() {
     local domain=$1
-    # Remove dots for db name
-    local db_name=$(echo "$domain" | tr -d '.')
-    local db_user="${db_name}_user"
-    local db_pass=$(openssl rand -base64 12)
+    # Remove dots and hyphens for db name, keep it simple
+    local db_name=$(echo "$domain" | tr -d '.-' | cut -c1-16)
+    local db_user="${db_name}_u"
+    # Use alphanumeric password to avoid sed issues and complexity
+    local db_pass=$(openssl rand -base64 18 | tr -dc 'a-zA-Z0-9' | head -c 16)
 
     log_info "Creating database..."
     
@@ -200,9 +216,11 @@ install_wordpress() {
 
     # Setup wp-config.php
     cp wp-config-sample.php wp-config.php
-    sed -i "s/database_name_here/$WP_DB_NAME/" wp-config.php
-    sed -i "s/username_here/$WP_DB_USER/" wp-config.php
-    sed -i "s/password_here/$WP_DB_PASS/" wp-config.php
+    
+    # Use pipe | delimiter to avoid issues with special chars if any
+    sed -i "s|database_name_here|$WP_DB_NAME|" wp-config.php
+    sed -i "s|username_here|$WP_DB_USER|" wp-config.php
+    sed -i "s|password_here|$WP_DB_PASS|" wp-config.php
 
     # Fix permissions again
     chown -R www-data:www-data "/var/www/$domain/public_html"
@@ -296,9 +314,10 @@ clone_site() {
     create_nginx_config "$dest_domain"
     
     # 3. Create New DB
-    local new_db_name=$(echo "$dest_domain" | tr -d '.')
-    local new_db_user="${new_db_name}_user"
-    local new_db_pass=$(openssl rand -base64 12)
+    # Limit db name length and complexity
+    local new_db_name=$(echo "$dest_domain" | tr -d '.-' | cut -c1-16)
+    local new_db_user="${new_db_name}_u"
+    local new_db_pass=$(openssl rand -base64 18 | tr -dc 'a-zA-Z0-9' | head -c 16)
     
     log_info "Đang tạo database mới cho $dest_domain..."
     mysql -e "CREATE DATABASE ${new_db_name};"
@@ -331,9 +350,9 @@ clone_site() {
         
         # Create new wp-config
         cp "/var/www/$src_domain/public_html/wp-config.php" .
-        sed -i "s/DB_NAME', '.*'/DB_NAME', '$new_db_name'/" wp-config.php
-        sed -i "s/DB_USER', '.*'/DB_USER', '$new_db_user'/" wp-config.php
-        sed -i "s/DB_PASSWORD', '.*'/DB_PASSWORD', '$new_db_pass'/" wp-config.php
+        sed -i "s|DB_NAME', '.*'|DB_NAME', '$new_db_name'|" wp-config.php
+        sed -i "s|DB_USER', '.*'|DB_USER', '$new_db_user'|" wp-config.php
+        sed -i "s|DB_PASSWORD', '.*'|DB_PASSWORD', '$new_db_pass'|" wp-config.php
         
         wp search-replace "http://$src_domain" "http://$dest_domain" --allow-root
         wp search-replace "https://$src_domain" "https://$dest_domain" --allow-root
@@ -449,9 +468,9 @@ update_site_db_info() {
     read -p "Database User mới: " db_user
     read -p "Database Password mới: " db_pass
     
-    sed -i "s/DB_NAME', '.*'/DB_NAME', '$db_name'/" "$wp_conf"
-    sed -i "s/DB_USER', '.*'/DB_USER', '$db_user'/" "$wp_conf"
-    sed -i "s/DB_PASSWORD', '.*'/DB_PASSWORD', '$db_pass'/" "$wp_conf"
+    sed -i "s|DB_NAME', '.*'|DB_NAME', '$db_name'|" "$wp_conf"
+    sed -i "s|DB_USER', '.*'|DB_USER', '$db_user'|" "$wp_conf"
+    sed -i "s|DB_PASSWORD', '.*'|DB_PASSWORD', '$db_pass'|" "$wp_conf"
     
     log_info "Đã cập nhật thông tin Database."
     pause
