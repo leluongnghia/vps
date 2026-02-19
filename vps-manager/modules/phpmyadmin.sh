@@ -59,9 +59,19 @@ install_phpmyadmin() {
     # Extract
     tar xzf "phpMyAdmin-${PMA_VER}-all-languages.tar.gz"
     
-    # Move to destination (Rename extracted folder)
-    # The folder name is usually phpMyAdmin-5.2.1-all-languages
-    mv "phpMyAdmin-${PMA_VER}-all-languages" "$PMA_DIR"
+    # Move to destination (Generic Move using Wildcard)
+    # Move whatever folder starts with phpMyAdmin to the target dir
+    mv phpMyAdmin-* "$PMA_DIR"
+    
+    # Verify
+    if [ ! -d "$PMA_DIR" ]; then
+        log_error "Lỗi di chuyển thư mục phpMyAdmin."
+        ls -la
+        return
+    fi
+    
+    log_info "Debug: Kiểm tra thư mục cài đặt:"
+    ls -la "$PMA_DIR" | head -n 5
     
     # Clean temp
     rm -rf "$TEMP_DIR"
@@ -110,7 +120,7 @@ install_phpmyadmin() {
     # 1. Disable original default
     if [ -L "/etc/nginx/sites-enabled/default" ]; then rm /etc/nginx/sites-enabled/default; fi
     
-    # 2. Create new default-pma with EMBEDDED CONFIG
+    # 2. Create new default-pma with ALIAS CONFIG (Safer)
     cat > /etc/nginx/sites-available/000-phpmyadmin <<EOF
 server {
     listen 80 default_server;
@@ -119,38 +129,32 @@ server {
     root /var/www/html;
     index index.php index.html index.htm;
     
-    # Main location
     location / {
         try_files \$uri \$uri/ =404;
     }
     
-    # phpMyAdmin Location (Directly Embedded)
-    location ^~ /phpmyadmin {
-        root /var/www/html;
+    # phpMyAdmin Location using ALIAS
+    location /phpmyadmin {
+        alias /var/www/html/phpmyadmin;
         index index.php index.html index.htm;
+        try_files \$uri \$uri/ =404;
         
         # HTTP Basic Auth Protection
         auth_basic "Restricted Access";
         auth_basic_user_file /etc/nginx/.phpmyadmin_htpasswd;
         
-        # PHP Handling inside phpMyAdmin
+        # PHP Handling inside phpMyAdmin (Must use request_filename with alias)
         location ~ \.php$ {
             include snippets/fastcgi-php.conf;
             fastcgi_pass $PHP_SOCK;
-            fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
+            fastcgi_param SCRIPT_FILENAME \$request_filename;
             include fastcgi_params;
         }
         
         # Deny access to sensitive files
         location ~ ^/phpmyadmin/(.+\.(jpg|jpeg|gif|css|png|js|ico|html|xml|txt))$ {
-            root /var/www/html;
+            alias /var/www/html/phpmyadmin/\$1;
         }
-    }
-    
-    # PHP handling for root (if needed for other tools)
-    location ~ \.php$ {
-        include snippets/fastcgi-php.conf;
-        fastcgi_pass $PHP_SOCK;
     }
 }
 EOF
