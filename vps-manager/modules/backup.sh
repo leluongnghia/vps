@@ -472,9 +472,38 @@ restore_site_manual_upload() {
 
 setup_gdrive() {
     if ! command -v rclone &> /dev/null; then
-        apt-get install -y rclone
+        echo -e "${YELLOW}Đang cài đặt rclone...${NC}"
+        if command -v apt-get &> /dev/null; then
+             apt-get update -y && apt-get install -y rclone
+        elif command -v yum &> /dev/null; then
+             yum install -y rclone
+        else
+             curl https://rclone.org/install.sh | bash
+        fi
     fi
-    echo -e "${YELLOW}--- Cấu hình rclone ---${NC}"
+    
+    echo -e "${YELLOW}--- HƯỚNG DẪN CẤU HÌNH GOOGLE DRIVE (KHÔNG CẦN CÀI Rclone TRÊN MÁY MẸ) ---${NC}"
+    echo -e "${GREEN}MẸO: Sử dụng SSH Tunnel để xác thực trực tiếp trên trình duyệt máy tính.${NC}"
+    echo -e "1. Thoát SSH hiện tại (gõ exit)."
+    echo -e "2. Kết nối lại SSH với tham số chuyển tiếp port:"
+    echo -e "   ${CYAN}ssh -L 53682:127.0.0.1:53682 root@IP_VPS_CUA_BAN${NC}"
+    echo -e "3. Vào lại menu này và thực hiện các bước sau:"
+    echo -e "   - Chọn ${GREEN}n${NC} (New remote) > Tên: ${GREEN}gdrive${NC}."
+    echo -e "   - Storage: Chọn số của Google Drive."
+    echo -e "   - Client ID/Secret: ${CYAN}Enter${NC} (bỏ qua)."
+    echo -e "   - Scope: ${GREEN}1${NC} (Full access)."
+    echo -e "   - Service Account: ${CYAN}Enter${NC} (bỏ qua)."
+    echo -e "   - Edit advanced config: ${GREEN}n${NC} (No)."
+    echo -e "   - ${YELLOW}Use auto config?${NC}: Chọn ${GREEN}y${NC} (Yes) <- QUAN TRỌNG."
+    echo -e "     (Vì đã có SSH Tunnel, VPS sẽ nghĩ là nó có trình duyệt)"
+    echo -e "   - Rclone sẽ hiện link: ${CYAN}http://127.0.0.1:53682/auth...${NC}"
+    echo -e "   - Copy link đó dán vào trình duyệt Chrome/Safari trên máy tính của bạn."
+    echo -e "   - Đăng nhập Google > Allow."
+    echo -e "   - Quay lại Terminal VPS, nó sẽ báo Success."
+    echo -e "   - Team Drive: ${GREEN}n${NC} > Yes > Quit."
+    echo -e "${YELLOW}------------------------------------------------${NC}"
+    read -p "Nhấn Enter để bắt đầu cấu hình..."
+    
     rclone config
     pause
 }
@@ -501,31 +530,91 @@ backup_site_local() {
     pause
 }
 
-backup_to_gdrive() {
-    # Select site from list
-    source "$(dirname "${BASH_SOURCE[0]}")/site.sh"
-    select_site || return
-    domain=$SELECTED_DOMAIN
-    read -p "Nhập tên remote GDrive (Mac dinh: gdrive): " remote
-    remote=${remote:-gdrive}
+perform_gdrive_backup() {
+    local domain=$1
+    local remote=$2
+    local timestamp=$(date +%F_%H-%M-%S)
+    local backup_dir="/root/backups/$domain"
     
-    # Local backup first
-    timestamp=$(date +%F_%H-%M-%S)
-    backup_dir="/root/backups/$domain"
+    echo -e "\n${CYAN}>>> Đang xử lý: $domain${NC}"
     mkdir -p "$backup_dir"
     
-    zip_file="$backup_dir/code_$timestamp.zip"
-    db_file="$backup_dir/db_$timestamp.sql.gz"
+    local zip_file="$backup_dir/code_$timestamp.zip"
+    local db_file="$backup_dir/db_$timestamp.sql.gz"
     
-    log_info "Creating Local Backup..."
-    zip -r "$zip_file" "/var/www/$domain/public_html" -x "*.log"
-    mysqldump $(echo "$domain" | tr -d '.') | gzip > "$db_file"
+    # 1. Backup Code
+    if [ -d "/var/www/$domain/public_html" ]; then
+        log_info "Đang nén mã nguồn (Code)..."
+        zip -r "$zip_file" "/var/www/$domain/public_html" -x "*.log" -q
+    else
+        log_warn "Không tìm thấy thư mục public_html cho $domain"
+    fi
     
-    log_info "Uploading to Google Drive ($remote:vps_backups/$domain)..."
-    rclone copy "$zip_file" "$remote:vps_backups/$domain/"
-    rclone copy "$db_file" "$remote:vps_backups/$domain/"
+    # 2. Backup DB
+    local db_name=$(echo "$domain" | tr -d '.-' | cut -c1-16)
+    if mysql -e "USE $db_name" 2>/dev/null; then
+        log_info "Đang dump Database..."
+        mysqldump "$db_name" | gzip > "$db_file"
+    else
+        log_warn "Database $db_name không tồn tại."
+    fi
     
-    log_info "Upload Done."
+    # 3. Upload
+    if [ -f "$zip_file" ]; then
+        log_info "Đang upload Code lên Google Drive ($remote:vps_backups/$domain)..."
+        rclone copy "$zip_file" "$remote:vps_backups/$domain/"
+    fi
+    
+    if [ -f "$db_file" ]; then
+        log_info "Đang upload DB lên Google Drive ($remote:vps_backups/$domain)..."
+        rclone copy "$db_file" "$remote:vps_backups/$domain/"
+    fi
+    
+    log_info "✅ Backup $domain hoàn tất."
+}
+
+backup_to_gdrive() {
+    echo -e "\n${CYAN}Danh sách Website trên VPS:${NC}"
+    sites=()
+    i=1
+    for d in /var/www/*; do
+        if [[ -d "$d" && "$(basename "$d")" != "html" ]]; then
+            domain=$(basename "$d")
+            sites+=("$domain")
+            echo -e "$i. $domain"
+            ((i++))
+        fi
+    done
+    
+    if [ ${#sites[@]} -eq 0 ]; then
+        echo -e "${RED}Không tìm thấy website nào!${NC}"
+        pause
+        return
+    fi
+
+    echo -e "${GREEN}A. Sao lưu TẤT CẢ các website trên${NC}"
+    
+    read -p "Chọn website [1-${#sites[@]}] hoặc nhập 'A' để backup tất cả: " choice
+
+    read -p "Nhập tên remote GDrive (Mặc định: gdrive): " remote
+    remote=${remote:-gdrive}
+
+    if [[ "$choice" == "A" || "$choice" == "a" ]]; then
+        # Backup ALL
+        for domain in "${sites[@]}"; do
+            perform_gdrive_backup "$domain" "$remote"
+        done
+    elif [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#sites[@]}" ]; then
+        # Backup Single
+        domain="${sites[$((choice-1))]}"
+        perform_gdrive_backup "$domain" "$remote"
+    else
+         echo -e "${RED}Lựa chọn không hợp lệ.${NC}"
+         pause
+         return
+    fi
+    
+    echo -e "\n${GREEN}🎉 Hoàn tất quá trình Backup lên Google Drive.${NC}"
     pause
 }
 
