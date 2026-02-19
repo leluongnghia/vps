@@ -2,28 +2,43 @@
 
 # modules/wordpress_performance.sh - WordPress Performance Optimization
 
-# Helper: Get installed PHP version with fallback
+# Helper: Get ACTIVE PHP-FPM version (not CLI version which may differ)
 get_installed_php_version() {
-    local php_ver=$(php -r "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;" 2>/dev/null)
-    
-    # Check if config exists for detected version
-    if [ -d "/etc/php/${php_ver}" ]; then
-        echo "$php_ver"
-        return 0
+    # Method 1: Find running php-fpm service (most reliable)
+    local running
+    running=$(systemctl list-units --type=service --state=running 2>/dev/null \
+        | grep 'php.*-fpm' | grep -oP '\d+\.\d+' | sort -rV | head -1)
+    if [ -n "$running" ] && [ -d "/etc/php/$running" ]; then
+        echo "$running"; return 0
     fi
-    
-    # Fallback: Find installed PHP versions
+
+    # Method 2: Find version with FPM pool config present
     for ver in 8.4 8.3 8.2 8.1 8.0 7.4; do
-        if [ -d "/etc/php/${ver}" ]; then
-            echo "$ver"
-            return 0
+        if [ -f "/etc/php/${ver}/fpm/pool.d/www.conf" ]; then
+            echo "$ver"; return 0
         fi
     done
-    
-    # Last resort: return detected version anyway
-    echo "$php_ver"
-    return 1
+
+    # Method 3: php-fpm binary in PATH
+    local fpm_bin
+    fpm_bin=$(command -v php-fpm8.3 php-fpm8.2 php-fpm8.1 php-fpm 2>/dev/null | head -1)
+    if [ -n "$fpm_bin" ]; then
+        local v
+        v=$("$fpm_bin" -v 2>/dev/null | grep -oP '\d+\.\d+' | head -1)
+        [ -n "$v" ] && echo "$v" && return 0
+    fi
+
+    # Method 4: PHP CLI (last resort - may be different from FPM)
+    local cli_ver
+    cli_ver=$(php -r "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;" 2>/dev/null)
+    if [ -n "$cli_ver" ] && [ -d "/etc/php/$cli_ver" ]; then
+        echo "$cli_ver"; return 0
+    fi
+
+    echo ""; return 1
 }
+
+
 
 wp_performance_menu() {
     while true; do
@@ -108,13 +123,21 @@ auto_optimize_server() {
 tune_php_fpm() {
     local auto_mode=$1
     log_info "Tuning PHP-FPM for WordPress..."
-    
-    # Detect PHP version
-    local php_ver=$(get_installed_php_version)
+
+    # Detect active PHP-FPM version
+    local php_ver
+    php_ver=$(get_installed_php_version)
+    if [ -z "$php_ver" ]; then
+        log_error "Không tìm thấy PHP-FPM cài đặt!"
+        echo -e "${YELLOW}PHP đị: $(php -v 2>/dev/null | head -1)${NC}"
+        echo -e "${YELLOW}Thư mục /etc/php/: $(ls /etc/php/ 2>/dev/null || echo 'trống')${NC}"
+        return 1
+    fi
+    log_info "PHP-FPM version: $php_ver"
+
     local fpm_conf="/etc/php/${php_ver}/fpm/pool.d/www.conf"
-    
     if [ ! -f "$fpm_conf" ]; then
-        log_error "PHP-FPM config not found for PHP $php_ver"
+        log_error "PHP-FPM config not found: $fpm_conf"
         return 1
     fi
     
@@ -155,9 +178,20 @@ tune_php_fpm() {
 optimize_opcache() {
     local auto_mode=$1
     log_info "Optimizing OPcache for maximum performance..."
-    
-    local php_ver=$(get_installed_php_version)
-    local opcache_ini="/etc/php/${php_ver}/fpm/conf.d/10-opcache.ini"
+
+    local php_ver
+    php_ver=$(get_installed_php_version)
+    if [ -z "$php_ver" ]; then
+        log_error "Không tìm thấy PHP-FPM để cấu hình OPcache!"
+        return 1
+    fi
+    log_info "OPcache target: PHP $php_ver"
+
+    local conf_dir="/etc/php/${php_ver}/fpm/conf.d"
+    if [ ! -d "$conf_dir" ]; then
+        mkdir -p "$conf_dir"
+    fi
+    local opcache_ini="$conf_dir/10-opcache.ini"
     
     # Aggressive OPcache settings for WordPress
     cat > "$opcache_ini" <<EOF
