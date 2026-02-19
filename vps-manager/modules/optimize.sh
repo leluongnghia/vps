@@ -141,17 +141,54 @@ optimize_system() {
 
 install_brotli() {
     log_info "Đang cài đặt Nginx Brotli module..."
-    apt-get install -y libnginx-mod-http-brotli
     
-    # Configure Brotli
-    cat > /etc/nginx/conf.d/brotli.conf <<EOF
+    if nginx -V 2>&1 | grep -qi "brotli"; then
+        echo -e "${GREEN}Module Brotli đã có sẵn trong Nginx.${NC}"
+    else
+        echo -e "${YELLOW}Module Brotli chưa có. Đang thử cài đặt từ Repository...${NC}"
+        
+        # 1. Try standard apt install first
+        apt-get update -qq
+        if apt-get install -y libnginx-mod-http-brotli 2>/dev/null; then
+            log_info "Đã cài libnginx-mod-http-brotli từ repo mặc định."
+        else
+            echo -e "${YELLOW}Repo mặc định không có. Bạn có muốn thêm PPA Ondrej/Nginx (Stable) không?${NC}"
+            echo "Việc này sẽ cập nhật Nginx lên phiên bản mới nhất hỗ trợ Brotli."
+            read -p "Đồng ý? [y/N]: " agreemma
+            if [[ "$agreemma" == "y" || "$agreemma" == "Y" ]]; then
+                apt-get install -y software-properties-common
+                add-apt-repository -y ppa:ondrej/nginx
+                apt-get update
+                apt-get install -y nginx libnginx-mod-http-brotli
+                log_info "Đã thêm PPA và cài đặt Nginx + Brotli."
+            else
+                log_warn "Đã hủy cài đặt Brotli."
+                return
+            fi
+        fi
+    fi
+    
+    # Configure Brotli with Safety Check
+    echo -e "${CYAN}Đang cấu hình và kiểm tra Brotli...${NC}"
+    local conf_file="/etc/nginx/conf.d/brotli.conf"
+    
+    # Create valid config content
+    cat > "$conf_file" <<EOF
 brotli on;
 brotli_comp_level 6;
 brotli_static on;
 brotli_types text/plain text/css application/javascript application/x-javascript text/xml application/xml application/xml+rss text/javascript image/x-icon image/vnd.microsoft.icon image/bmp image/svg+xml;
 EOF
 
-    nginx -t && systemctl reload nginx
-    log_info "Brotli compression đã được kích hoạt."
+    # STRICT TEST
+    if nginx -t; then
+        systemctl restart nginx
+        log_info "✅ Brotli compression đã được kích hoạt thành công!"
+    else
+        log_error "Nginx không hỗ trợ Brotli (Test failed). Đang gỡ bỏ cấu hình..."
+        rm -f "$conf_file"
+        systemctl restart nginx
+        echo -e "${RED}Đã khôi phục Nginx về trạng thái cũ. Không thể bật Brotli trên hệ thống này.${NC}"
+    fi
     pause
 }
