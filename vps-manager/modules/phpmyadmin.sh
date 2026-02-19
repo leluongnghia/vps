@@ -183,6 +183,12 @@ install_phpmyadmin() {
     PMA_AUTH_PASS=$(openssl rand -base64 12 | tr -dc 'a-zA-Z0-9' | head -c 12)
     htpasswd -cb /etc/nginx/.phpmyadmin_htpasswd "$PMA_AUTH_USER" "$PMA_AUTH_PASS"
 
+    # Lưu plaintext để xem lại sau
+    mkdir -p /root/.vps-manager
+    echo "PMA_USER=${PMA_AUTH_USER}" > /root/.vps-manager/phpmyadmin_auth.conf
+    echo "PMA_PASS=${PMA_AUTH_PASS}" >> /root/.vps-manager/phpmyadmin_auth.conf
+    chmod 600 /root/.vps-manager/phpmyadmin_auth.conf
+
     # ── Detect PHP Socket ──────────────────────────────────────
     local PHP_SOCK
     PHP_SOCK=$(_detect_php_sock)
@@ -357,9 +363,17 @@ reset_phpmyadmin_auth() {
     fi
 
     htpasswd -cb /etc/nginx/.phpmyadmin_htpasswd "pma_admin" "$new_pass"
+
+    # Lưu plaintext để xem lại sau
+    mkdir -p /root/.vps-manager
+    echo "PMA_USER=pma_admin" > /root/.vps-manager/phpmyadmin_auth.conf
+    echo "PMA_PASS=${new_pass}" >> /root/.vps-manager/phpmyadmin_auth.conf
+    chmod 600 /root/.vps-manager/phpmyadmin_auth.conf
+
     echo -e "${GREEN}✅ Đã đặt lại mật khẩu!${NC}"
     echo -e "   User: pma_admin"
     echo -e "   Pass: ${new_pass}"
+    echo -e "   ${CYAN}(Đã lưu vào /root/.vps-manager/phpmyadmin_auth.conf)${NC}"
     pause
 }
 
@@ -380,9 +394,13 @@ view_phpmyadmin_info() {
 
     echo ""
     echo -e "${CYAN}[Lớp 1] HTTP Basic Auth:${NC}"
-    if [ -f /etc/nginx/.phpmyadmin_htpasswd ]; then
+    if [ -f /root/.vps-manager/phpmyadmin_auth.conf ]; then
+        source /root/.vps-manager/phpmyadmin_auth.conf
+        echo -e "   User: ${PMA_USER:-pma_admin}"
+        echo -e "   Pass: ${GREEN}${PMA_PASS}${NC}"
+    elif [ -f /etc/nginx/.phpmyadmin_htpasswd ]; then
         echo -e "   User: pma_admin"
-        echo -e "   Pass: ${YELLOW}(đã mã hóa - dùng option 4 để reset)${NC}"
+        echo -e "   Pass: ${YELLOW}(chưa lưu plaintext — dùng option 4 để reset và lưu lại)${NC}"
     else
         echo -e "   ${RED}Chưa có file htpasswd!${NC}"
     fi
