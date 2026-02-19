@@ -113,35 +113,28 @@ EOF
          sed -i "s|fastcgi_pass.*;|fastcgi_pass unix:/run/php/php8.3-fpm.sock;|" /etc/nginx/snippets/phpmyadmin.conf
     fi
 
-    # Check if default site exists
+    # Create a dedicated vhost for IP access to ensure it works
+    # This avoids messing with 'default' site which might be broken or overridden
+    cat > /etc/nginx/sites-available/000-phpmyadmin <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name $VPS_IP; 
+    root /var/www/html;
+    index index.php index.html index.htm;
+    
+    # Priority for phpmyadmin
+    include snippets/phpmyadmin.conf;
+}
+EOF
+    # Enable it
+    ln -sf /etc/nginx/sites-available/000-phpmyadmin /etc/nginx/sites-enabled/000-phpmyadmin
+    
+    # Also attempt to inject into default if it exists, as backup for other hostnames
     if [ -f "/etc/nginx/sites-available/default" ]; then
-        # Ensure include is present inside server block
-        # We look for 'server_name _;' as a reliable anchor
         if ! grep -q "include snippets/phpmyadmin.conf;" "/etc/nginx/sites-available/default"; then
              sed -i '/server_name _;/a \    include snippets/phpmyadmin.conf;' /etc/nginx/sites-available/default
         fi
-    else
-        # If no default site, create one just for phpmyadmin/IP access
-        cat > /etc/nginx/sites-available/default <<EOF
-server {
-    listen 80 default_server;
-    listen [::]:80 default_server;
-    server_name _;
-    root /var/www/html;
-    index index.php index.html index.htm;
-
-    location / {
-        try_files \$uri \$uri/ =404;
-    }
-    
-    include snippets/phpmyadmin.conf;
-
-    location ~ \.php$ {
-        include snippets/fastcgi-php.conf;
-        fastcgi_pass unix:/run/php/php$PHP_VER-fpm.sock;
-    }
-}
-EOF
     fi
     
     # Ensure default site is enabled
