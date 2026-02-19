@@ -585,6 +585,12 @@ fix_permissions() {
     fi
     
     log_info "Đang thiết lập quyền chuẩn cho $target..."
+    
+    # REMOVE CONFLICTING CONFIGS (Critical for open_basedir errors)
+    log_info "Đang xóa .user.ini và .htaccess để tránh conflict..."
+    find "$target" -name ".user.ini" -delete 2>/dev/null
+    find "$target" -name ".htaccess" -delete 2>/dev/null
+    
     chown -R www-data:www-data "$target"
     find "$target" -type d -exec chmod 755 {} \;
     find "$target" -type f -exec chmod 644 {} \;

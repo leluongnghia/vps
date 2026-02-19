@@ -215,14 +215,21 @@ restore_site_manual_upload() {
         fi
     fi
 
+    # REMOVE CONFLICTING CONFIGS (Critical for open_basedir errors)
+    log_info "Đang dọn dẹp cấu hình cũ gây xung đột..."
+    find "/var/www/$target_domain/public_html" -name ".user.ini" -delete
+    find "/var/www/$target_domain/public_html" -name ".htaccess" -delete
+    
+    # Clean temporary files if any remain
+    if [ -n "$tmp_extract" ] && [ -d "$tmp_extract" ]; then
+        rm -rf "$tmp_extract"
+    fi
+
     # FINAL PERMISSIONS FIX (AGAIN to cover new files)
     log_info "Đang thiết lập quyền (Permissions) chuẩn cho WordPress..."
     chown -R www-data:www-data "/var/www/$target_domain/public_html"
     find "/var/www/$target_domain/public_html" -type d -exec chmod 755 {} \;
     find "/var/www/$target_domain/public_html" -type f -exec chmod 644 {} \;
-    
-    # Remove problematic configs
-    rm -f "/var/www/$target_domain/public_html/.htaccess" "/var/www/$target_domain/public_html/.user.ini"
     
     log_info "Restore hoàn tất!"
     pause
