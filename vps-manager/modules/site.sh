@@ -296,8 +296,9 @@ delete_site() {
     systemctl reload nginx
 
     # Drop DB (Auto detect simple names)
-    local db_name=$(echo "$domain" | tr -d '.')
-    local db_user="${db_name}_user"
+    # MUST MATCH creation logic: tr -d '.-' | cut -c1-16
+    local db_name=$(echo "$domain" | tr -d '.-' | cut -c1-16)
+    local db_user="${db_name}_u"
     
     if command -v mysql &> /dev/null; then
         mysql -e "DROP DATABASE IF EXISTS ${db_name};" 2>/dev/null
