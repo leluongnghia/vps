@@ -80,45 +80,88 @@ auto_backup_setup() {
     # Read keep_days from config if exists
     [ -f /root/.vps-manager-backup.conf ] && source /root/.vps-manager-backup.conf
 
+    # Check if gdrive is configured
+    local use_gdrive=false
+    if command -v rclone &> /dev/null && rclone listremotes | grep -q "^gdrive:"; then
+        use_gdrive=true
+    fi
+
     # Create backup script
-    cat > "$script_path" << 'BACKUPSCRIPT'
+    cat > "$script_path" << BACKUPSCRIPT
 #!/bin/bash
 BACKUP_ROOT="/root/backups"
 KEEP_DAYS=7
 [ -f /root/.vps-manager-backup.conf ] && source /root/.vps-manager-backup.conf
 
-timestamp=$(date +%F_%H-%M-%S)
+# Ensure commands exist
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+timestamp=\$(date +%F_%H-%M-%S)
 LOG="/var/log/vps-auto-backup.log"
 
-echo "[$timestamp] === Auto Backup Start ===" >> "$LOG"
+echo "[\$timestamp] === Auto Backup Start ===" >> "\$LOG"
+
+# Installing zip if missing (Auto-repair)
+if ! command -v zip &> /dev/null; then
+    if command -v apt-get &> /dev/null; then apt-get update && apt-get install -y zip; fi
+    if command -v yum &> /dev/null; then yum install -y zip; fi
+fi
 
 for site_dir in /var/www/*; do
-    [ ! -d "$site_dir" ] && continue
-    domain=$(basename "$site_dir")
-    [[ "$domain" == "html" ]] && continue
+    [ ! -d "\$site_dir" ] && continue
+    domain=\$(basename "\$site_dir")
+    [[ "\$domain" == "html" ]] && continue
 
-    backup_dir="$BACKUP_ROOT/$domain"
-    mkdir -p "$backup_dir"
+    backup_dir="\$BACKUP_ROOT/\$domain"
+    mkdir -p "\$backup_dir"
 
     # Backup code
-    if [ -d "$site_dir/public_html" ]; then
-        zip -r "$backup_dir/code_${timestamp}.zip" "$site_dir/public_html" -x "*.log" -x "*.tmp" -q
-        echo "[$timestamp] Code backup: $domain OK" >> "$LOG"
+    if [ -d "\$site_dir/public_html" ]; then
+        zip -r "\$backup_dir/code_\${timestamp}.zip" "\$site_dir/public_html" -x "*.log" -x "*.tmp" -q
+        echo "[\$timestamp] Code backup: \$domain OK" >> "\$LOG"
     fi
 
     # Backup DB
-    db_name=$(echo "$domain" | tr -d '.-' | cut -c1-16)
-    if mysql -e "USE $db_name" 2>/dev/null; then
-        mysqldump "$db_name" | gzip > "$backup_dir/db_${timestamp}.sql.gz"
-        echo "[$timestamp] DB backup: $domain OK" >> "$LOG"
+    db_name=\$(echo "\$domain" | tr -d '.-' | cut -c1-16)
+    if mysql -e "USE \$db_name" 2>/dev/null; then
+        mysqldump "\$db_name" | gzip > "\$backup_dir/db_\${timestamp}.sql.gz"
+        echo "[\$timestamp] DB backup: \$domain OK" >> "\$LOG"
     fi
 
-    # Cleanup old backups (keep last N days)
-    find "$backup_dir" -name "code_*.zip" -mtime +$KEEP_DAYS -delete
-    find "$backup_dir" -name "db_*.sql.gz" -mtime +$KEEP_DAYS -delete
+    # Cleanup old backups ON VPS (keep last N days) 
+    # NOTE: Even if we move to cloud, we might want to keep recent ones locally for fast restore?
+    # User asked to REMOVE from VPS after upload. 
+    # usage: find ... -delete
 done
 
-echo "[$timestamp] === Auto Backup Done ===" >> "$LOG"
+# Sync to Google Drive if enabled
+if [ "$use_gdrive" = "true" ]; then
+    echo "[\$timestamp] Moving backups to Google Drive (gdrive:vps_backups)..." >> "\$LOG"
+    
+    # Use 'move' instead of 'sync' or 'copy'. 
+    # 'move' will verify upload and THEN delete local file.
+    # This satisfies "loại bỏ file khỏi VPS khi upload xong".
+    # Result: VPS is empty, Cloud has files.
+    
+    rclone move "\$BACKUP_ROOT" "gdrive:vps_backups" --delete-empty-src-dirs >> "\$LOG" 2>&1
+    
+    # Also clean up old files ON CLOUD (retention policy applied to cloud)
+    # listing files older than KEEP_DAYS on cloud and deleting them
+    rclone delete "gdrive:vps_backups" --min-age \${KEEP_DAYS}d >> "\$LOG" 2>&1
+    # rclone rmdirs "gdrive:vps_backups" --leave-root >> "\$LOG" 2>&1
+    
+    echo "[\$timestamp] Google Drive Move & Cleanup OK" >> "\$LOG"
+else
+    # Local only cleanup
+    for site_dir in /var/www/*; do
+        domain=\$(basename "\$site_dir")
+        [[ "\$domain" == "html" ]] && continue
+        find "\$BACKUP_ROOT/\$domain" -name "code_*.zip" -mtime +\$KEEP_DAYS -delete
+        find "\$BACKUP_ROOT/\$domain" -name "db_*.sql.gz" -mtime +\$KEEP_DAYS -delete
+    done
+fi
+
+echo "[\$timestamp] === Auto Backup Done ===" >> "\$LOG"
 BACKUPSCRIPT
 
     chmod +x "$script_path"
@@ -137,6 +180,12 @@ BACKUPSCRIPT
     (crontab -l 2>/dev/null; echo "$CRON_TIME $script_path # vps-manager-backup") | crontab -
 
     log_info "Đã bật Auto Backup: $SCHEDULE_DESC"
+    if [ "$use_gdrive" = "true" ]; then
+         echo -e "  Mode: ${GREEN}Upload & Delete Local (Tiết kiệm dung lượng VPS)${NC}"
+         echo -e "  Dest: ${GREEN}Google Drive (gdrive:vps_backups)${NC}"
+    else
+         echo -e "  Link: ${YELLOW}Local Only (Chưa cấu hình gdrive)${NC}"
+    fi
     echo -e "  Script: ${CYAN}$script_path${NC}"
     echo -e "  Log: ${CYAN}/var/log/vps-auto-backup.log${NC}"
     pause
@@ -551,7 +600,7 @@ perform_gdrive_backup() {
     # 1. Backup Code
     if [ -d "/var/www/$domain/public_html" ]; then
         log_info "Đang nén mã nguồn (Code)..."
-        zip -r "$zip_file" "/var/www/$domain/public_html" -x "*.log" -q
+        zip -r "$zip_file" "/var/www/$domain/public_html" -x "*.log" -x "*.tmp" -q
     else
         log_warn "Không tìm thấy thư mục public_html cho $domain"
     fi
@@ -565,18 +614,22 @@ perform_gdrive_backup() {
         log_warn "Database $db_name không tồn tại."
     fi
     
-    # 3. Upload
+    # 3. Upload & Remove Local
+    # Use rclone move to upload and delete source file if successful
     if [ -f "$zip_file" ]; then
-        log_info "Đang upload Code lên Google Drive ($remote:vps_backups/$domain)..."
-        rclone copy "$zip_file" "$remote:vps_backups/$domain/"
+        log_info "Đang upload Code lên Google Drive (và xóa cục bộ)..."
+        rclone move "$zip_file" "$remote:vps_backups/$domain/"
     fi
     
     if [ -f "$db_file" ]; then
-        log_info "Đang upload DB lên Google Drive ($remote:vps_backups/$domain)..."
-        rclone copy "$db_file" "$remote:vps_backups/$domain/"
+        log_info "Đang upload DB lên Google Drive (và xóa cục bộ)..."
+        rclone move "$db_file" "$remote:vps_backups/$domain/"
     fi
     
-    log_info "✅ Backup $domain hoàn tất."
+    # Cleanup empty dir if exists
+    rmdir "$backup_dir" 2>/dev/null
+    
+    log_info "✅ Backup $domain hoàn tất (Đã giải phóng dung lượng VPS)."
 }
 
 backup_to_gdrive() {
