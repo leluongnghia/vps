@@ -196,6 +196,12 @@ restore_site_manual_upload() {
         log_info "URL trong database ($source_domain) khớp với hiện tại hoặc không tìm thấy. Bỏ qua thay thế."
     fi
     
+    # FINAL PERMISSIONS FIX
+    log_info "Đang thiết lập quyền (Permissions) chuẩn cho WordPress..."
+    chown -R www-data:www-data "/var/www/$target_domain/public_html"
+    find "/var/www/$target_domain/public_html" -type d -exec chmod 755 {} \;
+    find "/var/www/$target_domain/public_html" -type f -exec chmod 644 {} \;
+    
     log_info "Restore hoàn tất!"
     pause
 }
