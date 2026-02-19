@@ -536,6 +536,12 @@ perform_gdrive_backup() {
     local timestamp=$(date +%F_%H-%M-%S)
     local backup_dir="/root/backups/$domain"
     
+    # Ensure zip is installed
+    if ! command -v zip &> /dev/null; then
+        echo "Installing zip..."
+        if command -v apt-get &> /dev/null; then apt-get install -y zip; elif command -v yum &> /dev/null; then yum install -y zip; fi
+    fi
+    
     echo -e "\n${CYAN}>>> Đang xử lý: $domain${NC}"
     mkdir -p "$backup_dir"
     
