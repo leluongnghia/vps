@@ -22,7 +22,7 @@ manage_sites_menu() {
     echo -e "13. Kiểm tra/Sửa lỗi WordPress Core"
     echo -e "0. Quay lại Menu chính"
     echo -e "${BLUE}=================================================${NC}"
-    read -p "Nhập lựa chọn [0-12]: " choice
+    read -p "Nhập lựa chọn [0-13]: " choice
 
     case $choice in
         1) list_sites ;;
@@ -136,26 +136,11 @@ create_nginx_config() {
     local domain=$1
     local config_file="/etc/nginx/sites-available/$domain"
     
-    # Dynamic PHP Version Socket Detection
-    local php_sock=""
-    if [ -S "/run/php/php8.1-fpm.sock" ]; then
-        php_sock="unix:/run/php/php8.1-fpm.sock"
-    elif [ -S "/run/php/php8.2-fpm.sock" ]; then
-        php_sock="unix:/run/php/php8.2-fpm.sock"
-    elif [ -S "/run/php/php8.3-fpm.sock" ]; then
-        php_sock="unix:/run/php/php8.3-fpm.sock"
-    elif [ -S "/run/php/php-fpm.sock" ]; then
-        php_sock="unix:/run/php/php-fpm.sock"
-    else
-        # Fallback detection
-        local php_ver=$(php -r "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;")
-        if [ -S "/run/php/php$php_ver-fpm.sock" ]; then
-             php_sock="unix:/run/php/php$php_ver-fpm.sock"
-        fi
-    fi
-
-    if [ -z "$php_sock" ]; then
-        log_error "Không tìm thấy PHP-FPM socket. Vui lòng cài đặt PHP-FPM."
+    # Dynamic PHP socket detection using shared helper
+    local php_sock
+    php_sock=$(detect_php_socket 2>/dev/null)
+    if [ $? -ne 0 ] || [ -z "$php_sock" ]; then
+        log_error "Không tìm thấy PHP-FPM socket. Hãy cài PHP-FPM trước."
         return 1
     fi
     

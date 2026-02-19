@@ -21,7 +21,7 @@ main_menu() {
         echo -e "5. Sao lưu & Khôi phục (Backup/Restore)"
         echo -e "6. Công cụ Hệ thống (Update, Logs)"
         echo -e "7. Quản lý Phiên bản PHP"
-        echo -e "8. Quản lý Cronmodel (Lịch biểu)"
+        echo -e "8. Quản lý Cronjob (Lịch biểu)"
         echo -e "9. Quản lý Services (Khởi động lại/Stop)"
         echo -e "10. Quản lý Database (Cơ sở dữ liệu)"
         echo -e "11. Quản lý Cache (Redis/FastCGI)"
@@ -34,9 +34,11 @@ main_menu() {
         echo -e "18. Chẩn đoán Hệ thống (Health Check)"
         echo -e "19. 🚀 Tối ưu WordPress Performance (Chuyên sâu)"
         echo -e "20. 🗄️  Quản lý phpMyAdmin"
+        echo -e "21. 🔒 Quản lý SSL (Let's Encrypt / Renew)"
+        echo -e "22. ⏰ Backup Tự động (Auto Backup Cron)"
         echo -e "0. Thoát"
         echo -e "${BLUE}=================================================${NC}"
-        read -p "Nhập lựa chọn của bạn [0-20]: " choice
+        read -p "Nhập lựa chọn của bạn [0-22]: " choice
 
         case $choice in
             1)
@@ -118,6 +120,14 @@ main_menu() {
             20)
                 source "$ROOT_DIR/modules/phpmyadmin.sh"
                 phpmyadmin_menu
+                ;;
+            21)
+                source "$ROOT_DIR/modules/ssl.sh"
+                ssl_menu
+                ;;
+            22)
+                source "$ROOT_DIR/modules/backup.sh"
+                auto_backup_menu
                 ;;
             0)
                 echo -e "${GREEN}Exiting... Goodbye!${NC}"

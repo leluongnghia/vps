@@ -88,6 +88,11 @@ EOF
 }
 
 change_ssh_port() {
+    # Get current SSH port
+    current_port=$(grep -E "^Port " /etc/ssh/sshd_config | awk '{print $2}')
+    current_port=${current_port:-22}
+    echo -e "${YELLOW}Port SSH hiện tại: ${current_port}${NC}"
+    
     read -p "Nhập cổng SSH mới (1024-65535): " new_port
     if [[ ! "$new_port" =~ ^[0-9]+$ ]] || [ "$new_port" -lt 1024 ] || [ "$new_port" -gt 65535 ]; then
         echo -e "${RED}Cổng không hợp lệ!${NC}"
@@ -101,13 +106,19 @@ change_ssh_port() {
         echo "Port $new_port" >> /etc/ssh/sshd_config
     fi
     
-    # Update UFW
+    # UFW: allow new port FIRST, then remove old
     ufw allow $new_port/tcp
+    if [ "$current_port" != "$new_port" ] && [ "$current_port" != "22" ]; then
+        ufw delete allow $current_port/tcp 2>/dev/null
+    elif [ "$current_port" == "22" ]; then
+        ufw delete allow ssh 2>/dev/null
+        ufw delete allow 22/tcp 2>/dev/null
+    fi
     
-    systemctl restart ssh
-    systemctl restart sshd
+    systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null
     
-    log_info "Đã đổi Port SSH sang $new_port. Vui lòng reconnect với port mới."
+    log_info "Đã đổi Port SSH sang $new_port. Kết nối lại với port mới!"
+    echo -e "${YELLOW}Lưu ý: ssh -p $new_port root@<IP_VPS>${NC}"
     pause
 }
 

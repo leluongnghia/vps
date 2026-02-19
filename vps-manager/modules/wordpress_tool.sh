@@ -147,7 +147,11 @@ wp_user_menu() {
             3)
                 read -p "Username: " u
                 read -p "Email: " e
-                $WP_CMD user create "$u" "$e" --role=administrator --prompt
+                read -sp "Password (Enter để tự sinh): " wp
+                echo ""
+                if [ -z "$wp" ]; then wp=$(openssl rand -base64 12 | tr -dc 'a-zA-Z0-9' | head -c 14); fi
+                $WP_CMD user create "$u" "$e" --role=administrator --user_pass="$wp"
+                echo -e "${GREEN}Admin tạo thành công!— User: $u | Pass: $wp${NC}"
                 pause
                 ;;
             0) return ;;

@@ -2,6 +2,128 @@
 
 # modules/ssl.sh - SSL Management (Let's Encrypt)
 
+ssl_menu() {
+    while true; do
+        clear
+        echo -e "${BLUE}=================================================${NC}"
+        echo -e "${GREEN}          🔒 Quản lý SSL${NC}"
+        echo -e "${BLUE}=================================================${NC}"
+        echo -e "1. Xem trạng thái SSL tất cả domain"
+        echo -e "2. Cài đặt SSL cho domain"
+        echo -e "3. Gia hạn SSL (Renew) - Thủ công"
+        echo -e "4. Gia hạn TẤT CẢ SSL"
+        echo -e "5. Thu hồi SSL (Revoke)"
+        echo -e "6. Bật Auto-Renew (Cron hàng ngày)"
+        echo -e "0. Quay lại"
+        echo -e "${BLUE}=================================================${NC}"
+        read -p "Chọn: " c
+
+        case $c in
+            1) ssl_status ;;
+            2) install_ssl ;;
+            3) ssl_renew_one ;;
+            4) ssl_renew_all ;;
+            5) ssl_revoke ;;
+            6) ssl_auto_renew_setup ;;
+            0) return ;;
+            *) echo -e "${RED}Sai lựa chọn.${NC}"; pause ;;
+        esac
+    done
+}
+
+ssl_status() {
+    echo -e "${CYAN}--- Trạng thái SSL các Domain ---${NC}"
+    if ! command -v certbot &>/dev/null; then
+        echo -e "${RED}Certbot chưa được cài đặt.${NC}"
+        pause; return
+    fi
+
+    certbot certificates 2>/dev/null | grep -E "(Found|Domains|Expiry|VALID|INVALID|WARNING)"
+
+    echo -e "\n${YELLOW}--- Kiểm tra chi tiết từng site ---${NC}"
+    for site_dir in /var/www/*; do
+        if [ -d "$site_dir" ]; then
+            domain=$(basename "$site_dir")
+            [[ "$domain" == "html" ]] && continue
+
+            cert_file="/etc/letsencrypt/live/$domain/fullchain.pem"
+            if [ -f "$cert_file" ]; then
+                expiry=$(openssl x509 -enddate -noout -in "$cert_file" 2>/dev/null | cut -d= -f2)
+                expiry_ts=$(date -d "$expiry" +%s 2>/dev/null || date -j -f "%b %d %T %Y %Z" "$expiry" +%s 2>/dev/null)
+                now_ts=$(date +%s)
+                days_left=$(( (expiry_ts - now_ts) / 86400 ))
+
+                if [ "$days_left" -gt 30 ]; then
+                    status="${GREEN}✅ OK${NC}"
+                elif [ "$days_left" -gt 7 ]; then
+                    status="${YELLOW}⚠️  Sắp hết hạn (${days_left} ngày)${NC}"
+                else
+                    status="${RED}🔴 Nguy hiểm! (${days_left} ngày)${NC}"
+                fi
+                echo -e "  🌐 $domain → $status (hết hạn: $expiry)"
+            else
+                echo -e "  🌐 $domain → ${RED}Chưa có SSL${NC}"
+            fi
+        fi
+    done
+    pause
+}
+
+ssl_renew_one() {
+    source "$(dirname "${BASH_SOURCE[0]}")/site.sh"
+    select_site || return
+    domain="$SELECTED_DOMAIN"
+
+    log_info "Đang gia hạn SSL cho $domain..."
+    certbot renew --cert-name "$domain" --force-renewal
+    nginx -t && systemctl reload nginx
+    log_info "Hoàn tất gia hạn SSL cho $domain."
+    pause
+}
+
+ssl_renew_all() {
+    log_info "Đang gia hạn TẤT CẢ SSL..."
+    certbot renew
+    nginx -t && systemctl reload nginx
+    log_info "Hoàn tất gia hạn SSL."
+    pause
+}
+
+ssl_revoke() {
+    source "$(dirname "${BASH_SOURCE[0]}")/site.sh"
+    select_site || return
+    domain="$SELECTED_DOMAIN"
+
+    read -p "Xác nhận thu hồi SSL cho $domain? (y/n): " c
+    if [[ "$c" == "y" ]]; then
+        certbot delete --cert-name "$domain"
+        log_info "Đã thu hồi SSL cho $domain."
+    fi
+    pause
+}
+
+ssl_auto_renew_setup() {
+    echo -e "${YELLOW}--- Cấu hình Auto-Renew SSL ---${NC}"
+
+    CRON_JOB="0 3 * * * /usr/bin/certbot renew --quiet && systemctl reload nginx"
+
+    if crontab -l 2>/dev/null | grep -q "certbot renew"; then
+        echo -e "${GREEN}✅ Auto-Renew đã được cấu hình trước đó.${NC}"
+        echo -e "Cron hiện tại:"
+        crontab -l | grep "certbot"
+        echo ""
+        read -p "Cập nhật lại? (y/n): " c
+        if [[ "$c" != "y" ]]; then pause; return; fi
+        crontab -l | grep -v "certbot" | crontab -
+    fi
+
+    (crontab -l 2>/dev/null; echo "$CRON_JOB") | crontab -
+    log_info "Đã thiết lập Auto-Renew SSL lúc 3:00 AM hàng ngày."
+    echo -e "  Cron: ${CYAN}$CRON_JOB${NC}"
+    pause
+}
+
+
 install_ssl() {
     local domain=$1
     if [ -z "$domain" ]; then

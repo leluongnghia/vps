@@ -3,33 +3,217 @@
 # modules/backup.sh - Backup & Restore System
 
 backup_menu() {
-    clear
-    echo -e "${BLUE}=================================================${NC}"
-    echo -e "${GREEN}          Sao lưu & Khôi phục${NC}"
-    echo -e "${BLUE}=================================================${NC}"
-    echo -e "1. Backup Website (Local)"
-    echo -e "2. Backup Website (Google Drive)"
-    echo -e "3. Restore Website (Local)"
-    echo -e "4. Restore Website (Manual Uploaded - trong public_html)"
-    echo -e "5. Restore Website (Google Drive)"
-    echo -e "6. Cấu hình Google Drive (rclone)"
-    echo -e "7. Quản lý bản Backup (List/Delete)"
-    echo -e "0. Quay lại Menu chính"
-    echo -e "${BLUE}=================================================${NC}"
-    read -p "Nhập lựa chọn [0-7]: " choice
+    while true; do
+        clear
+        echo -e "${BLUE}=================================================${NC}"
+        echo -e "${GREEN}          💾 Sao lưu & Khôi phục${NC}"
+        echo -e "${BLUE}=================================================${NC}"
+        echo -e "1. Backup Website (Local)"
+        echo -e "2. Backup Website (Google Drive)"
+        echo -e "3. Restore Website (Local)"
+        echo -e "4. Restore Website (Manual Uploaded - trong public_html)"
+        echo -e "5. Restore Website (Google Drive)"
+        echo -e "6. Cấu hình Google Drive (rclone)"
+        echo -e "7. Quản lý bản Backup (List/Delete)"
+        echo -e "0. Quay lại Menu chính"
+        echo -e "${BLUE}=================================================${NC}"
+        read -p "Nhập lựa chọn [0-7]: " choice
 
-    case $choice in
-        1) backup_site_local ;;
-        2) backup_to_gdrive ;;
-        3) restore_site_local ;;
-        4) restore_site_manual_upload ;;
-        5) restore_site_gdrive ;;
-        6) setup_gdrive ;;
-        7) manage_backups ;;
-        0) return ;;
-        *) echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause ;;
-    esac
+        case $choice in
+            1) backup_site_local ;;
+            2) backup_to_gdrive ;;
+            3) restore_site_local ;;
+            4) restore_site_manual_upload ;;
+            5) restore_site_gdrive ;;
+            6) setup_gdrive ;;
+            7) manage_backups ;;
+            0) return ;;
+            *) echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause ;;
+        esac
+    done
 }
+
+auto_backup_menu() {
+    while true; do
+        clear
+        echo -e "${BLUE}=================================================${NC}"
+        echo -e "${GREEN}          ⏰ Backup Tự động (Cron)${NC}"
+        echo -e "${BLUE}=================================================${NC}"
+
+        # Show current cron status
+        if crontab -l 2>/dev/null | grep -q "vps-manager-backup"; then
+            echo -e "Trạng thái: ${GREEN}● Đang hoạt động${NC}"
+            echo -e "Schedule: $(crontab -l | grep 'vps-manager-backup' | awk '{print $1,$2,$3,$4,$5}')"
+        else
+            echo -e "Trạng thái: ${RED}● Chưa cấu hình${NC}"
+        fi
+        echo -e "${BLUE}=================================================${NC}"
+        echo -e "1. Bật Auto Backup Hàng ngày (3:00 AM)"
+        echo -e "2. Bật Auto Backup Hàng tuần (Chủ nhật 2:00 AM)"
+        echo -e "3. Backup ngay TẤT CẢ sites (Thủ công)"
+        echo -e "4. Xem lịch sử backup"
+        echo -e "5. Tắt Auto Backup"
+        echo -e "6. Cấu hình giữ bao nhiêu bản (hiện tại: 7 bản)"
+        echo -e "0. Quay lại"
+        echo -e "${BLUE}=================================================${NC}"
+        read -p "Chọn: " c
+
+        case $c in
+            1) auto_backup_setup "daily" ;;
+            2) auto_backup_setup "weekly" ;;
+            3) backup_all_sites ;;
+            4) auto_backup_view_history ;;
+            5) auto_backup_disable ;;
+            6) auto_backup_set_retention ;;
+            0) return ;;
+            *) echo -e "${RED}Sai lựa chọn.${NC}"; pause ;;
+        esac
+    done
+}
+
+auto_backup_setup() {
+    local mode=${1:-daily}
+    local script_path="/usr/local/bin/vps-manager-backup.sh"
+    local backup_root="/root/backups"
+    local keep_days=7
+
+    # Read keep_days from config if exists
+    [ -f /root/.vps-manager-backup.conf ] && source /root/.vps-manager-backup.conf
+
+    # Create backup script
+    cat > "$script_path" << 'BACKUPSCRIPT'
+#!/bin/bash
+BACKUP_ROOT="/root/backups"
+KEEP_DAYS=7
+[ -f /root/.vps-manager-backup.conf ] && source /root/.vps-manager-backup.conf
+
+timestamp=$(date +%F_%H-%M-%S)
+LOG="/var/log/vps-auto-backup.log"
+
+echo "[$timestamp] === Auto Backup Start ===" >> "$LOG"
+
+for site_dir in /var/www/*; do
+    [ ! -d "$site_dir" ] && continue
+    domain=$(basename "$site_dir")
+    [[ "$domain" == "html" ]] && continue
+
+    backup_dir="$BACKUP_ROOT/$domain"
+    mkdir -p "$backup_dir"
+
+    # Backup code
+    if [ -d "$site_dir/public_html" ]; then
+        zip -r "$backup_dir/code_${timestamp}.zip" "$site_dir/public_html" -x "*.log" -x "*.tmp" -q
+        echo "[$timestamp] Code backup: $domain OK" >> "$LOG"
+    fi
+
+    # Backup DB
+    db_name=$(echo "$domain" | tr -d '.-' | cut -c1-16)
+    if mysql -e "USE $db_name" 2>/dev/null; then
+        mysqldump "$db_name" | gzip > "$backup_dir/db_${timestamp}.sql.gz"
+        echo "[$timestamp] DB backup: $domain OK" >> "$LOG"
+    fi
+
+    # Cleanup old backups (keep last N days)
+    find "$backup_dir" -name "code_*.zip" -mtime +$KEEP_DAYS -delete
+    find "$backup_dir" -name "db_*.sql.gz" -mtime +$KEEP_DAYS -delete
+done
+
+echo "[$timestamp] === Auto Backup Done ===" >> "$LOG"
+BACKUPSCRIPT
+
+    chmod +x "$script_path"
+
+    # Remove old cron entry
+    crontab -l 2>/dev/null | grep -v "vps-manager-backup" | crontab -
+
+    if [[ "$mode" == "daily" ]]; then
+        CRON_TIME="0 3 * * *"
+        SCHEDULE_DESC="Hàng ngày lúc 3:00 AM"
+    else
+        CRON_TIME="0 2 * * 0"
+        SCHEDULE_DESC="Hàng tuần (Chủ nhật 2:00 AM)"
+    fi
+
+    (crontab -l 2>/dev/null; echo "$CRON_TIME $script_path # vps-manager-backup") | crontab -
+
+    log_info "Đã bật Auto Backup: $SCHEDULE_DESC"
+    echo -e "  Script: ${CYAN}$script_path${NC}"
+    echo -e "  Log: ${CYAN}/var/log/vps-auto-backup.log${NC}"
+    pause
+}
+
+backup_all_sites() {
+    log_info "Đang backup TẤT CẢ sites..."
+    local backup_root="/root/backups"
+    local timestamp=$(date +%F_%H-%M-%S)
+    local count=0
+
+    for site_dir in /var/www/*; do
+        [ ! -d "$site_dir" ] && continue
+        domain=$(basename "$site_dir")
+        [[ "$domain" == "html" ]] && continue
+
+        backup_dir="$backup_root/$domain"
+        mkdir -p "$backup_dir"
+
+        echo -e "\n${CYAN}📦 Backup: $domain${NC}"
+
+        if [ -d "$site_dir/public_html" ]; then
+            zip -r "$backup_dir/code_${timestamp}.zip" "$site_dir/public_html" -x "*.log" -q
+            echo -e "  ✅ Code: $(du -sh "$backup_dir/code_${timestamp}.zip" | cut -f1)"
+        fi
+
+        db_name=$(echo "$domain" | tr -d '.-' | cut -c1-16)
+        if mysql -e "USE $db_name" 2>/dev/null; then
+            mysqldump "$db_name" | gzip > "$backup_dir/db_${timestamp}.sql.gz"
+            echo -e "  ✅ DB: $(du -sh "$backup_dir/db_${timestamp}.sql.gz" | cut -f1)"
+        fi
+        count=$((count + 1))
+    done
+
+    echo -e "\n${GREEN}Đã backup $count sites vào /root/backups/${NC}"
+    echo -e "Tổng dung lượng: $(du -sh $backup_root | cut -f1)"
+    pause
+}
+
+auto_backup_view_history() {
+    echo -e "${CYAN}--- Lịch sử Backup ---${NC}"
+    if [ -f /var/log/vps-auto-backup.log ]; then
+        tail -n 50 /var/log/vps-auto-backup.log
+    else
+        echo -e "${YELLOW}Chưa có log backup tự động.${NC}"
+    fi
+
+    echo -e "\n${CYAN}--- Dung lượng Backup theo Site ---${NC}"
+    if [ -d /root/backups ]; then
+        du -sh /root/backups/* 2>/dev/null || echo "Chưa có backup nào."
+        echo -e "\nTổng: $(du -sh /root/backups 2>/dev/null | cut -f1)"
+    fi
+    pause
+}
+
+auto_backup_disable() {
+    read -p "Xác nhận tắt Auto Backup? (y/n): " c
+    if [[ "$c" == "y" ]]; then
+        crontab -l 2>/dev/null | grep -v "vps-manager-backup" | crontab -
+        log_info "Đã tắt Auto Backup."
+    fi
+    pause
+}
+
+auto_backup_set_retention() {
+    echo -e "${YELLOW}Số bản backup cần giữ (theo số ngày):${NC}"
+    read -p "Giữ backup trong bao nhiêu ngày? (mặc định 7): " days
+    days=${days:-7}
+    if [[ ! "$days" =~ ^[0-9]+$ ]]; then
+        echo -e "${RED}Không hợp lệ.${NC}"; pause; return
+    fi
+    echo "KEEP_DAYS=$days" > /root/.vps-manager-backup.conf
+    log_info "Đã cấu hình giữ backup trong $days ngày."
+    pause
+}
+
+
 
 restore_site_manual_upload() {
     # 1. Select Target Domain
@@ -237,9 +421,11 @@ restore_site_manual_upload() {
     # AUTO DETECT & SEARCH REPLACE
     log_info "Đang kiểm tra URL cũ trong Database..."
     
-    # Ensure WP-CLI
+    # Ensure WP-CLI (via shared helper from wordpress_tool.sh)
     if ! command -v wp &> /dev/null; then
-         curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar; chmod +x wp-cli.phar; mv wp-cli.phar /usr/local/bin/wp
+        log_info "Cài đặt WP-CLI..."
+        curl -sO https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+        chmod +x wp-cli.phar && mv wp-cli.phar /usr/local/bin/wp
     fi
     
     cd "/var/www/$target_domain/public_html"
@@ -318,7 +504,7 @@ backup_site_local() {
     log_info "Backing up Code..."
     zip -r "$backup_dir/code_$timestamp.zip" "/var/www/$domain/public_html" -x "*.log"
     
-    db_name=$(echo "$domain" | tr -d '.')
+    db_name=$(echo "$domain" | tr -d '.-' | cut -c1-16)
     log_info "Backing up DB..."
     mysqldump "$db_name" > "$backup_dir/db_$timestamp.sql"
     gzip "$backup_dir/db_$timestamp.sql"
@@ -449,20 +635,41 @@ restore_site_local() {
     read -p "Xác nhận restore? (y/n): " confirm
     if [[ "$confirm" != "y" ]]; then return; fi
     
-    # Get Target DB Creds (from current wp-config or regenerate)
-    # We assume standard naming convention or read from file
-    target_db_name=$(echo "$target_domain" | tr -d '.')
-    target_db_user="${target_db_name}_user"
-    # Try to grep password from existing file
-    if [ -f "/var/www/$target_domain/public_html/wp-config.php" ]; then
+    # Get Target DB Creds from persistent store or wp-config
+    target_db_name=$(echo "$target_domain" | tr -d '.-' | cut -c1-16)
+    target_db_user="${target_db_name}_u"  # FIX: use _u suffix (matches setup_database)
+    target_db_pass=""
+
+    # 1. Try persistent store
+    local data_file="$HOME/.vps-manager/sites_data.conf"
+    if [ -f "$data_file" ]; then
+        local db_info=$(grep "^$target_domain|" "$data_file")
+        if [ -n "$db_info" ]; then
+            target_db_pass=$(echo "$db_info" | cut -d'|' -f4)
+            log_info "Lấy mật khẩu từ kho lưu trữ hệ thống."
+        fi
+    fi
+
+    # 2. Fallback: wp-config.php
+    if [ -z "$target_db_pass" ] && [ -f "/var/www/$target_domain/public_html/wp-config.php" ]; then
         target_db_pass=$(grep "DB_PASSWORD" "/var/www/$target_domain/public_html/wp-config.php" | cut -d "'" -f 4)
-    else
-        # If config missing, we might have a problem unless we know the pass.
-        # Assuming we don't change pass, just keeping what's in the backup? NO, backup has OLD creds.
-        # We need to UPDATE wp-config with TARGET creds.
-        # If we can't find target creds, we might need to reset them?
-        # Let's hope mysql root access works.
-        target_db_pass=$(grep "DB_PASSWORD" "/var/www/$target_domain/public_html/wp-config.php" 2>/dev/null | cut -d "'" -f 4)
+        [ -z "$target_db_pass" ] && target_db_pass=$(grep "DB_PASSWORD" "/var/www/$target_domain/public_html/wp-config.php" | cut -d '"' -f 4)
+    fi
+
+    # 3. Last resort: generate new password
+    if [ -z "$target_db_pass" ]; then
+        log_warn "Không tìm thấy mật khẩu DB. Tạo mật khẩu mới..."
+        target_db_pass=$(openssl rand -base64 18 | tr -dc 'a-zA-Z0-9' | head -c 16)
+        mysql -e "ALTER USER '${target_db_user}'@'localhost' IDENTIFIED BY '${target_db_pass}';" 2>/dev/null
+        if [ $? -ne 0 ]; then
+            mysql -e "CREATE USER IF NOT EXISTS '${target_db_user}'@'localhost' IDENTIFIED BY '${target_db_pass}';" 2>/dev/null
+            mysql -e "GRANT ALL PRIVILEGES ON ${target_db_name}.* TO '${target_db_user}'@'localhost';" 2>/dev/null
+            mysql -e "FLUSH PRIVILEGES;"
+        fi
+        local data_file="$HOME/.vps-manager/sites_data.conf"
+        mkdir -p "$(dirname "$data_file")"
+        [ -f "$data_file" ] && sed -i "/^$target_domain|/d" "$data_file"
+        echo "$target_domain|$target_db_name|$target_db_user|$target_db_pass" >> "$data_file"
     fi
 
     # RESTORE CODE

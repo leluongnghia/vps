@@ -113,6 +113,7 @@ view_db_by_website() {
     echo -e "${YELLOW}💡 Tip: Data được lấy từ file lưu trữ hệ thống hoặc wp-config.php${NC}"
     
     local data_file="$HOME/.vps-manager/sites_data.conf"
+    local found=0   # FIX: initialize found counter
     
     # Loop through all websites in /var/www
     for site_dir in /var/www/*; do
@@ -168,6 +169,7 @@ view_db_by_website() {
                 fi
                 
                 echo ""
+                found=$((found + 1))  # FIX: increment counter
             fi
         fi
     done
