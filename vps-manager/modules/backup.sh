@@ -591,13 +591,56 @@ backup_to_gdrive() {
         pause
         return
     fi
-
+    
     echo -e "${GREEN}A. Sao lưu TẤT CẢ các website trên${NC}"
     
     read -p "Chọn website [1-${#sites[@]}] hoặc nhập 'A' để backup tất cả: " choice
 
-    read -p "Nhập tên remote GDrive (Mặc định: gdrive): " remote
+    # --- Select Remote Logic ---
+    echo -e "\n${CYAN}Danh sách các Remote Google Drive đã cấu hình:${NC}"
+    
+    # Check if rclone is installed
+    if ! command -v rclone &> /dev/null; then
+        echo -e "${RED}Rclone chưa được cài đặt. Vui lòng cấu hình trước.${NC}"
+        pause; return
+    fi
+    
+    remotes=()
+    j=1
+    # Read remotes into array
+    while IFS= read -r line; do
+        # 'rclone listremotes' returns names with colon, e.g., 'gdrive:'
+        # Remove the trailing colon
+        r_name=${line%:}
+        remotes+=("$r_name")
+    done < <(rclone listremotes 2>/dev/null)
+    
+    if [ ${#remotes[@]} -eq 0 ]; then
+        echo -e "${YELLOW}Chưa tìm thấy remote nào. Sẽ sử dụng mặc định 'gdrive'.${NC}"
+        remote="gdrive"
+    else
+        # Display list
+        for r in "${!remotes[@]}"; do
+             echo -e "$((r+1)). ${remotes[$r]}"
+        done
+        
+        echo -e "0. Nhập thủ công tên khác"
+        read -p "Chọn Remote Store [1-${#remotes[@]}]: " r_choice
+        
+        if [[ "$r_choice" == "0" ]]; then
+             read -p "Nhập tên remote: " remote
+        elif [[ "$r_choice" =~ ^[0-9]+$ ]] && [ "$r_choice" -ge 1 ] && [ "$r_choice" -le "${#remotes[@]}" ]; then
+             remote="${remotes[$((r_choice-1))]}"
+        else
+             # Default to first one or 'gdrive' if invalid
+             remote="${remotes[0]}" 
+             echo -e "${YELLOW}Lựa chọn không hợp lệ. Tự động chọn: $remote${NC}"
+        fi
+    fi
+    
+    # Final check
     remote=${remote:-gdrive}
+    echo -e "Remote được chọn: ${GREEN}$remote${NC}"
 
     if [[ "$choice" == "A" || "$choice" == "a" ]]; then
         # Backup ALL
