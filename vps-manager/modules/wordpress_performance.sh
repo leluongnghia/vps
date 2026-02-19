@@ -516,11 +516,23 @@ enable_http2_brotli() {
 
     # ── Brotli check ─────────────────────────────────────────
     local brotli_ok=0
+    # Strict check: Test config with brotli directive before enabling
     if nginx -V 2>&1 | grep -qi "brotli"; then
-        brotli_ok=1
-        log_info "Brotli module: ✅ đã cài"
+        # Create temp config to test
+        echo "brotli on;" > /etc/nginx/conf.d/brotli_test_temp.conf
+        if nginx -t &>/dev/null; then
+            brotli_ok=1
+            log_info "Brotli module: ✅ Hoạt động tốt"
+        else
+            log_warn "Nginx build có string 'brotli' nhưng directive không chạy được."
+            brotli_ok=0
+        fi
+        rm -f /etc/nginx/conf.d/brotli_test_temp.conf
     else
         log_warn "Brotli module chưa có trong Nginx build hiện tại."
+    fi
+
+    if [ "$brotli_ok" -eq 0 ]; then
         echo ""
         echo -e "Muốn thử cài module Brotli không?"
         echo -e "  1. Cài libnginx-mod-http-brotli (apt)"
@@ -529,12 +541,15 @@ enable_http2_brotli() {
 
         if [[ "$bc" == "1" ]]; then
             apt-get install -y libnginx-mod-http-brotli 2>/dev/null
-            if nginx -V 2>&1 | grep -qi "brotli"; then
+            # Test again
+            echo "brotli on;" > /etc/nginx/conf.d/brotli_test_temp.conf
+            if nginx -t &>/dev/null; then
                 brotli_ok=1
-                log_info "✅ Brotli module đã cài thành công"
+                log_info "✅ Brotli module đã cài và hoạt động"
             else
-                log_warn "Cài thất bại hoặc Nginx build riêng. Dùng Gzip."
+                log_warn "Cài xong nhưng vẫn không chạy được. Dùng Gzip."
             fi
+            rm -f /etc/nginx/conf.d/brotli_test_temp.conf
         fi
     fi
 
