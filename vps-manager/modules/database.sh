@@ -110,39 +110,56 @@ view_db_by_website() {
     echo -e "${GREEN}==================================================${NC}"
     echo ""
     
-    local found=0
+    echo -e "${YELLOW}💡 Tip: Data được lấy từ file lưu trữ hệ thống hoặc wp-config.php${NC}"
     
-    # Loop through all websites
+    local data_file="$HOME/.vps-manager/sites_data.conf"
+    
+    # Loop through all websites in /var/www
     for site_dir in /var/www/*; do
         if [ -d "$site_dir" ]; then
             local domain=$(basename "$site_dir")
             local wp_config="$site_dir/public_html/wp-config.php"
             
-            # Check if WordPress site
-            if [ -f "$wp_config" ]; then
-                found=1
+            # Skip system folders
+            if [[ "$domain" == "html" ]]; then continue; fi
+            
+            # 1. Try reading from Local Config Store (Most Reliable)
+            local db_info=""
+            if [ -f "$data_file" ]; then
+                db_info=$(grep "^$domain|" "$data_file")
+            fi
+            
+            local db_name=""
+            local db_user=""
+            local db_pass=""
+            local source="System Store"
+            
+            if [ -n "$db_info" ]; then
+                db_name=$(echo "$db_info" | cut -d'|' -f2)
+                db_user=$(echo "$db_info" | cut -d'|' -f3)
+                db_pass=$(echo "$db_info" | cut -d'|' -f4)
+            # 2. Fallback to reading wp-config.php (Robust Grep)
+            elif [ -f "$wp_config" ]; then
+                source="wp-config.php"
+                # Use robust grep, do NOT use php execution which can print HTML errors
+                db_name=$(grep "DB_NAME" "$wp_config" | cut -d "'" -f 4)
+                if [ -z "$db_name" ]; then db_name=$(grep "DB_NAME" "$wp_config" | cut -d '"' -f 4); fi
                 
-                # Extract database credentials using PHP (most reliable)
-                local db_name=$(php -r "define('ABSPATH', ''); @include '$wp_config'; echo defined('DB_NAME') ? DB_NAME : '';" 2>/dev/null)
-                local db_user=$(php -r "define('ABSPATH', ''); @include '$wp_config'; echo defined('DB_USER') ? DB_USER : '';" 2>/dev/null)
-                local db_pass=$(php -r "define('ABSPATH', ''); @include '$wp_config'; echo defined('DB_PASSWORD') ? DB_PASSWORD : '';" 2>/dev/null)
-                local db_host=$(php -r "define('ABSPATH', ''); @include '$wp_config'; echo defined('DB_HOST') ? DB_HOST : '';" 2>/dev/null)
+                db_user=$(grep "DB_USER" "$wp_config" | cut -d "'" -f 4)
+                if [ -z "$db_user" ]; then db_user=$(grep "DB_USER" "$wp_config" | cut -d '"' -f 4); fi
                 
-                # Fallback to grep if PHP fails
-                if [ -z "$db_name" ]; then
-                    db_name=$(grep "DB_NAME" "$wp_config" 2>/dev/null | cut -d "'" -f 4 | head -1)
-                    db_user=$(grep "DB_USER" "$wp_config" 2>/dev/null | cut -d "'" -f 4 | head -1)
-                    db_pass=$(grep "DB_PASSWORD" "$wp_config" 2>/dev/null | cut -d "'" -f 4 | head -1)
-                    db_host=$(grep "DB_HOST" "$wp_config" 2>/dev/null | cut -d "'" -f 4 | head -1)
-                fi
-                
-                # Display info
-                echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-                echo -e "${YELLOW}🌐 Website:${NC} ${GREEN}$domain${NC}"
-                echo -e "${YELLOW}📦 Database:${NC} $db_name"
-                echo -e "${YELLOW}👤 User:${NC} $db_user"
-                echo -e "${YELLOW}🔑 Password:${NC} $db_pass"
-                echo -e "${YELLOW}🖥️  Host:${NC} $db_host"
+                db_pass=$(grep "DB_PASSWORD" "$wp_config" | cut -d "'" -f 4)
+                if [ -z "$db_pass" ]; then db_pass=$(grep "DB_PASSWORD" "$wp_config" | cut -d '"' -f 4); fi
+            else
+                continue
+            fi
+            
+            # Display info
+            echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+            echo -e "${YELLOW}🌐 Website:${NC} ${GREEN}$domain${NC} ($source)"
+            echo -e "${YELLOW}📦 Database:${NC} $db_name"
+            echo -e "${YELLOW}👤 User:${NC} $db_user"
+            echo -e "${YELLOW}🔑 Password:${NC} $db_pass"
                 
                 # Get database size
                 local db_size=$(mysql -e "SELECT ROUND(SUM(data_length + index_length) / 1024 / 1024, 2) FROM information_schema.tables WHERE table_schema = '$db_name';" 2>/dev/null | tail -1)

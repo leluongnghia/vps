@@ -213,10 +213,22 @@ setup_database() {
         echo -e "${GREEN}DB User: $db_user${NC}"
         echo -e "${GREEN}DB Pass: $db_pass${NC}"
         
-        # Save these credentials for WP config
         export WP_DB_NAME="$db_name"
         export WP_DB_USER="$db_user"
         export WP_DB_PASS="$db_pass"
+        
+        # SAVE TO LOCAL STORAGE (Persistent)
+        local data_file="$HOME/.vps-manager/sites_data.conf"
+        mkdir -p "$(dirname "$data_file")"
+        
+        # Remove old entry if exists
+        if [ -f "$data_file" ]; then
+            sed -i "/^$domain|/d" "$data_file"
+        fi
+        
+        # Format: domain|db_name|db_user|db_pass
+        echo "$domain|$db_name|$db_user|$db_pass" >> "$data_file"
+        chmod 600 "$data_file"
     else
         log_error "Failed to create database"
         return 1

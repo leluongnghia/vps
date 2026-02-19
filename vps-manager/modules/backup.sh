@@ -59,51 +59,111 @@ restore_site_manual_upload() {
     # Usually filenames are code_domain_time.zip
     # We will prompt later if search-replace needed.
     
-    # 2. Select Code File
-    echo -e "\n${CYAN}Tìm kiếm file .zip / .tar.gz trong $search_dir...${NC}"
+    # 1. AUTO DETECT BACKUP FILES (Smart Select)
+    
+    # -> CODE FILES
     code_files=()
-    j=1
     while IFS= read -r file; do
-        if [[ -f "$file" ]]; then
-            fname=$(basename "$file")
-            code_files+=("$fname")
-            echo -e "$j. $fname"
-            ((j++))
-        fi
+        if [[ -f "$file" ]]; then code_files+=("$(basename "$file")"); fi
     done < <(find "$search_dir" -maxdepth 1 \( -name "*.zip" -o -name "*.tar.gz" \) -type f)
     
-    read -p "Chọn file Code [1-${#code_files[@]}] (Enter để bỏ qua): " c_sel
     code_file=""
-    if [[ -n "$c_sel" && "$c_sel" =~ ^[0-9]+$ ]]; then code_file="${code_files[$((c_sel-1))]}"; fi
+    if [ ${#code_files[@]} -eq 1 ]; then
+        code_file="${code_files[0]}"
+        log_info "Tự động chọn Code Backup: $code_file"
+    elif [ ${#code_files[@]} -gt 1 ]; then
+        echo -e "\n${CYAN}Tìm thấy nhiều file Code:${NC}"
+        for i in "${!code_files[@]}"; do
+            echo -e "$((i+1)). ${code_files[$i]}"
+        done
+        read -p "Chọn file Code (Enter để bỏ qua): " c_sel
+        if [[ -n "$c_sel" && "$c_sel" =~ ^[0-9]+$ ]]; then code_file="${code_files[$((c_sel-1))]}"; fi
+    else
+        log_warn "Không tìm thấy file Code (.zip, .tar.gz) nào."
+    fi
 
-    # 3. Select DB File
-    echo -e "\n${CYAN}Tìm kiếm file .sql / .sql.gz trong $search_dir...${NC}"
+    # -> DB FILES
     db_files=()
-    k=1
     while IFS= read -r file; do
-        if [[ -f "$file" ]]; then
-            fname=$(basename "$file")
-            db_files+=("$fname")
-            echo -e "$k. $fname"
-            ((k++))
-        fi
+        if [[ -f "$file" ]]; then db_files+=("$(basename "$file")"); fi
     done < <(find "$search_dir" -maxdepth 1 \( -name "*.sql" -o -name "*.sql.gz" \) -type f)
     
-    read -p "Chọn file DB [1-${#db_files[@]}] (Enter để bỏ qua): " db_sel
     db_file=""
-    if [[ -n "$db_sel" && "$db_sel" =~ ^[0-9]+$ ]]; then db_file="${db_files[$((db_sel-1))]}"; fi
+    if [ ${#db_files[@]} -eq 1 ]; then
+        db_file="${db_files[0]}"
+        log_info "Tự động chọn DB Backup: $db_file"
+    elif [ ${#db_files[@]} -gt 1 ]; then
+        echo -e "\n${CYAN}Tìm thấy nhiều file Database:${NC}"
+        for i in "${!db_files[@]}"; do
+            echo -e "$((i+1)). ${db_files[$i]}"
+        done
+        read -p "Chọn file DB (Enter để bỏ qua): " db_sel
+        if [[ -n "$db_sel" && "$db_sel" =~ ^[0-9]+$ ]]; then db_file="${db_files[$((db_sel-1))]}"; fi
+    else
+        log_warn "Không tìm thấy file Database (.sql, .sql.gz) nào."
+    fi
     
-    if [ -z "$code_file" ] && [ -z "$db_file" ]; then echo -e "${RED}Không chọn file nào.${NC}"; pause; return; fi
+    if [ -z "$code_file" ] && [ -z "$db_file" ]; then echo -e "${RED}Lỗi: Không có gì để restore.${NC}"; pause; return; fi
 
     # 4. Confirm Restore
-    echo -e "${RED}CẢNH BÁO: Dữ liệu trên $target_domain sẽ bị ghi đè!${NC}"
+    echo -e "\n${YELLOW}--- TỔNG QUÁT ---${NC}"
+    echo -e "Website ĐÍCH: ${GREEN}$target_domain${NC}"
+    echo -e "Nguồn Code  : ${CYAN}${code_file:-[Không thay đổi]}${NC}"
+    echo -e "Nguồn DB    : ${CYAN}${db_file:-[Không thay đổi]}${NC}"
+    echo -e "${RED}CẢNH BÁO: Dữ liệu hiện tại sẽ bị ghi đè!${NC}"
+
     read -p "Xác nhận restore? (y/n): " confirm
     if [[ "$confirm" != "y" ]]; then return; fi
     
-    # Get Target DB Creds (Match logic with site.sh)
+    # 2. DATA PREPARATION & CREDENTIALS
+    # Logic: 
+    # 1. Try reading persistent store (~/.vps-manager/sites_data.conf) -> Best
+    # 2. Try reading current wp-config.php -> Okay
+    # 3. If both fail -> RESET Database Password to a new random one -> Guaranteed to work.
+    
     target_db_name=$(echo "$target_domain" | tr -d '.-' | cut -c1-16)
     target_db_user="${target_db_name}_u"
-    target_db_pass=$(grep "DB_PASSWORD" "/var/www/$target_domain/public_html/wp-config.php" 2>/dev/null | cut -d "'" -f 4)
+    target_db_pass=""
+    
+    data_file="$HOME/.vps-manager/sites_data.conf"
+    
+    # Check Store
+    if [ -f "$data_file" ]; then
+        db_info=$(grep "^$target_domain|" "$data_file")
+        if [ -n "$db_info" ]; then
+            target_db_pass=$(echo "$db_info" | cut -d'|' -f4)
+            log_info "Đã lấy mật khẩu DB từ kho lưu trữ hệ thống."
+        fi
+    fi
+    
+    # Check Config (Fallback)
+    if [ -z "$target_db_pass" ]; then
+        target_db_pass=$(grep "DB_PASSWORD" "/var/www/$target_domain/public_html/wp-config.php" 2>/dev/null | cut -d "'" -f 4)
+        if [ -z "$target_db_pass" ]; then
+             target_db_pass=$(grep "DB_PASSWORD" "/var/www/$target_domain/public_html/wp-config.php" 2>/dev/null | cut -d '"' -f 4)
+        fi
+    fi
+    
+    # Last Resort: Auto Reset Password
+    if [ -z "$target_db_pass" ]; then
+        log_warn "Không tìm thấy mật khẩu Database cũ. Đang tạo mật khẩu mới..."
+        target_db_pass=$(openssl rand -base64 18 | tr -dc 'a-zA-Z0-9' | head -c 16)
+        
+        # Reset in MySQL
+        log_info "Đang reset mật khẩu DB User: $target_db_user"
+        mysql -e "ALTER USER '${target_db_user}'@'localhost' IDENTIFIED BY '${target_db_pass}';" 2>/dev/null
+        if [ $? -ne 0 ]; then
+             # Maybe user doesn't exist? Create it.
+             mysql -e "CREATE USER IF NOT EXISTS '${target_db_user}'@'localhost' IDENTIFIED BY '${target_db_pass}';" 2>/dev/null
+             mysql -e "GRANT ALL PRIVILEGES ON ${target_db_name}.* TO '${target_db_user}'@'localhost';" 2>/dev/null
+             mysql -e "FLUSH PRIVILEGES;"
+        fi
+        
+        # Save to store for future
+        mkdir -p "$(dirname "$data_file")"
+        if [ -f "$data_file" ]; then sed -i "/^$target_domain|/d" "$data_file"; fi
+        echo "$target_domain|$target_db_name|$target_db_user|$target_db_pass" >> "$data_file"
+    fi
 
     # RESTORE CODE
     if [ -n "$code_file" ]; then
@@ -140,15 +200,15 @@ restore_site_manual_upload() {
         log_info "Khôi phục thông tin kết nối Database chuẩn..."
         wp_conf="/var/www/$target_domain/public_html/wp-config.php"
         
-        if [ -f "$wp_conf" ] && [ -n "$current_db_pass" ]; then
+        if [ -f "$wp_conf" ] && [ -n "$target_db_pass" ]; then
             # Update DB_NAME
             sed -i "s|define([ ]*['\"]DB_NAME['\"],.*)|define( 'DB_NAME', '$target_db_name' );|" "$wp_conf"
             # Update DB_USER
             sed -i "s|define([ ]*['\"]DB_USER['\"],.*)|define( 'DB_USER', '$target_db_user' );|" "$wp_conf"
             # Update DB_PASSWORD
-            sed -i "s|define([ ]*['\"]DB_PASSWORD['\"],.*)|define( 'DB_PASSWORD', '$current_db_pass' );|" "$wp_conf"
+            sed -i "s|define([ ]*['\"]DB_PASSWORD['\"],.*)|define( 'DB_PASSWORD', '$target_db_pass' );|" "$wp_conf"
         else
-            log_warn "Không tìm thấy wp-config.php hoặc không lấy được mật khẩu DB cũ."
+            log_warn "Không tìm thấy wp-config.php để ghi cấu hình."
         fi
     fi
     
