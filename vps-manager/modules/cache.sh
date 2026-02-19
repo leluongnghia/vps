@@ -46,31 +46,83 @@ fix_redis_connection() {
         pause; return
     fi
     
-    echo -e "${CYAN}Đang kiểm tra cấu hình Redis Server...${NC}"
+    echo -e "${CYAN}Đang kiểm tra trạng thái Redis Server...${NC}"
     
-    # 1. Check if Redis is running
-    if ! systemctl is-active --quiet redis-server; then
-        echo -e "${YELLOW}Redis chưa chạy. Đang khởi động...${NC}"
-        systemctl enable redis-server
-        systemctl start redis-server
+    # 1. Check Installation
+    if ! command -v redis-server &> /dev/null; then
+        echo -e "${RED}CẢNH BÁO: Redis chưa được cài đặt trên VPS!${NC}"
+        read -p "Bạn có muốn cài đặt Redis + PHP Extension ngay không? (y/n): " install_opt
+        if [[ "$install_opt" == "y" ]]; then
+            log_info "Đang cài đặt Redis..."
+            apt-get update -qq
+            apt-get install -y redis-server php-redis
+            
+            # Configure Redis (Socket)
+            local rconf="/etc/redis/redis.conf"
+            cp "$rconf" "$rconf.bak"
+            
+            if ! grep -q "unixsocket /var/run/redis/redis-server.sock" "$rconf"; then
+                echo "" >> "$rconf"
+                echo "unixsocket /var/run/redis/redis-server.sock" >> "$rconf"
+                echo "unixsocketperm 770" >> "$rconf"
+            fi
+            
+            # Maxmemory
+            if ! grep -q "maxmemory 256mb" "$rconf"; then
+                echo "maxmemory 256mb" >> "$rconf"
+                echo "maxmemory-policy allkeys-lru" >> "$rconf"
+            fi
+            
+            usermod -aG redis www-data
+            systemctl enable redis-server
+            systemctl restart redis-server
+            
+            log_info "Redis đã cài đặt và khởi động."
+        else
+            return
+        fi
     fi
     
-    # 2. Detect Connection Method (Unix Socket vs TCP)
+    # 2. Check Service Running
+    if ! systemctl is-active --quiet redis-server; then
+        echo -e "${YELLOW}Redis Service đang tắt. Đang bật lại...${NC}"
+        systemctl unmask redis-server 2>/dev/null
+        systemctl enable redis-server
+        systemctl start redis-server
+        
+        if ! systemctl is-active --quiet redis-server; then
+            echo -e "${RED}LỖI NGHIÊM TRỌNG: Không thể khởi động Redis. Hãy kiểm tra 'systemctl status redis-server'.${NC}"
+            pause; return
+        fi
+    fi
+    
+    # 3. Detect Connection Method
     local redis_conf="/etc/redis/redis.conf"
     local use_socket=false
     local socket_path="/var/run/redis/redis-server.sock"
     
-    if grep -q "^unixsocket $socket_path" "$redis_conf" || grep -q "^unixsocket .*redis.*sock" "$redis_conf"; then
-        # Double check if socket file exists
-        # Grep might find config line even if commented out? No, ^ anchor helps. 
-        # But let's check config specifically.
-        # Actually easier to just check if config ENABLED it.
+    if [ ! -f "$redis_conf" ]; then
+        echo -e "${RED}Không tìm thấy file config $redis_conf. Giả định mặc định (TCP).${NC}"
+    elif grep -q "^unixsocket $socket_path" "$redis_conf" || grep -q "^unixsocket .*redis.*sock" "$redis_conf"; then
         use_socket=true
-        # Extract exact path just in case
-        socket_path=$(grep "^unixsocket " "$redis_conf" | head -n1 | awk '{print $2}')
+        # Try finding exact path
+        local found_path=$(grep "^unixsocket " "$redis_conf" | head -n1 | awk '{print $2}')
+        if [ -n "$found_path" ]; then socket_path="$found_path"; fi
     fi
     
-    # 3. Update wp-config.php
+    # Verify socket existence if config says so
+    if [ "$use_socket" = "true" ] && [ ! -S "$socket_path" ]; then
+        echo -e "${YELLOW}Cấu hình dùng Socket nhưng file $socket_path không tồn tại.${NC}"
+        echo -e "Đang restart Redis để tạo socket..."
+        systemctl restart redis-server
+        sleep 2
+        if [ ! -S "$socket_path" ]; then
+            echo -e "${RED}Vẫn không thấy socket. Chuyển về TCP.${NC}"
+            use_socket=false
+        fi
+    fi
+    
+    # 4. Update wp-config.php
     echo -e "${YELLOW}Đang cấu hình lại kết nối Redis cho WordPress...${NC}"
     
     # Clean old configs
@@ -78,33 +130,27 @@ fix_redis_connection() {
     sed -i "/WP_REDIS_PATH/d" "$wp_config"
     sed -i "/WP_REDIS_HOST/d" "$wp_config"
     sed -i "/WP_REDIS_PORT/d" "$wp_config"
+    sed -i "/WP_REDIS_DATABASE/d" "$wp_config" # Clean DB ID config too
     
     if [ "$use_socket" = "true" ]; then
-        echo -e "-> Phát hiện Redis dùng Unix Socket: ${GREEN}$socket_path${NC}"
-        # Insert Socket Config
+        echo -e "-> Chế độ: ${GREEN}Unix Socket ($socket_path)${NC}"
         sed -i "/table_prefix/i define( 'WP_REDIS_SCHEME', 'unix' );" "$wp_config"
         sed -i "/table_prefix/i define( 'WP_REDIS_PATH', '$socket_path' );" "$wp_config"
+        # Perm Fix
+        usermod -aG redis www-data
+        chmod 770 "$(dirname "$socket_path")" 2>/dev/null
     else
-        echo -e "-> Phát hiện Redis dùng TCP (127.0.0.1:6379)"
-        # Insert TCP Config explicitly
+        echo -e "-> Chế độ: ${YELLOW}TCP (127.0.0.1:6379)${NC}"
         sed -i "/table_prefix/i define( 'WP_REDIS_HOST', '127.0.0.1' );" "$wp_config"
         sed -i "/table_prefix/i define( 'WP_REDIS_PORT', 6379 );" "$wp_config"
     fi
     
-    # Add Key Salt if missing (to prevent collisions)
+    # Key Salt
     if ! grep -q "WP_CACHE_KEY_SALT" "$wp_config"; then
-        echo -e "-> Thêm WP_CACHE_KEY_SALT để tránh xung đột cache."
         sed -i "/table_prefix/i define( 'WP_CACHE_KEY_SALT', '$domain:' );" "$wp_config"
     fi
     
-    # Permissions fix for socket if needed
-    if [ "$use_socket" = "true" ]; then
-        usermod -aG redis www-data
-        chmod 770 "$(dirname "$socket_path")" 2>/dev/null
-    fi
-    
-    echo -e "${GREEN}Đã sửa lỗi kết nối Redis thành công!${NC}"
-    echo "Hãy vào trang quản trị WP > Settings > Redis để kiểm tra lại."
+    echo -e "${GREEN}Đã sửa lỗi xong!${NC}"
     pause
 }
 
