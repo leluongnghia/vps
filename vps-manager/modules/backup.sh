@@ -925,16 +925,114 @@ restore_site_gdrive() {
 }
 
 manage_backups() {
-    echo -e "1. List Local"
-    echo -e "2. List Cloud"
-    read -p "Select: " c
-    if [[ "$c" == "1" ]]; then
-        du -sh /root/backups/*
-    elif [[ "$c" == "2" ]]; then
-        read -p "Remote: " r
-        rclone lsd "${r:-gdrive}:vps_backups/"
-    fi
-    pause
+    while true; do
+        echo -e "\n${CYAN}--- Quản lý bản Backup ---${NC}"
+        echo -e "1. Xem danh sách Local (/root/backups)"
+        echo -e "2. Xem danh sách Cloud (Google Drive)"
+        echo -e "3. Xóa Backup Local"
+        echo -e "4. Xóa Backup Cloud"
+        echo -e "0. Quay lại"
+        read -p "Chọn: " c
+        
+        case $c in
+            1)
+                echo -e "${YELLOW}Dung lượng Local:${NC}"
+                du -sh /root/backups/* 2>/dev/null || echo "Trống."
+                ;;
+            2)
+                # List Remotes
+                local remotes=($(rclone listremotes 2>/dev/null | grep -v "Alias"))
+                if [ ${#remotes[@]} -eq 0 ]; then echo -e "${RED}Chưa cấu hình rclone.${NC}"; continue; fi
+                
+                local remote="gdrive"
+                if [ ${#remotes[@]} -eq 1 ]; then
+                    remote=${remotes[0]%%:}
+                else
+                    echo "Danh sách Remote:"
+                    for i in "${!remotes[@]}"; do echo -e "$((i+1)). ${remotes[$i]}"; done
+                    read -p "Chọn Remote (1-${#remotes[@]}): " r_sel
+                    if [[ "$r_sel" =~ ^[0-9]+$ ]]; then remote=${remotes[$((r_sel-1))]%%:}; fi
+                fi
+                
+                echo -e "${YELLOW}Danh sách trên Cloud ($remote):${NC}"
+                rclone lsd "$remote:vps_backups/"
+                ;;
+            3)
+                echo -e "${YELLOW}--- Xóa Backup Local ---${NC}"
+                # 1. Select Site Folder
+                local backup_root="/root/backups"
+                local dirs=($(find "$backup_root" -maxdepth 1 -type d -not -path "$backup_root"))
+                if [ ${#dirs[@]} -eq 0 ]; then echo "Không có backup nào."; continue; fi
+                
+                for i in "${!dirs[@]}"; do echo "$((i+1)). $(basename "${dirs[$i]}")"; done
+                read -p "Chọn Site [1-${#dirs[@]}]: " d_sel
+                if [[ ! "$d_sel" =~ ^[0-9]+$ ]]; then continue; fi
+                local target_dir="${dirs[$((d_sel-1))]}"
+                
+                # 2. Select File
+                local files=($(find "$target_dir" -maxdepth 1 -type f))
+                if [ ${#files[@]} -eq 0 ]; then echo "Thư mục rỗng."; rmdir "$target_dir"; continue; fi
+                
+                for j in "${!files[@]}"; do echo "$((j+1)). $(basename "${files[$j]}") ($(du -h "${files[$j]}" | cut -f1))"; done
+                echo "$(( ${#files[@]} + 1 )). Xóa HẾT thư mục này"
+                read -p "Chọn File để xóa: " f_sel
+                
+                if [ "$f_sel" -eq "$(( ${#files[@]} + 1 ))" ]; then
+                    rm -rf "$target_dir"
+                    log_info "Đã xóa toàn bộ thư mục $(basename "$target_dir")"
+                elif [[ "$f_sel" =~ ^[0-9]+$ ]] && [ "$f_sel" -le "${#files[@]}" ]; then
+                    rm -f "${files[$((f_sel-1))]}"
+                    log_info "Đã xóa file."
+                fi
+                ;;
+            4)
+                echo -e "${YELLOW}--- Xóa Backup Cloud ---${NC}"
+                # Same remote selection logic
+                local remotes=($(rclone listremotes 2>/dev/null | grep -v "Alias"))
+                if [ ${#remotes[@]} -eq 0 ]; then echo -e "${RED}Chưa cấu hình rclone.${NC}"; continue; fi
+                local remote="gdrive"
+                if [ ${#remotes[@]} -gt 1 ]; then
+                    for i in "${!remotes[@]}"; do echo -e "$((i+1)). ${remotes[$i]}"; done
+                    read -p "Chọn Remote (1-${#remotes[@]}): " r_sel
+                    if [[ "$r_sel" =~ ^[0-9]+$ ]]; then remote=${remotes[$((r_sel-1))]%%:}; fi
+                else
+                    remote=${remotes[0]%%:}
+                fi
+                
+                # List Cloud Folders
+                local folders=($(rclone lsd "$remote:vps_backups/" | awk '{print $NF}'))
+                if [ ${#folders[@]} -eq 0 ]; then echo "Cloud trống."; continue; fi
+                
+                for i in "${!folders[@]}"; do echo "$((i+1)). ${folders[$i]}"; done
+                read -p "Chọn Site [1-${#folders[@]}]: " c_sel
+                if [[ ! "$c_sel" =~ ^[0-9]+$ ]]; then continue; fi
+                local target_folder="${folders[$((c_sel-1))]}"
+                
+                # List Files in Cloud Folder
+                echo -e "Đang tải danh sách file..."
+                # Get file list with size
+                # Output format: size path
+                # Need to capture into array. 
+                # Simplified: just name
+                local c_files=($(rclone lsf "$remote:vps_backups/$target_folder/" --files-only))
+                
+                for j in "${!c_files[@]}"; do echo "$((j+1)). ${c_files[$j]}"; done
+                echo "$(( ${#c_files[@]} + 1 )). Xóa HẾT thư mục này trên Cloud"
+                read -p "Chọn File để xóa: " cf_sel
+                
+                if [ "$cf_sel" -eq "$(( ${#c_files[@]} + 1 ))" ]; then
+                    rclone purge "$remote:vps_backups/$target_folder/"
+                    log_info "Đã xóa thư mục $target_folder trên Cloud."
+                elif [[ "$cf_sel" =~ ^[0-9]+$ ]] && [ "$cf_sel" -le "${#c_files[@]}" ]; then
+                    local file_to_del="${c_files[$((cf_sel-1))]}"
+                    rclone deletefile "$remote:vps_backups/$target_folder/$file_to_del"
+                    log_info "Đã xóa $file_to_del trên Cloud."
+                fi
+                ;;
+            0) return ;;
+        esac
+        pause
+    done
 }
 
 cleanup_old_backups() {
