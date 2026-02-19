@@ -38,28 +38,44 @@ install_phpmyadmin() {
     fi
     
     # Download
+    # Download & Install Logic (Robust)
     log_info "Đang tải phpMyAdmin..."
     PMA_VER="5.2.1"
-    cd /tmp
-    wget -q https://files.phpmyadmin.net/phpMyAdmin/${PMA_VER}/phpMyAdmin-${PMA_VER}-all-languages.tar.gz
+    TEMP_DIR="/tmp/pma_install"
+    rm -rf "$TEMP_DIR"; mkdir -p "$TEMP_DIR"
+    
+    cd "$TEMP_DIR"
+    wget -q "https://files.phpmyadmin.net/phpMyAdmin/${PMA_VER}/phpMyAdmin-${PMA_VER}-all-languages.tar.gz"
     
     if [ ! -f "phpMyAdmin-${PMA_VER}-all-languages.tar.gz" ]; then
-        log_error "Tải thất bại."
+        log_error "Tải thất bại. Vui lòng kiểm tra kết nối mạng."
         return
     fi
     
-    mkdir -p /var/www/html
-    tar xzf phpMyAdmin-${PMA_VER}-all-languages.tar.gz
+    log_info "Giải nén và cài đặt..."
+    # Clean old install
     rm -rf "$PMA_DIR"
-    mv phpMyAdmin-${PMA_VER}-all-languages "$PMA_DIR"
-    rm phpMyAdmin-${PMA_VER}-all-languages.tar.gz
+    
+    # Extract
+    tar xzf "phpMyAdmin-${PMA_VER}-all-languages.tar.gz"
+    
+    # Move to destination (Rename extracted folder)
+    # The folder name is usually phpMyAdmin-5.2.1-all-languages
+    mv "phpMyAdmin-${PMA_VER}-all-languages" "$PMA_DIR"
+    
+    # Clean temp
+    rm -rf "$TEMP_DIR"
     
     # Config
-    cp "$PMA_DIR/config.sample.inc.php" "$PMA_DIR/config.inc.php"
-    
-    # Generate secret
-    SECRET=$(openssl rand -base64 32 | tr -dc 'a-zA-Z0-9')
-    sed -i "s/\$cfg\['blowfish_secret'\] = '';/\$cfg\['blowfish_secret'\] = '$SECRET';/" "$PMA_DIR/config.inc.php"
+    if [ -f "$PMA_DIR/config.sample.inc.php" ]; then
+        cp "$PMA_DIR/config.sample.inc.php" "$PMA_DIR/config.inc.php"
+        
+        # Generate secret (32 chars)
+        SECRET=$(openssl rand -base64 32 | tr -dc 'a-zA-Z0-9' | head -c 32)
+        sed -i "s|\\\$cfg\['blowfish_secret'\] = '';|\\\$cfg['blowfish_secret'] = '$SECRET';|" "$PMA_DIR/config.inc.php"
+    else
+        log_error "Không tìm thấy file config mẫu. Cài đặt có thể bị lỗi."
+    fi
     
     # Permissions
     chown -R www-data:www-data "$PMA_DIR"
