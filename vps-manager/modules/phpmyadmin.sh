@@ -94,55 +94,23 @@ install_phpmyadmin() {
     PMA_AUTH_PASS=$(openssl rand -base64 12 | tr -dc 'a-zA-Z0-9')
     htpasswd -cb /etc/nginx/.phpmyadmin_htpasswd "$PMA_AUTH_USER" "$PMA_AUTH_PASS"
 
-    cat > /etc/nginx/snippets/phpmyadmin.conf <<EOF
-location /phpmyadmin {
-    root /var/www/html;
-    index index.php index.html index.htm;
-    try_files \$uri \$uri/ =404;
-
-    # HTTP Basic Auth Protection
-    auth_basic "Restricted Access";
-    auth_basic_user_file /etc/nginx/.phpmyadmin_htpasswd;
-
-    location ~ ^/phpmyadmin/(.+\.php)$ {
-        alias /var/www/html/phpmyadmin/\$1;
-        include snippets/fastcgi-php.conf;
-        fastcgi_pass unix:/run/php/php8.1-fpm.sock; 
-        fastcgi_param SCRIPT_FILENAME \$request_filename;
-    }
-
-    location ~* ^/phpmyadmin/(.+\.(jpg|jpeg|gif|css|png|js|ico|html|xml|txt))$ {
-        root /var/www/html;
-    }
-}
-EOF
-
-    # Detect PHP version for socket
+    # Detect PHP version for socket first
     PHP_VER=$(php -r "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;")
-    if [ -S "/run/php/php$PHP_VER-fpm.sock" ]; then
-         sed -i "s|fastcgi_pass.*;|fastcgi_pass unix:/run/php/php$PHP_VER-fpm.sock;|" /etc/nginx/snippets/phpmyadmin.conf
-    elif [ -S "/run/php/php8.1-fpm.sock" ]; then
-         sed -i "s|fastcgi_pass.*;|fastcgi_pass unix:/run/php/php8.1-fpm.sock;|" /etc/nginx/snippets/phpmyadmin.conf
-    elif [ -S "/run/php/php8.2-fpm.sock" ]; then
-         sed -i "s|fastcgi_pass.*;|fastcgi_pass unix:/run/php/php8.2-fpm.sock;|" /etc/nginx/snippets/phpmyadmin.conf
-    elif [ -S "/run/php/php8.3-fpm.sock" ]; then
-         sed -i "s|fastcgi_pass.*;|fastcgi_pass unix:/run/php/php8.3-fpm.sock;|" /etc/nginx/snippets/phpmyadmin.conf
-    fi
-
+    PHP_SOCK=""
+    if [ -S "/run/php/php$PHP_VER-fpm.sock" ]; then PHP_SOCK="unix:/run/php/php$PHP_VER-fpm.sock";
+    elif [ -S "/run/php/php8.1-fpm.sock" ]; then PHP_SOCK="unix:/run/php/php8.1-fpm.sock";
+    elif [ -S "/run/php/php8.2-fpm.sock" ]; then PHP_SOCK="unix:/run/php/php8.2-fpm.sock";
+    elif [ -S "/run/php/php8.3-fpm.sock" ]; then PHP_SOCK="unix:/run/php/php8.3-fpm.sock";
+    else PHP_SOCK="unix:/run/php/php8.1-fpm.sock"; fi # Fallback
+    
     # Detect IP
     VPS_IP=$(curl -s https://ifconfig.me || hostname -I | awk '{print $1}')
-    # Sanitize IP (remove newlines/spaces)
     VPS_IP=$(echo "$VPS_IP" | tr -d '\n' | tr -d ' ')
 
-    # Create a dedicated vhost for IP access (Default Server)
-    # This guarantees that accessing via IP (or any unmatched domain) hits this block
+    # 1. Disable original default
+    if [ -L "/etc/nginx/sites-enabled/default" ]; then rm /etc/nginx/sites-enabled/default; fi
     
-    # 1. Disable original default if exists to avoid conflict
-    if [ -L "/etc/nginx/sites-enabled/default" ]; then
-        rm /etc/nginx/sites-enabled/default
-    fi
-    
-    # 2. Create new default-pma
+    # 2. Create new default-pma with EMBEDDED CONFIG
     cat > /etc/nginx/sites-available/000-phpmyadmin <<EOF
 server {
     listen 80 default_server;
@@ -151,17 +119,38 @@ server {
     root /var/www/html;
     index index.php index.html index.htm;
     
+    # Main location
     location / {
         try_files \$uri \$uri/ =404;
     }
     
-    # Priority for phpmyadmin
-    include snippets/phpmyadmin.conf;
+    # phpMyAdmin Location (Directly Embedded)
+    location ^~ /phpmyadmin {
+        root /var/www/html;
+        index index.php index.html index.htm;
+        
+        # HTTP Basic Auth Protection
+        auth_basic "Restricted Access";
+        auth_basic_user_file /etc/nginx/.phpmyadmin_htpasswd;
+        
+        # PHP Handling inside phpMyAdmin
+        location ~ \.php$ {
+            include snippets/fastcgi-php.conf;
+            fastcgi_pass $PHP_SOCK;
+            fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
+            include fastcgi_params;
+        }
+        
+        # Deny access to sensitive files
+        location ~ ^/phpmyadmin/(.+\.(jpg|jpeg|gif|css|png|js|ico|html|xml|txt))$ {
+            root /var/www/html;
+        }
+    }
     
-    # PHP handling for root (if needed)
+    # PHP handling for root (if needed for other tools)
     location ~ \.php$ {
         include snippets/fastcgi-php.conf;
-        fastcgi_pass unix:/run/php/php$PHP_VER-fpm.sock;
+        fastcgi_pass $PHP_SOCK;
     }
 }
 EOF
