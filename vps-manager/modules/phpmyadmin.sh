@@ -147,11 +147,11 @@ install_phpmyadmin() {
         cp "$PMA_DIR/config.sample.inc.php" "$PMA_DIR/config.inc.php"
         local SECRET
         SECRET=$(openssl rand -base64 32 | tr -dc 'a-zA-Z0-9' | head -c 32)
-        # Use perl for safer substitution (sed has issues with $ in some systems)
+        # Use perl -pi -e for correct in-place substitution
         if command -v perl &>/dev/null; then
-            perl -i "s|\\\$cfg\['blowfish_secret'\] = '';|\\\$cfg['blowfish_secret'] = '${SECRET}';|" "$PMA_DIR/config.inc.php"
+            perl -pi -e "s|\\\$cfg\\['blowfish_secret'\\] = '';|\$cfg['blowfish_secret'] = '${SECRET}';|" "$PMA_DIR/config.inc.php"
         else
-            sed -i "s/\\\$cfg\['blowfish_secret'\] = '';/\\\$cfg['blowfish_secret'] = '${SECRET}';/" "$PMA_DIR/config.inc.php"
+            sed -i "s/\\\$cfg\\['blowfish_secret'\\] = '';/\$cfg['blowfish_secret'] = '${SECRET}';/" "$PMA_DIR/config.inc.php"
         fi
         _pma_log "Config tạo thành công."
     else
@@ -239,9 +239,8 @@ install_phpmyadmin() {
         printf '        }\n'
         printf '    }\n\n'
 
-        printf '    # PHP handler for root\n'
+        printf '    # PHP handler for root (NOTE: fastcgi-php.conf already has try_files)\n'
         printf '    location ~ \\.php$ {\n'
-        printf '        try_files $uri =404;\n'
         printf '        include snippets/fastcgi-php.conf;\n'
         printf '        fastcgi_pass %s;\n' "$PHP_SOCK"
         printf '        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;\n'
