@@ -16,6 +16,7 @@ manage_sites_menu() {
     echo -e "7. Redirect Domain"
     echo -e "8. Đổi phiên bản PHP cho Website"
     echo -e "9. Clone/Nhân bản Website"
+    echo -e "10. Đổi thông tin Database (wp-config)"
     echo -e "11. Đặt mật khẩu bảo vệ thư mục"
     echo -e "12. Fix Permissions"
     echo -e "13. Kiểm tra/Sửa lỗi WordPress Core"
