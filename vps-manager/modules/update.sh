@@ -5,6 +5,59 @@
 
 REPO_URL="https://github.com/leluongnghia/vps.git"
 INSTALL_DIR="/usr/local/vps-manager"
+BRANCH="main"
+
+# Helper: clone với retry + HTTP/1.1 fallback
+_clone_with_retry() {
+    local url="$1"
+    local dest="$2"
+    local max_attempts=3
+    local attempt=1
+
+    # Ép git dùng HTTP/1.1 để tránh lỗi curl 92 HTTP/2 stream cancel
+    git config --global http.version HTTP/1.1 2>/dev/null
+    git config --global http.postBuffer 524288000 2>/dev/null  # 500MB buffer
+
+    while [ "$attempt" -le "$max_attempts" ]; do
+        echo -e "${YELLOW}Cloning (lần $attempt/$max_attempts)...${NC}"
+        GIT_HTTP_LOW_SPEED_LIMIT=1000 \
+        GIT_HTTP_LOW_SPEED_TIME=30 \
+        git clone -b "$BRANCH" --depth 1 --single-branch "$url" "$dest" 2>&1
+
+        if [ $? -eq 0 ] && [ -d "$dest/vps-manager" ]; then
+            echo -e "${GREEN}✅ Clone thành công!${NC}"
+            return 0
+        fi
+
+        echo -e "${YELLOW}⚠️  Clone thất bại, thử lại sau ${attempt}s...${NC}"
+        sleep "$attempt"
+        rm -rf "$dest"
+        attempt=$((attempt + 1))
+    done
+
+    return 1
+}
+
+# Helper: download bằng wget tar.gz (fallback nếu git fail hoàn toàn)
+_download_zip_fallback() {
+    local dest="$1"
+    local zip_url="https://github.com/leluongnghia/vps/archive/refs/heads/main.tar.gz"
+
+    echo -e "${YELLOW}Thử tải bằng wget (tar.gz fallback)...${NC}"
+
+    mkdir -p "$dest"
+    if wget -q --show-progress -O "$dest/vps.tar.gz" "$zip_url" 2>/dev/null \
+       || curl -L --progress-bar -o "$dest/vps.tar.gz" "$zip_url" 2>/dev/null; then
+        tar -xzf "$dest/vps.tar.gz" -C "$dest" --strip-components=1 2>/dev/null
+        rm -f "$dest/vps.tar.gz"
+        if [ -d "$dest/vps-manager" ]; then
+            echo -e "${GREEN}✅ Tải thành công qua wget/curl!${NC}"
+            return 0
+        fi
+    fi
+
+    return 1
+}
 
 do_update() {
     # ── CRITICAL: Đổi sang /root trước để tránh getcwd error ──
@@ -15,11 +68,15 @@ do_update() {
     # ── Cách 1: git pull nếu đây là git repo (nhanh nhất) ─────
     if [ -d "$INSTALL_DIR/.git" ]; then
         echo -e "${GREEN}Tìm thấy git repo, đang pull...${NC}"
-        cd "$INSTALL_DIR"
-        git fetch origin main 2>/dev/null
+
+        # Ép HTTP/1.1 cho pull cũng
+        git -C "$INSTALL_DIR" config http.version HTTP/1.1 2>/dev/null
+        git -C "$INSTALL_DIR" config http.postBuffer 524288000 2>/dev/null
+
+        git -C "$INSTALL_DIR" fetch origin "$BRANCH" 2>/dev/null
         local LOCAL REMOTE
-        LOCAL=$(git rev-parse HEAD 2>/dev/null)
-        REMOTE=$(git rev-parse origin/main 2>/dev/null)
+        LOCAL=$(git -C "$INSTALL_DIR" rev-parse HEAD 2>/dev/null)
+        REMOTE=$(git -C "$INSTALL_DIR" rev-parse origin/$BRANCH 2>/dev/null)
 
         if [ "$LOCAL" = "$REMOTE" ]; then
             echo -e "${GREEN}✅ Script đã là phiên bản mới nhất!${NC}"
@@ -27,35 +84,35 @@ do_update() {
         fi
 
         echo -e "${GREEN}Đã tìm thấy phiên bản mới! Đang cập nhật...${NC}"
-        git pull origin main
+        git -C "$INSTALL_DIR" pull origin "$BRANCH"
         if [ $? -eq 0 ]; then
             find "$INSTALL_DIR" -name "*.sh" -exec chmod +x {} \;
-            echo -e "${GREEN}✅ Cập nhật thành công!${NC}"
-            echo -e "${YELLOW}Khởi động lại script để áp dụng...${NC}"
-            sleep 2
+            echo -e "${GREEN}✅ Cập nhật thành công qua git pull!${NC}"
+            sleep 1
             cd /root
             exec /usr/local/bin/vps
         else
-            echo -e "${RED}git pull thất bại. Thử phương pháp clone...${NC}"
+            echo -e "${RED}git pull thất bại. Chuyển sang phương pháp clone...${NC}"
         fi
         cd /root
     fi
 
-    # ── Cách 2: Clone mới vào temp rồi copy (fallback) ────────
-    echo -e "${GREEN}Đã tìm thấy phiên bản mới! Đang tiến hành cập nhật...${NC}"
-
-    # Đảm bảo đứng ở /root không bị ảnh hưởng
+    # ── Cách 2: Clone mới vào temp rồi copy ───────────────────
+    echo -e "${GREEN}Đang tải phiên bản mới từ GitHub...${NC}"
     cd /root
 
     local TEMP_DIR
     TEMP_DIR=$(mktemp -d /root/vps_update_XXXXXX)
-    echo -e "${YELLOW}Cloning repository...${NC}"
 
-    git clone -b main --depth 1 "$REPO_URL" "$TEMP_DIR/vps-repo" 2>&1
-    if [ $? -ne 0 ]; then
-        echo -e "${RED}Failed to clone repository. Check internet connection.${NC}"
-        rm -rf "$TEMP_DIR"
-        pause; return 1
+    # Thử git clone (3 lần, HTTP/1.1)
+    if ! _clone_with_retry "$REPO_URL" "$TEMP_DIR/vps-repo"; then
+        # Fallback: wget tar.gz
+        if ! _download_zip_fallback "$TEMP_DIR/vps-repo"; then
+            echo -e "${RED}❌ Không thể tải về. Kiểm tra kết nối mạng.${NC}"
+            echo -e "${YELLOW}Thử lại sau hoặc chạy: git config --global http.version HTTP/1.1${NC}"
+            rm -rf "$TEMP_DIR"
+            pause; return 1
+        fi
     fi
 
     if [ ! -d "$TEMP_DIR/vps-repo/vps-manager" ]; then
@@ -64,11 +121,9 @@ do_update() {
         pause; return 1
     fi
 
-    # Backup current (đứng ở /root để tránh getcwd issues)
+    # Backup current
     local BACKUP_DIR="${INSTALL_DIR}_backup_$(date +%s)"
-    if [ -d "$INSTALL_DIR" ]; then
-        cp -r "$INSTALL_DIR" "$BACKUP_DIR"
-    fi
+    [ -d "$INSTALL_DIR" ] && cp -r "$INSTALL_DIR" "$BACKUP_DIR"
 
     # Copy new files
     cp -r "$TEMP_DIR/vps-repo/vps-manager/." "$INSTALL_DIR/"
@@ -83,17 +138,15 @@ do_update() {
     fi
 
     # Cleanup
-    rm -rf "$TEMP_DIR"
-    rm -rf "$BACKUP_DIR"
+    rm -rf "$TEMP_DIR" "$BACKUP_DIR"
     chmod +x "$INSTALL_DIR/install.sh"
     find "$INSTALL_DIR" -name "*.sh" -exec chmod +x {} \;
     ln -sf "$INSTALL_DIR/install.sh" /usr/local/bin/vps
 
     echo -e "${GREEN}✅ Cập nhật thành công!${NC}"
-    echo -e "${GREEN}Gõ 'vps' để chạy lại script.${NC}"
-    sleep 2
-
-    # Restart từ /root để tránh getcwd error
+    sleep 1
     cd /root
     exec /usr/local/bin/vps
 }
+
+
