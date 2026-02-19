@@ -164,6 +164,13 @@ auto_install_stack() {
     install_mariadb
     install_php "8.1"
 
+    # Auto Install phpMyAdmin
+    if [ -f "modules/phpmyadmin.sh" ]; then
+         echo -e "${BLUE}[2.5/4] Installing phpMyAdmin...${NC}"
+         source modules/phpmyadmin.sh
+         install_phpmyadmin
+    fi
+
     # 3. Security
     echo -e "${BLUE}[3/4] Configuring Security...${NC}"
     source modules/security.sh
