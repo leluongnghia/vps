@@ -3,31 +3,34 @@
 # modules/cache.sh - Cache Management
 
 cache_menu() {
-    clear
-    echo -e "${BLUE}=================================================${NC}"
-    echo -e "${GREEN}          Quản lý Cache${NC}"
-    echo -e "${BLUE}=================================================${NC}"
-    echo -e "1. Xóa Cache (FastCGI, Redis, Memcached)"
-    echo -e "2. Bật/Tắt Redis PHP Extension"
-    echo -e "3. Bật/Tắt Memcached PHP Extension"
-    echo -e "4. Bật/Tắt Opcache"
-    echo -e "5. Cấu hình Nginx cho WP Rocket"
-    echo -e "7. Tối ưu Server cho Object Cache Pro"
-    echo -e "0. Quay lại Menu chính"
-    echo -e "${BLUE}=================================================${NC}"
-    read -p "Nhập lựa chọn [0-7]: " choice
+    while true; do
+        clear
+        echo -e "${BLUE}=================================================${NC}"
+        echo -e "${GREEN}          Quản lý Cache${NC}"
+        echo -e "${BLUE}=================================================${NC}"
+        echo -e "1. Xóa Cache (FastCGI, Redis, Memcached)"
+        echo -e "2. Bật/Tắt Redis PHP Extension"
+        echo -e "3. Bật/Tắt Memcached PHP Extension"
+        echo -e "4. Bật/Tắt Opcache"
+        echo -e "5. Cấu hình Nginx cho WP Rocket"
+        echo -e "6. Cấu hình Nginx cho W3 Total Cache"
+        echo -e "7. Tối ưu Server cho Object Cache Pro"
+        echo -e "0. Quay lại Menu chính"
+        echo -e "${BLUE}=================================================${NC}"
+        read -p "Nhập lựa chọn [0-7]: " choice
 
-    case $choice in
-        1) clear_all_cache ;;
-        2) toggle_extension "redis" ;;
-        3) toggle_extension "memcached" ;;
-        4) toggle_extension "opcache" ;;
-        5) setup_rocket_nginx ;;
-        6) setup_w3tc_nginx ;;
-        7) setup_object_cache_pro ;;
-        0) return ;;
-        *) echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause ;;
-    esac
+        case $choice in
+            1) clear_all_cache ;;
+            2) toggle_extension "redis" ;;
+            3) toggle_extension "memcached" ;;
+            4) toggle_extension "opcache" ;;
+            5) setup_rocket_nginx ;;
+            6) setup_w3tc_nginx ;;
+            7) setup_object_cache_pro ;;
+            0) return ;;
+            *) echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause ;;
+        esac
+    done
 }
 
 setup_object_cache_pro() {

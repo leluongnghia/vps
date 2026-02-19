@@ -3,28 +3,30 @@
 # modules/optimize.sh - System & Server Optimization
 
 optimize_menu() {
-    clear
-    echo -e "${BLUE}=================================================${NC}"
-    echo -e "${GREEN}          Tối ưu hóa Hiệu suất (High Performance)${NC}"
-    echo -e "${BLUE}=================================================${NC}"
-    echo -e "1. Cài đặt & Cấu hình Redis Object Cache"
-    echo -e "2. Bật FastCGI Cache cho Nginx"
-    echo -e "3. Tối ưu hóa System (TCP BBR, Swap, Limits)"
-    echo -e "4. Cài đặt Brotli Compression (Nginx)"
-    echo -e "5. Cài đặt Memcached"
-    echo -e "0. Quay lại Menu chính"
-    echo -e "${BLUE}=================================================${NC}"
-    read -p "Nhập lựa chọn [0-5]: " choice
+    while true; do
+        clear
+        echo -e "${BLUE}=================================================${NC}"
+        echo -e "${GREEN}          Tối ưu hóa Hiệu suất (High Performance)${NC}"
+        echo -e "${BLUE}=================================================${NC}"
+        echo -e "1. Cài đặt & Cấu hình Redis Object Cache"
+        echo -e "2. Bật FastCGI Cache cho Nginx"
+        echo -e "3. Tối ưu hóa System (TCP BBR, Swap, Limits)"
+        echo -e "4. Cài đặt Brotli Compression (Nginx)"
+        echo -e "5. Cài đặt Memcached"
+        echo -e "0. Quay lại Menu chính"
+        echo -e "${BLUE}=================================================${NC}"
+        read -p "Nhập lựa chọn [0-5]: " choice
 
-    case $choice in
-        1) install_redis ;;
-        2) setup_fastcgi_cache ;;
-        3) optimize_system ;;
-        4) install_brotli ;;
-        5) install_memcached ;;
-        0) return ;;
-        *) echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause ;;
-    esac
+        case $choice in
+            1) install_redis ;;
+            2) setup_fastcgi_cache ;;
+            3) optimize_system ;;
+            4) install_brotli ;;
+            5) install_memcached ;;
+            0) return ;;
+            *) echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause ;;
+        esac
+    done
 }
 
 install_memcached() {

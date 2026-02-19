@@ -3,37 +3,39 @@
 # modules/database.sh - Database Management
 
 database_menu() {
-    clear
-    echo -e "${BLUE}=================================================${NC}"
-    echo -e "${GREEN}          Quản lý Database${NC}"
-    echo -e "${BLUE}=================================================${NC}"
-    echo -e "1. Danh sách Database"
-    echo -e "2. Thêm Database & User"
-    echo -e "3. Xóa Database"
-    echo -e "4. Đổi mật khẩu DB User"
-    echo -e "5. Import Database (.sql)"
-    echo -e "6. Export Database (Dump)"
-    echo -e "7. 🔍 Xem DB theo Website (WordPress)"
-    echo -e "8. Quản lý phpMyAdmin"
-    echo -e "0. Quay lại Menu chính"
-    echo -e "${BLUE}=================================================${NC}"
-    read -p "Nhập lựa chọn [0-8]: " choice
+    while true; do
+        clear
+        echo -e "${BLUE}=================================================${NC}"
+        echo -e "${GREEN}          Quản lý Database${NC}"
+        echo -e "${BLUE}=================================================${NC}"
+        echo -e "1. Danh sách Database"
+        echo -e "2. Thêm Database & User"
+        echo -e "3. Xóa Database"
+        echo -e "4. Đổi mật khẩu DB User"
+        echo -e "5. Import Database (.sql)"
+        echo -e "6. Export Database (Dump)"
+        echo -e "7. 🔍 Xem DB theo Website (WordPress)"
+        echo -e "8. Quản lý phpMyAdmin"
+        echo -e "0. Quay lại Menu chính"
+        echo -e "${BLUE}=================================================${NC}"
+        read -p "Nhập lựa chọn [0-8]: " choice
 
-    case $choice in
-        1) list_databases ;;
-        2) add_database ;;
-        3) delete_database ;;
-        4) change_db_pass ;;
-        5) import_database ;;
-        6) export_database ;;
-        7) view_db_by_website ;;
-        8) 
-            source "$ROOT_DIR/modules/phpmyadmin.sh"
-            phpmyadmin_menu 
-            ;;
-        0) return ;;
-        *) echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause ;;
-    esac
+        case $choice in
+            1) list_databases ;;
+            2) add_database ;;
+            3) delete_database ;;
+            4) change_db_pass ;;
+            5) import_database ;;
+            6) export_database ;;
+            7) view_db_by_website ;;
+            8) 
+                source "$ROOT_DIR/modules/phpmyadmin.sh"
+                phpmyadmin_menu 
+                ;;
+            0) return ;;
+            *) echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause ;;
+        esac
+    done
 }
 
 list_databases() {

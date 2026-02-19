@@ -216,28 +216,15 @@ auto_backup_set_retention() {
 
 
 restore_site_manual_upload() {
-    # 1. Select Target Domain
     echo -e "${YELLOW}--- Restore từ File Upload thủ công ---${NC}"
     echo -e "Vui lòng upload file backup (.zip / .sql) vào thư mục: /var/www/TEN_MIEN/public_html"
-    
-    # List active sites
-    target_sites=()
-    i=1
-    for d in /var/www/*; do
-        if [ -d "$d" ]; then
-            domain=$(basename "$d")
-            if [[ "$domain" != "html" ]]; then
-                target_sites+=("$domain")
-                echo -e "$i. $domain"
-                ((i++))
-            fi
-        fi
-    done
-    
-    read -p "Chọn website ĐÍCH [1-${#target_sites[@]}]: " t_choice
-    if ! [[ "$t_choice" =~ ^[0-9]+$ ]] || [ "$t_choice" -lt 1 ] || [ "$t_choice" -gt "${#target_sites[@]}" ]; then echo -e "${RED}Error${NC}"; pause; return; fi
-    target_domain="${target_sites[$((t_choice-1))]}"
-    search_dir="/var/www/$target_domain/public_html"
+    echo ""
+
+    source "$(dirname "${BASH_SOURCE[0]}")/site.sh"
+    select_site || return
+    local target_domain="$SELECTED_DOMAIN"
+    local search_dir="/var/www/$target_domain/public_html"
+
     
     # Detect Source Domain (Try to guess from filename or prompt)
     # Usually filenames are code_domain_time.zip
@@ -543,34 +530,16 @@ backup_to_gdrive() {
 }
 
 restore_site_local() {
-    # 1. Select Target Domain (Active Sites)
     echo -e "${YELLOW}--- Restore / Migrate Website (Local) ---${NC}"
     echo -e "Chọn Website ĐÍCH (Nơi dữ liệu sẽ được khôi phục vào):"
+    echo ""
+
+    source "$(dirname "${BASH_SOURCE[0]}")/site.sh"
+    select_site || return
+    local target_domain="$SELECTED_DOMAIN"
     
-    # List active sites in /var/www check
-    target_sites=()
-    i=1
-    for d in /var/www/*; do
-        if [ -d "$d" ]; then
-            domain=$(basename "$d")
-            if [[ "$domain" != "html" ]]; then
-                target_sites+=("$domain")
-                echo -e "$i. $domain"
-                ((i++))
-            fi
-        fi
-    done
-    
-    if [ ${#target_sites[@]} -eq 0 ]; then
-        echo -e "${RED}Chưa có website nào được tạo trên VPS.${NC}"
-        pause; return
-    fi
-    
-    read -p "Chọn website ĐÍCH [1-${#target_sites[@]}]: " t_choice
-    if ! [[ "$t_choice" =~ ^[0-9]+$ ]] || [ "$t_choice" -lt 1 ] || [ "$t_choice" -gt "${#target_sites[@]}" ]; then
-        echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause; return
-    fi
-    target_domain="${target_sites[$((t_choice-1))]}"
+
+
     
     # 2. Select Source Backup (From /root/backups)
     echo -e "\n${CYAN}Chọn Nguồn Backup (Domain gốc của bản sao lưu):${NC}"
