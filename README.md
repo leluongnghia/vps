@@ -80,7 +80,9 @@ Script Bash toàn diện giúp quản lý VPS **Ubuntu/Debian** qua menu tương
 ### 💾 Backup & Restore thông minh (Menu 5 & 22)
 - Backup Code + DB về **Local** hoặc **Google Drive** (rclone)
 - **Auto Backup Cron**: Lịch hàng ngày (3:00 AM) hoặc hàng tuần
-- **Backup tức thì TẤT CẢ sites** chỉ 1 lệnh
+- **Space Saving Mode**: Tự động xóa file trên VPS sau khi upload thành công lên Google Drive (tiết kiệm dung lượng)
+- **Backup ALL to Drive**: Sao lưu toàn bộ website lên Cloud chỉ với 1 thao tác
+- **Smart Remote Select**: Tự động liệt kê danh sách Remote rclone để chọn (không cần nhớ tên)
 - **Smart Restore với 3 lớp fallback**:
   1. Đọc từ kho lưu trữ hệ thống (`~/.vps-manager/sites_data.conf`)
   2. Đọc từ `wp-config.php` (nếu còn tồn tại)
