@@ -145,9 +145,12 @@ EOF
 
     nginx -t && systemctl reload nginx
     
+    # Detect IP
+    VPS_IP=$(curl -s https://ifconfig.me || hostname -I | awk '{print $1}')
+
     log_info "Cài đặt phpMyAdmin hoàn tất!"
     echo -e "${YELLOW}--- THÔNG TIN TRUY CẬP ---${NC}"
-    echo -e "URL: http://<IP_VPS>/phpmyadmin"
+    echo -e "URL: http://$VPS_IP/phpmyadmin"
     echo -e "${CYAN}[Bảo mật lớp 1] HTTP Auth:${NC}"
     echo -e "  User: $PMA_AUTH_USER"
     echo -e "  Pass: $PMA_AUTH_PASS"
