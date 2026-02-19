@@ -118,34 +118,39 @@ EOF
     # Sanitize IP (remove newlines/spaces)
     VPS_IP=$(echo "$VPS_IP" | tr -d '\n' | tr -d ' ')
 
-    # Create a dedicated vhost for IP access to ensure it works
-    # This avoids messing with 'default' site which might be broken or overridden
+    # Create a dedicated vhost for IP access (Default Server)
+    # This guarantees that accessing via IP (or any unmatched domain) hits this block
+    
+    # 1. Disable original default if exists to avoid conflict
+    if [ -L "/etc/nginx/sites-enabled/default" ]; then
+        rm /etc/nginx/sites-enabled/default
+    fi
+    
+    # 2. Create new default-pma
     cat > /etc/nginx/sites-available/000-phpmyadmin <<EOF
 server {
-    listen 80;
-    listen [::]:80;
-    server_name $VPS_IP; 
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
     root /var/www/html;
     index index.php index.html index.htm;
     
+    location / {
+        try_files \$uri \$uri/ =404;
+    }
+    
     # Priority for phpmyadmin
     include snippets/phpmyadmin.conf;
+    
+    # PHP handling for root (if needed)
+    location ~ \.php$ {
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:/run/php/php$PHP_VER-fpm.sock;
+    }
 }
 EOF
     # Enable it
     ln -sf /etc/nginx/sites-available/000-phpmyadmin /etc/nginx/sites-enabled/000-phpmyadmin
-    
-    # Also attempt to inject into default if it exists, as backup for other hostnames
-    if [ -f "/etc/nginx/sites-available/default" ]; then
-        if ! grep -q "include snippets/phpmyadmin.conf;" "/etc/nginx/sites-available/default"; then
-             sed -i '/server_name _;/a \    include snippets/phpmyadmin.conf;' /etc/nginx/sites-available/default
-        fi
-    fi
-    
-    # Ensure default site is enabled
-    if [ ! -L "/etc/nginx/sites-enabled/default" ]; then
-        ln -s /etc/nginx/sites-available/default /etc/nginx/sites-enabled/
-    fi
 
     if nginx -t; then
         systemctl reload nginx
