@@ -15,9 +15,10 @@ cache_menu() {
         echo -e "5. Cấu hình Nginx cho WP Rocket"
         echo -e "6. Cấu hình Nginx cho W3 Total Cache"
         echo -e "7. Tối ưu Server cho Object Cache Pro"
+        echo -e "8. Fix lỗi kết nối Redis (Connection Refused)"
         echo -e "0. Quay lại Menu chính"
         echo -e "${BLUE}=================================================${NC}"
-        read -p "Nhập lựa chọn [0-7]: " choice
+        read -p "Nhập lựa chọn [0-8]: " choice
 
         case $choice in
             1) clear_all_cache ;;
@@ -27,10 +28,84 @@ cache_menu() {
             5) setup_rocket_nginx ;;
             6) setup_w3tc_nginx ;;
             7) setup_object_cache_pro ;;
+            8) fix_redis_connection ;;
             0) return ;;
             *) echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause ;;
         esac
     done
+}
+
+fix_redis_connection() {
+    source "$(dirname "${BASH_SOURCE[0]}")/site.sh"
+    select_site || return
+    local domain=$SELECTED_DOMAIN
+    local wp_config="/var/www/$domain/public_html/wp-config.php"
+    
+    if [ ! -f "$wp_config" ]; then
+        echo -e "${RED}Không tìm thấy wp-config.php cho $domain${NC}"
+        pause; return
+    fi
+    
+    echo -e "${CYAN}Đang kiểm tra cấu hình Redis Server...${NC}"
+    
+    # 1. Check if Redis is running
+    if ! systemctl is-active --quiet redis-server; then
+        echo -e "${YELLOW}Redis chưa chạy. Đang khởi động...${NC}"
+        systemctl enable redis-server
+        systemctl start redis-server
+    fi
+    
+    # 2. Detect Connection Method (Unix Socket vs TCP)
+    local redis_conf="/etc/redis/redis.conf"
+    local use_socket=false
+    local socket_path="/var/run/redis/redis-server.sock"
+    
+    if grep -q "^unixsocket $socket_path" "$redis_conf" || grep -q "^unixsocket .*redis.*sock" "$redis_conf"; then
+        # Double check if socket file exists
+        # Grep might find config line even if commented out? No, ^ anchor helps. 
+        # But let's check config specifically.
+        # Actually easier to just check if config ENABLED it.
+        use_socket=true
+        # Extract exact path just in case
+        socket_path=$(grep "^unixsocket " "$redis_conf" | head -n1 | awk '{print $2}')
+    fi
+    
+    # 3. Update wp-config.php
+    echo -e "${YELLOW}Đang cấu hình lại kết nối Redis cho WordPress...${NC}"
+    
+    # Clean old configs
+    sed -i "/WP_REDIS_SCHEME/d" "$wp_config"
+    sed -i "/WP_REDIS_PATH/d" "$wp_config"
+    sed -i "/WP_REDIS_HOST/d" "$wp_config"
+    sed -i "/WP_REDIS_PORT/d" "$wp_config"
+    
+    if [ "$use_socket" = "true" ]; then
+        echo -e "-> Phát hiện Redis dùng Unix Socket: ${GREEN}$socket_path${NC}"
+        # Insert Socket Config
+        sed -i "/table_prefix/i define( 'WP_REDIS_SCHEME', 'unix' );" "$wp_config"
+        sed -i "/table_prefix/i define( 'WP_REDIS_PATH', '$socket_path' );" "$wp_config"
+    else
+        echo -e "-> Phát hiện Redis dùng TCP (127.0.0.1:6379)"
+        # Insert TCP Config explicitly
+        sed -i "/table_prefix/i define( 'WP_REDIS_HOST', '127.0.0.1' );" "$wp_config"
+        sed -i "/table_prefix/i define( 'WP_REDIS_PORT', 6379 );" "$wp_config"
+    fi
+    
+    # Add Key Salt if missing (to prevent collisions)
+    if ! grep -q "WP_CACHE_KEY_SALT" "$wp_config"; then
+        echo -e "-> Thêm WP_CACHE_KEY_SALT để tránh xung đột cache."
+        sed -i "/table_prefix/i define( 'WP_CACHE_KEY_SALT', '$domain:' );" "$wp_config"
+    fi
+    
+    # Permissions fix for socket if needed
+    if [ "$use_socket" = "true" ]; then
+        usermod -aG redis www-data
+        chmod 770 "$(dirname "$socket_path")" 2>/dev/null
+    fi
+    
+    echo -e "${GREEN}Đã sửa lỗi kết nối Redis thành công!${NC}"
+    echo "Hãy vào trang quản trị WP > Settings > Redis để kiểm tra lại."
+    pause
 }
 
 setup_object_cache_pro() {
