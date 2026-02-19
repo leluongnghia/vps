@@ -196,13 +196,32 @@ restore_site_manual_upload() {
         log_info "URL trong database ($source_domain) khớp với hiện tại hoặc không tìm thấy. Bỏ qua thay thế."
     fi
     
-    # FINAL PERMISSIONS FIX
+    # AUTO FIX WORDPRESS CORE IF NEEDED
+    # Check if critical files are missing (which causes 'No input file specified/redirect setup')
+    if [ ! -f "/var/www/$target_domain/public_html/wp-admin/admin.php" ] || [ ! -f "/var/www/$target_domain/public_html/wp-includes/version.php" ]; then
+        log_warn "Phát hiện thiếu file Core WordPress. Đang tự động tải lại Core..."
+        
+        cd "/var/www/$target_domain/public_html"
+        wget -q https://wordpress.org/latest.tar.gz
+        if [ -f latest.tar.gz ]; then
+            tar -xzf latest.tar.gz
+            cp -r wordpress/* .
+            rm -rf wordpress latest.tar.gz
+            log_info "Đã khôi phục Core WordPress thành công."
+        fi
+    fi
+
+    # FINAL PERMISSIONS FIX (AGAIN to cover new files)
     log_info "Đang thiết lập quyền (Permissions) chuẩn cho WordPress..."
     chown -R www-data:www-data "/var/www/$target_domain/public_html"
     find "/var/www/$target_domain/public_html" -type d -exec chmod 755 {} \;
     find "/var/www/$target_domain/public_html" -type f -exec chmod 644 {} \;
     
+    # Remove problematic configs
+    rm -f "/var/www/$target_domain/public_html/.htaccess" "/var/www/$target_domain/public_html/.user.ini"
+    
     log_info "Restore hoàn tất!"
+    pause
     pause
 }
 
