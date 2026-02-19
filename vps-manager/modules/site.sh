@@ -16,9 +16,9 @@ manage_sites_menu() {
     echo -e "7. Redirect Domain"
     echo -e "8. Đổi phiên bản PHP cho Website"
     echo -e "9. Clone/Nhân bản Website"
-    echo -e "10. Đổi thông tin Database (wp-config)"
     echo -e "11. Đặt mật khẩu bảo vệ thư mục"
     echo -e "12. Fix Permissions"
+    echo -e "13. Kiểm tra/Sửa lỗi WordPress Core"
     echo -e "0. Quay lại Menu chính"
     echo -e "${BLUE}=================================================${NC}"
     read -p "Nhập lựa chọn [0-12]: " choice
@@ -40,6 +40,7 @@ manage_sites_menu() {
         10) update_site_db_info ;;
         11) protect_folder ;;
         12) fix_permissions ;;
+        13) check_wp_core ;;
         0) return ;;
         *) echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause ;;
     esac
@@ -589,5 +590,50 @@ fix_permissions() {
     find "$target" -type f -exec chmod 644 {} \;
     
     log_info "Hoàn tất phân quyền."
+    pause
+}
+
+check_wp_core() {
+    select_site || return
+    domain="$SELECTED_DOMAIN"
+    
+    echo -e "${YELLOW}--- Kiểm tra & Sửa lỗi WordPress Core ---${NC}"
+    echo -e "Tính năng này sẽ tải lại bộ mã nguồn gốc của WordPress (wp-admin, wp-includes) để sửa lỗi thiếu file."
+    echo -e "Các file config, wp-content (themes, plugins, uploads) sẽ KHÔNG bị ảnh hưởng."
+    echo -e "${RED}Lưu ý: Nếu bạn đã sửa core WP (không khuyến khích), các thay đổi sẽ mất.${NC}"
+    
+    read -p "Tiếp tục? (y/n): " c
+    if [[ "$c" != "y" ]]; then return; fi
+    
+    log_info "Đang tải WordPress Core mới nhất..."
+    
+    cd "/var/www/$domain/public_html"
+    
+    # Download
+    wget -q https://wordpress.org/latest.tar.gz
+    if [ ! -f latest.tar.gz ]; then
+        log_error "Tải thất bại. Kiểm tra kết nối mạng."
+        return
+    fi
+    
+    tar -xzf latest.tar.gz
+    
+    log_info "Đang cập nhật Core Files..."
+    
+    # Copy core files, overwrite existing
+    cp -r wordpress/* .
+    
+    # Clean up
+    rm -rf wordpress latest.tar.gz
+    
+    # Fix permissions
+    chown -R www-data:www-data .
+    find . -type d -exec chmod 755 {} \;
+    find . -type f -exec chmod 644 {} \;
+    
+    # Delete potentially dangerous cached configs if any
+    rm -f .htaccess .user.ini
+    
+    log_info "Hoàn tất! Hãy thử truy cập lại website."
     pause
 }
