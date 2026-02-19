@@ -112,8 +112,26 @@ restore_site_manual_upload() {
         tmp_extract="/root/restore_tmp_$target_domain"
         rm -rf "$tmp_extract"; mkdir -p "$tmp_extract"
         
+    # PRESERVE DATABASE CREDENTIALS
+    # Before unzipping code (which overwrites wp-config.php), we must save the CORRECT credentials of the new server
+    log_info "Đang lưu thông tin Database hiện tại..."
+    # We already have target_db_name and target_db_user from logic above
+    # We need to ensure we have the correct password.
+    # If the site was just created, wp-config.php has the correct pass.
+    current_db_pass=$(grep "DB_PASSWORD" "/var/www/$target_domain/public_html/wp-config.php" 2>/dev/null | cut -d "'" -f 4)
+    
+    if [ -z "$current_db_pass" ]; then
+        # Fallback: maybe double quotes?
+        current_db_pass=$(grep "DB_PASSWORD" "/var/www/$target_domain/public_html/wp-config.php" 2>/dev/null | cut -d '"' -f 4)
+    fi
+
+    # RESTORE CODE
+    if [ -n "$code_file" ]; then
+        log_info "Giải nén Code..."
+        mkdir -p "$tmp_extract"
+        
         if [[ "$code_file" == *.zip ]]; then
-            unzip -o "$search_dir/$code_file" -d "$tmp_extract"
+            unzip -o -q "$search_dir/$code_file" -d "$tmp_extract"
         elif [[ "$code_file" == *.tar.gz ]]; then
             tar -xzf "$search_dir/$code_file" -C "$tmp_extract"
         else
@@ -124,7 +142,6 @@ restore_site_manual_upload() {
         
         # Move content to proper place
         log_info "Đang di chuyển dữ liệu..."
-        # If zip has /var/www/$source, we find it.
         # Find where wp-config.php is in extracted
         wp_root=$(find "$tmp_extract" -name "wp-config.php" -exec dirname {} \; | head -n 1)
         
@@ -136,13 +153,20 @@ restore_site_manual_upload() {
         fi
         
         rm -rf "$tmp_extract"
-        chown -R www-data:www-data "/var/www/$target_domain/public_html"
         
-        # Config patch
-        if [ -n "$target_db_pass" ]; then
-            sed -i "s/DB_NAME', '.*'/DB_NAME', '$target_db_name'/" "/var/www/$target_domain/public_html/wp-config.php"
-            sed -i "s/DB_USER', '.*'/DB_USER', '$target_db_user'/" "/var/www/$target_domain/public_html/wp-config.php"
-            sed -i "s/DB_PASSWORD', '.*'/DB_PASSWORD', '$target_db_pass'/" "/var/www/$target_domain/public_html/wp-config.php"
+        # RESTORE CORRECT DB CREDENTIALS TO wp-config.php
+        log_info "Khôi phục thông tin kết nối Database chuẩn..."
+        wp_conf="/var/www/$target_domain/public_html/wp-config.php"
+        
+        if [ -f "$wp_conf" ] && [ -n "$current_db_pass" ]; then
+            # Update DB_NAME
+            sed -i "s|define([ ]*['\"]DB_NAME['\"],.*)|define( 'DB_NAME', '$target_db_name' );|" "$wp_conf"
+            # Update DB_USER
+            sed -i "s|define([ ]*['\"]DB_USER['\"],.*)|define( 'DB_USER', '$target_db_user' );|" "$wp_conf"
+            # Update DB_PASSWORD
+            sed -i "s|define([ ]*['\"]DB_PASSWORD['\"],.*)|define( 'DB_PASSWORD', '$current_db_pass' );|" "$wp_conf"
+        else
+            log_warn "Không tìm thấy wp-config.php hoặc không lấy được mật khẩu DB cũ."
         fi
     fi
     
