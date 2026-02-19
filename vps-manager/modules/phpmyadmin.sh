@@ -68,6 +68,73 @@ install_phpmyadmin() {
     # Ensure default site or specific location exists
     # We will append a location block to the default site if it exists, or suggest URL
     
+    # Create a snippet for phpMyAdmin
+    cat > /etc/nginx/snippets/phpmyadmin.conf <<EOF
+location /phpmyadmin {
+    root /var/www/html;
+    index index.php index.html index.htm;
+    try_files \$uri \$uri/ =404;
+
+    location ~ ^/phpmyadmin/(.+\.php)$ {
+        alias /var/www/html/phpmyadmin/\$1;
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:/run/php/php8.1-fpm.sock; 
+        fastcgi_param SCRIPT_FILENAME \$request_filename;
+    }
+
+    location ~* ^/phpmyadmin/(.+\.(jpg|jpeg|gif|css|png|js|ico|html|xml|txt))$ {
+        root /var/www/html;
+    }
+}
+EOF
+
+    # Detect PHP version for socket
+    PHP_VER=$(php -r "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;")
+    if [ -S "/run/php/php$PHP_VER-fpm.sock" ]; then
+         sed -i "s|fastcgi_pass.*;|fastcgi_pass unix:/run/php/php$PHP_VER-fpm.sock;|" /etc/nginx/snippets/phpmyadmin.conf
+    elif [ -S "/run/php/php8.1-fpm.sock" ]; then
+         sed -i "s|fastcgi_pass.*;|fastcgi_pass unix:/run/php/php8.1-fpm.sock;|" /etc/nginx/snippets/phpmyadmin.conf
+    elif [ -S "/run/php/php8.2-fpm.sock" ]; then
+         sed -i "s|fastcgi_pass.*;|fastcgi_pass unix:/run/php/php8.2-fpm.sock;|" /etc/nginx/snippets/phpmyadmin.conf
+    elif [ -S "/run/php/php8.3-fpm.sock" ]; then
+         sed -i "s|fastcgi_pass.*;|fastcgi_pass unix:/run/php/php8.3-fpm.sock;|" /etc/nginx/snippets/phpmyadmin.conf
+    fi
+
+    # Check if default site exists
+    if [ -f "/etc/nginx/sites-available/default" ]; then
+        if ! grep -q "include snippets/phpmyadmin.conf;" "/etc/nginx/sites-available/default"; then
+             # Remove default location / if it conflicts or just insert before end of server block
+             # Ideally, we just tell user to include it or we add it to the server block
+             # Simple way: add to default server block
+             sed -i '/server_name _;/a \    include snippets/phpmyadmin.conf;' /etc/nginx/sites-available/default
+        fi
+    else
+        # If no default site, create one just for phpmyadmin/IP access
+        cat > /etc/nginx/sites-available/default <<EOF
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+    root /var/www/html;
+    index index.php index.html index.htm;
+
+    location / {
+        try_files \$uri \$uri/ =404;
+    }
+    
+    include snippets/phpmyadmin.conf;
+
+    location ~ \.php$ {
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:/run/php/php$PHP_VER-fpm.sock;
+    }
+}
+EOF
+        ln -s /etc/nginx/sites-available/default /etc/nginx/sites-enabled/ 2>/dev/null
+    fi
+
+    nginx -t && systemctl reload nginx
+    
     log_info "Cài đặt hoàn tất!"
     echo -e "Truy cập tại: http://<IP_VPS>/phpmyadmin"
     echo -e "User: root (MySQL root) hoặc user database bất kỳ."
