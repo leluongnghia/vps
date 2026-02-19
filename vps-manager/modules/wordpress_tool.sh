@@ -71,18 +71,23 @@ ensure_wp_cli() {
         mv wp-cli.phar /usr/local/bin/wp
     fi
     
-    # 2. Force Install & Enable PHP MySQL Extensions
-    # Check if mysql module is missing in CLI
-    if ! php -m | grep -q "mysql"; then
-        echo -e "${YELLOW}Đang cài đặt PHP MySQL Extensions (Bắt buộc cho WP-CLI)...${NC}"
+    # 2. Force Install & Enable PHP MySQL & XML Extensions (Required for WP-CLI & Plugins)
+    # Check if critical modules are missing
+    if ! php -m | grep -q "mysql" || ! php -m | grep -q "dom" || ! php -m | grep -q "mbstring"; then
+        echo -e "${YELLOW}Đang cài đặt PHP Extensions (MySQL, XML, MBString)...${NC}"
         apt-get update -qq
-        apt-get install -y php-mysql php8.1-mysql php8.2-mysql php8.3-mysql
+        # Install for all supported versions to be safe
+        apt-get install -y php-mysql php8.1-mysql php8.2-mysql php8.3-mysql \
+                           php-xml php8.1-xml php8.2-xml php8.3-xml \
+                           php-mbstring php8.1-mbstring php8.2-mbstring php8.3-mbstring \
+                           php-curl php8.1-curl php8.2-curl php8.3-curl \
+                           php-zip php8.1-zip php8.2-zip php8.3-zip
         
         # 3. Enable modules properly
         if command -v phpenmod &> /dev/null; then
-            phpenmod -v ALL mysql mysqli pdo_mysql
+            phpenmod -v ALL mysql mysqli pdo_mysql xml dom mbstring curl zip
         fi
-        echo -e "${GREEN}Đã cài đặt và kích hoạt php-mysql.${NC}"
+        echo -e "${GREEN}Đã cài đặt và kích hoạt các extension cần thiết.${NC}"
     fi
 }
 
