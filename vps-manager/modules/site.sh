@@ -135,9 +135,25 @@ create_nginx_config() {
     local config_file="/etc/nginx/sites-available/$domain"
     
     # Dynamic PHP Version Socket Detection
-    local php_sock=$(detect_php_socket)
+    local php_sock=""
+    if [ -S "/run/php/php8.1-fpm.sock" ]; then
+        php_sock="unix:/run/php/php8.1-fpm.sock"
+    elif [ -S "/run/php/php8.2-fpm.sock" ]; then
+        php_sock="unix:/run/php/php8.2-fpm.sock"
+    elif [ -S "/run/php/php8.3-fpm.sock" ]; then
+        php_sock="unix:/run/php/php8.3-fpm.sock"
+    elif [ -S "/run/php/php-fpm.sock" ]; then
+        php_sock="unix:/run/php/php-fpm.sock"
+    else
+        # Fallback detection
+        local php_ver=$(php -r "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;")
+        if [ -S "/run/php/php$php_ver-fpm.sock" ]; then
+             php_sock="unix:/run/php/php$php_ver-fpm.sock"
+        fi
+    fi
+
     if [ -z "$php_sock" ]; then
-        log_error "No PHP-FPM socket found. Please install PHP first."
+        log_error "Không tìm thấy PHP-FPM socket. Vui lòng cài đặt PHP-FPM."
         return 1
     fi
     
