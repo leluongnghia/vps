@@ -105,10 +105,12 @@ restore_site_manual_upload() {
     target_db_user="${target_db_name}_u"
     target_db_pass=$(grep "DB_PASSWORD" "/var/www/$target_domain/public_html/wp-config.php" 2>/dev/null | cut -d "'" -f 4)
 
-    # Init temp dir
-    tmp_extract="/root/restore_tmp_$target_domain"
-    rm -rf "$tmp_extract"; mkdir -p "$tmp_extract"
-        mkdir -p "$tmp_extract"
+    # RESTORE CODE
+    if [ -n "$code_file" ]; then
+        log_info "Giải nén Code..."
+        
+        tmp_extract="/root/restore_tmp_$target_domain"
+        rm -rf "$tmp_extract"; mkdir -p "$tmp_extract"
         
         if [[ "$code_file" == *.zip ]]; then
             unzip -o -q "$search_dir/$code_file" -d "$tmp_extract"
