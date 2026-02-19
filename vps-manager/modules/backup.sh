@@ -233,7 +233,6 @@ restore_site_manual_upload() {
     
     log_info "Restore hoàn tất!"
     pause
-    pause
 }
 
 setup_gdrive() {
