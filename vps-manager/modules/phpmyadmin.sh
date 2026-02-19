@@ -161,7 +161,23 @@ EOF
         echo -e "  User: $PMA_AUTH_USER"
         echo -e "  Pass: $PMA_AUTH_PASS"
         echo -e "${CYAN}[Bảo mật lớp 2] Database Login:${NC}"
-        echo -e "  Dùng User/Pass của Database (Root hoặc User riêng)"
+        
+        # Display Root Pass
+        if [ -f /root/.my.cnf ]; then
+            root_pass=$(grep "password" /root/.my.cnf | cut -d'=' -f2 | tr -d ' "')
+            echo -e "  ► User: root | Pass: $root_pass"
+        fi
+        
+        # Display Website Users
+        data_file="$HOME/.vps-manager/sites_data.conf"
+        if [ -f "$data_file" ]; then
+            echo -e "  ► Users Website (Đã lưu):"
+            while IFS='|' read -r domain db_name db_user db_pass; do
+                if [ -n "$domain" ]; then
+                    echo -e "    - $domain: User: $db_user | Pass: $db_pass"
+                fi
+            done < "$data_file"
+        fi
     else
         log_error "Lỗi cấu hình Nginx. Vui lòng kiểm tra lại 'nginx -t'"
         # Rollback faulty vhost to avoid breaking Nginx
@@ -222,5 +238,34 @@ view_phpmyadmin_auth() {
              echo -e "Pass: $new_pass"
         fi
     fi
+    fi
+    
+    echo -e "\n${YELLOW}--- [Bảo mật lớp 2] Database Login Info ---${NC}"
+    
+    # 1. ROOT Credential
+    if [ -f /root/.my.cnf ]; then
+        root_pass=$(grep "password" /root/.my.cnf | cut -d'=' -f2 | tr -d ' "')
+        echo -e "${RED}► MySQL ROOT:${NC}"
+        echo -e "   User: root"
+        echo -e "   Pass: $root_pass"
+    else
+        echo -e "${RED}MySQL Root:${NC} Không tìm thấy file .my.cnf (Pass rỗng hoặc đã đổi)"
+    fi
+    
+    # 2. Website Users
+    data_file="$HOME/.vps-manager/sites_data.conf"
+    if [ -f "$data_file" ]; then
+        echo -e "\n${CYAN}► Website Users (Từ hệ thống):${NC}"
+        while IFS='|' read -r domain db_name db_user db_pass; do
+            if [ -n "$domain" ]; then
+                echo -e "   🌐 $domain:"
+                echo -e "      User: $db_user"
+                echo -e "      Pass: $db_pass"
+            fi
+        done < "$data_file"
+    else
+        echo -e "\n${CYAN}► Website Users:${NC} Chưa có dữ liệu website nào."
+    fi
+    
     pause
 }
