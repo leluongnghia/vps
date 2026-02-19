@@ -105,6 +105,35 @@ Script Bash toàn diện giúp quản lý VPS **Ubuntu/Debian** qua menu tương
 
 ---
 
+## 🚀 Thứ tự ưu tiên tăng tốc WordPress
+
+Để đạt hiệu suất cao nhất, hãy thực hiện theo thứ tự ưu tiên sau:
+
+### 🥇 Tier 1 — Quan trọng nhất (Server-level & Database)
+| Option | Tác dụng |
+|--------|----------|
+| **1. Auto-Optimize Server** | Tối ưu PHP-FPM, OPcache, MySQL, Nginx FastCGI ở cấp server. Ảnh hưởng tích cực toàn bộ các site. |
+| **9. Disable Bloat** | Tắt Heartbeat, XML-RPC, Embeds... giúp giảm request không cần thiết. |
+| **8. Database Cleanup** | Dọn dẹp revision, spam, transient giúp query database nhanh hơn. |
+
+### 🥈 Tier 2 — Caching (Sau khi server ổn định)
+| Option | Tác dụng |
+|--------|----------|
+| **5. Nginx FastCGI Cache** | Cache PHP response, giúp bypass PHP hoàn toàn cho khách truy cập lại. |
+| **Cache Plugin (Rocket/W3TC)** | Tạo Static HTML giúp giảm TTFB xuống dưới 50ms. |
+| **6. Object Cache (Redis)** | Cache database queries vào RAM, giảm tải cho MySQL 60-80%. |
+
+### 🥉 Tier 3 — Tối ưu bổ sung
+| Option | Tác dụng |
+|--------|----------|
+| **7. HTTP/2 + Brotli/Gzip** | Cần SSL. Giảm dung lượng truyền tải 60-70%. |
+| **10. Image Optimization** | Cần thiết nếu site có nhiều hình ảnh chưa được tối ưu. |
+
+> **Quy trình khuyến nghị:** 
+> B1 (Opt 1) → B2 (Opt 9) → B3 (Opt 8) → B4 (Cài Cache Plugin) → B5 (Opt 6) → B6 (Opt 7)
+
+---
+
 ## 📋 Yêu cầu Hệ thống
 
 | Yêu cầu | Tối thiểu |
