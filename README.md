@@ -83,7 +83,7 @@ Script Bash toàn diện giúp quản lý VPS **Ubuntu/Debian** qua menu tương
 - **Space Saving Mode**: Tự động xóa file trên VPS sau khi upload thành công lên Google Drive (tiết kiệm dung lượng)
 - **Backup ALL to Drive**: Sao lưu toàn bộ website lên Cloud chỉ với 1 thao tác
 - **Smart Remote Select**: Tự động liệt kê danh sách Remote rclone để chọn (không cần nhớ tên)
-- **Smart Restore với 3 lớp fallback**:
+- **Smart Restore (Local & Cloud)** với 3 lớp fallback tự động xử lý config, URL, permissions:
   1. Đọc từ kho lưu trữ hệ thống (`~/.vps-manager/sites_data.conf`)
   2. Đọc từ `wp-config.php` (nếu còn tồn tại)
   3. **Tự động reset + tạo mới** DB password nếu không tìm thấy

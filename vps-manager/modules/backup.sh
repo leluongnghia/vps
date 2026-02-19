@@ -191,8 +191,18 @@ BACKUPSCRIPT
     pause
 }
 
+# Helper: Ensure zip installed
+ensure_zip_installed() {
+    if ! command -v zip &> /dev/null; then
+        echo "Installing zip..."
+        if command -v apt-get &> /dev/null; then apt-get install -y zip; elif command -v yum &> /dev/null; then yum install -y zip; fi
+    fi
+}
+
 backup_all_sites() {
-    log_info "Đang backup TẤT CẢ sites..."
+    log_info "Đang backup TẤT CẢ sites (Local)..."
+    ensure_zip_installed
+    
     local backup_root="/root/backups"
     local timestamp=$(date +%F_%H-%M-%S)
     local count=0
@@ -264,258 +274,239 @@ auto_backup_set_retention() {
 
 
 
-restore_site_manual_upload() {
-    echo -e "${YELLOW}--- Restore từ File Upload thủ công ---${NC}"
-    echo -e "Vui lòng upload file backup (.zip / .sql) vào thư mục: /var/www/TEN_MIEN/public_html"
-    echo ""
-
-    source "$(dirname "${BASH_SOURCE[0]}")/site.sh"
-    select_site || return
-    local target_domain="$SELECTED_DOMAIN"
-    local search_dir="/var/www/$target_domain/public_html"
-
+# --- SHARED RESTORE LOGIC ---
+perform_smart_restore() {
+    local target_domain=$1
+    local code_zip=$2
+    local db_sql=$3
     
-    # Detect Source Domain (Try to guess from filename or prompt)
-    # Usually filenames are code_domain_time.zip
-    # We will prompt later if search-replace needed.
+    log_info "Bắt đầu Smart Restore cho: $target_domain"
     
-    # 1. AUTO DETECT BACKUP FILES (Smart Select)
+    # 1. DB Credentials
+    local target_db_name=$(echo "$target_domain" | tr -d '.-' | cut -c1-16)
+    local target_db_user="${target_db_name}_u"
+    local target_db_pass=""
     
-    # -> CODE FILES
-    code_files=()
-    while IFS= read -r file; do
-        if [[ -f "$file" ]]; then code_files+=("$(basename "$file")"); fi
-    done < <(find "$search_dir" -maxdepth 1 \( -name "*.zip" -o -name "*.tar.gz" \) -type f)
-    
-    code_file=""
-    if [ ${#code_files[@]} -eq 1 ]; then
-        code_file="${code_files[0]}"
-        log_info "Tự động chọn Code Backup: $code_file"
-    elif [ ${#code_files[@]} -gt 1 ]; then
-        echo -e "\n${CYAN}Tìm thấy nhiều file Code:${NC}"
-        for i in "${!code_files[@]}"; do
-            echo -e "$((i+1)). ${code_files[$i]}"
-        done
-        read -p "Chọn file Code (Enter để bỏ qua): " c_sel
-        if [[ -n "$c_sel" && "$c_sel" =~ ^[0-9]+$ ]]; then code_file="${code_files[$((c_sel-1))]}"; fi
-    else
-        log_warn "Không tìm thấy file Code (.zip, .tar.gz) nào."
-    fi
-
-    # -> DB FILES
-    db_files=()
-    while IFS= read -r file; do
-        if [[ -f "$file" ]]; then db_files+=("$(basename "$file")"); fi
-    done < <(find "$search_dir" -maxdepth 1 \( -name "*.sql" -o -name "*.sql.gz" \) -type f)
-    
-    db_file=""
-    if [ ${#db_files[@]} -eq 1 ]; then
-        db_file="${db_files[0]}"
-        log_info "Tự động chọn DB Backup: $db_file"
-    elif [ ${#db_files[@]} -gt 1 ]; then
-        echo -e "\n${CYAN}Tìm thấy nhiều file Database:${NC}"
-        for i in "${!db_files[@]}"; do
-            echo -e "$((i+1)). ${db_files[$i]}"
-        done
-        read -p "Chọn file DB (Enter để bỏ qua): " db_sel
-        if [[ -n "$db_sel" && "$db_sel" =~ ^[0-9]+$ ]]; then db_file="${db_files[$((db_sel-1))]}"; fi
-    else
-        log_warn "Không tìm thấy file Database (.sql, .sql.gz) nào."
-    fi
-    
-    if [ -z "$code_file" ] && [ -z "$db_file" ]; then echo -e "${RED}Lỗi: Không có gì để restore.${NC}"; pause; return; fi
-
-    # 4. Confirm Restore
-    echo -e "\n${YELLOW}--- TỔNG QUÁT ---${NC}"
-    echo -e "Website ĐÍCH: ${GREEN}$target_domain${NC}"
-    echo -e "Nguồn Code  : ${CYAN}${code_file:-[Không thay đổi]}${NC}"
-    echo -e "Nguồn DB    : ${CYAN}${db_file:-[Không thay đổi]}${NC}"
-    echo -e "${RED}CẢNH BÁO: Dữ liệu hiện tại sẽ bị ghi đè!${NC}"
-
-    read -p "Xác nhận restore? (y/n): " confirm
-    if [[ "$confirm" != "y" ]]; then return; fi
-    
-    # 2. DATA PREPARATION & CREDENTIALS
-    # Logic: 
-    # 1. Try reading persistent store (~/.vps-manager/sites_data.conf) -> Best
-    # 2. Try reading current wp-config.php -> Okay
-    # 3. If both fail -> RESET Database Password to a new random one -> Guaranteed to work.
-    
-    target_db_name=$(echo "$target_domain" | tr -d '.-' | cut -c1-16)
-    target_db_user="${target_db_name}_u"
-    target_db_pass=""
-    
-    data_file="$HOME/.vps-manager/sites_data.conf"
-    
-    # Check Store
+    local data_file="$HOME/.vps-manager/sites_data.conf"
     if [ -f "$data_file" ]; then
-        db_info=$(grep "^$target_domain|" "$data_file")
-        if [ -n "$db_info" ]; then
-            target_db_pass=$(echo "$db_info" | cut -d'|' -f4)
-            log_info "Đã lấy mật khẩu DB từ kho lưu trữ hệ thống."
-        fi
+        target_db_pass=$(grep "^$target_domain|" "$data_file" | cut -d'|' -f4)
     fi
     
-    # Check Config (Fallback)
     if [ -z "$target_db_pass" ]; then
+        # Check wp-config
         target_db_pass=$(grep "DB_PASSWORD" "/var/www/$target_domain/public_html/wp-config.php" 2>/dev/null | cut -d "'" -f 4)
-        if [ -z "$target_db_pass" ]; then
-             target_db_pass=$(grep "DB_PASSWORD" "/var/www/$target_domain/public_html/wp-config.php" 2>/dev/null | cut -d '"' -f 4)
-        fi
+        [ -z "$target_db_pass" ] && target_db_pass=$(grep "DB_PASSWORD" "/var/www/$target_domain/public_html/wp-config.php" 2>/dev/null | cut -d '"' -f 4)
     fi
     
-    # Last Resort: Auto Reset Password
+    # Auto Reset if missing
     if [ -z "$target_db_pass" ]; then
-        log_warn "Không tìm thấy mật khẩu Database cũ. Đang tạo mật khẩu mới..."
+        log_warn "Không tìm thấy mật khẩu DB. Đang tạo mới..."
         target_db_pass=$(openssl rand -base64 18 | tr -dc 'a-zA-Z0-9' | head -c 16)
+        mysql -e "ALTER USER '${target_db_user}'@'localhost' IDENTIFIED BY '${target_db_pass}';" 2>/dev/null || \
+        mysql -e "CREATE USER IF NOT EXISTS '${target_db_user}'@'localhost' IDENTIFIED BY '${target_db_pass}';" 2>/dev/null
+        mysql -e "GRANT ALL PRIVILEGES ON ${target_db_name}.* TO '${target_db_user}'@'localhost';" 2>/dev/null
+        mysql -e "FLUSH PRIVILEGES;"
         
-        # Reset in MySQL
-        log_info "Đang reset mật khẩu DB User: $target_db_user"
-        mysql -e "ALTER USER '${target_db_user}'@'localhost' IDENTIFIED BY '${target_db_pass}';" 2>/dev/null
-        if [ $? -ne 0 ]; then
-             # Maybe user doesn't exist? Create it.
-             mysql -e "CREATE USER IF NOT EXISTS '${target_db_user}'@'localhost' IDENTIFIED BY '${target_db_pass}';" 2>/dev/null
-             mysql -e "GRANT ALL PRIVILEGES ON ${target_db_name}.* TO '${target_db_user}'@'localhost';" 2>/dev/null
-             mysql -e "FLUSH PRIVILEGES;"
-        fi
-        
-        # Save to store for future
         mkdir -p "$(dirname "$data_file")"
-        if [ -f "$data_file" ]; then sed -i "/^$target_domain|/d" "$data_file"; fi
+        sed -i "/^$target_domain|/d" "$data_file" 2>/dev/null
         echo "$target_domain|$target_db_name|$target_db_user|$target_db_pass" >> "$data_file"
     fi
 
-    # RESTORE CODE
-    if [ -n "$code_file" ]; then
+    # 2. Restore Code
+    if [ -n "$code_zip" ] && [ -f "$code_zip" ]; then
         log_info "Giải nén Code..."
-        
-        tmp_extract="/root/restore_tmp_$target_domain"
+        local tmp_extract="/root/restore_tmp_$target_domain"
         rm -rf "$tmp_extract"; mkdir -p "$tmp_extract"
         
-        if [[ "$code_file" == *.zip ]]; then
-            unzip -o -q "$search_dir/$code_file" -d "$tmp_extract"
-        elif [[ "$code_file" == *.tar.gz ]]; then
-            tar -xzf "$search_dir/$code_file" -C "$tmp_extract"
-        else
-            log_error "Định dạng file code không hỗ trợ (.zip, .tar.gz)"
-            rm -rf "$tmp_extract"
-            return
+        if [[ "$code_zip" == *.zip ]]; then
+            unzip -o -q "$code_zip" -d "$tmp_extract"
+        elif [[ "$code_zip" == *.tar.gz ]]; then
+            tar -xzf "$code_zip" -C "$tmp_extract"
         fi
         
-        # Move content to proper place
-        log_info "Đang di chuyển dữ liệu..."
-        # Find where wp-config.php is in extracted
-        wp_root=$(find "$tmp_extract" -name "wp-config.php" -exec dirname {} \; | head -n 1)
-        
+        # Move content
+        local wp_root=$(find "$tmp_extract" -name "wp-config.php" -exec dirname {} \; | head -n 1)
         if [ -n "$wp_root" ]; then
             cp -a "$wp_root/." "/var/www/$target_domain/public_html/"
         else
-            # Try just moving everything if empty
             cp -a "$tmp_extract/." "/var/www/$target_domain/public_html/"
         fi
-        
         rm -rf "$tmp_extract"
         
-        # RESTORE CORRECT DB CREDENTIALS TO wp-config.php
-        log_info "Khôi phục thông tin kết nối Database chuẩn..."
-        wp_conf="/var/www/$target_domain/public_html/wp-config.php"
-        
-        if [ -f "$wp_conf" ] && [ -n "$target_db_pass" ]; then
-            # Update DB_NAME
+        # Update wp-config
+        local wp_conf="/var/www/$target_domain/public_html/wp-config.php"
+        if [ -f "$wp_conf" ]; then
             sed -i "s|define([ ]*['\"]DB_NAME['\"],.*)|define( 'DB_NAME', '$target_db_name' );|" "$wp_conf"
-            # Update DB_USER
             sed -i "s|define([ ]*['\"]DB_USER['\"],.*)|define( 'DB_USER', '$target_db_user' );|" "$wp_conf"
-            # Update DB_PASSWORD
             sed -i "s|define([ ]*['\"]DB_PASSWORD['\"],.*)|define( 'DB_PASSWORD', '$target_db_pass' );|" "$wp_conf"
-        else
-            log_warn "Không tìm thấy wp-config.php để ghi cấu hình."
         fi
     fi
-    
-    # RESTORE DB
-    if [ -n "$db_file" ]; then
+
+    # 3. Restore DB
+    if [ -n "$db_sql" ] && [ -f "$db_sql" ]; then
         log_info "Import Database..."
-        if [[ "$db_file" == *.gz ]]; then
-            zcat "$search_dir/$db_file" | mysql "$target_db_name"
+        if [[ "$db_sql" == *.gz ]]; then
+            zcat "$db_sql" | mysql "$target_db_name"
         else
-            mysql "$target_db_name" < "$search_dir/$db_file"
+            mysql "$target_db_name" < "$db_sql"
         fi
         mysqlcheck --auto-repair "$target_db_name"
         
-        # Auto fix Table Prefix
-        log_info "Đang kiểm tra Table Prefix..."
-        detected_table=$(mysql -N -B -e "SHOW TABLES LIKE '%_users'" "$target_db_name" | head -n 1)
+        # Table Prefix Fix
+        local detected_table=$(mysql -N -B -e "SHOW TABLES LIKE '%_users'" "$target_db_name" | head -n 1)
         if [ -n "$detected_table" ]; then
-            new_prefix=${detected_table%users}
+            local new_prefix=${detected_table%users}
             if [ -n "$new_prefix" ]; then
-                log_info "Prefix phát hiện: '$new_prefix'. Cập nhật wp-config.php..."
                 sed -i "s/\\\$table_prefix\s*=\s*'.*';/\\\$table_prefix = '$new_prefix';/" "/var/www/$target_domain/public_html/wp-config.php"
             fi
         fi
     fi
-    
-    # AUTO DETECT & SEARCH REPLACE
-    log_info "Đang kiểm tra URL cũ trong Database..."
-    
+
+    # 4. Search Replace URL
     # Ensure WP-CLI (via shared helper from wordpress_tool.sh)
     if ! command -v wp &> /dev/null; then
         log_info "Cài đặt WP-CLI..."
         curl -sO https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
         chmod +x wp-cli.phar && mv wp-cli.phar /usr/local/bin/wp
     fi
-    
-    cd "/var/www/$target_domain/public_html"
-    
-    # Get current siteurl from DB
-    old_url=$(wp option get siteurl --allow-root 2>/dev/null)
-    # Extract domain from url (remove http:// or https://)
-    source_domain=$(echo "$old_url" | sed -e 's|^[^/]*//||' -e 's|/.*$||')
-    
-    if [ -n "$source_domain" ] && [ "$source_domain" != "$target_domain" ]; then
-        log_info "Phát hiện tên miền cũ: $source_domain -> Tên miền mới: $target_domain"
-        log_info "Tiến hành thay thế toàn bộ liên kết..."
-        
-        wp search-replace "http://$source_domain" "http://$target_domain" --allow-root
-        wp search-replace "https://$source_domain" "https://$target_domain" --allow-root
-        wp search-replace "$source_domain" "$target_domain" --allow-root
-        
-        log_info "Đã thay thế URL xong."
-    else
-        log_info "URL trong database ($source_domain) khớp với hiện tại hoặc không tìm thấy. Bỏ qua thay thế."
-    fi
-    
-    # AUTO FIX WORDPRESS CORE IF NEEDED
-    # Check if critical files are missing (which causes 'No input file specified/redirect setup')
-    if [ ! -f "/var/www/$target_domain/public_html/wp-admin/admin.php" ] || [ ! -f "/var/www/$target_domain/public_html/wp-includes/version.php" ]; then
-        log_warn "Phát hiện thiếu file Core WordPress. Đang tự động tải lại Core..."
-        
+
+    if command -v wp &> /dev/null; then
         cd "/var/www/$target_domain/public_html"
-        wget -q https://wordpress.org/latest.tar.gz
-        if [ -f latest.tar.gz ]; then
-            tar -xzf latest.tar.gz
-            cp -r wordpress/* .
-            rm -rf wordpress latest.tar.gz
-            log_info "Đã khôi phục Core WordPress thành công."
+        local old_url=$(wp option get siteurl --allow-root 2>/dev/null)
+        local source_domain=$(echo "$old_url" | sed -e 's|^[^/]*//||' -e 's|/.*$||')
+        
+        if [ -n "$source_domain" ] && [ "$source_domain" != "$target_domain" ]; then
+            log_info "Migrate Domain: $source_domain -> $target_domain"
+            wp search-replace "http://$source_domain" "http://$target_domain" --allow-root --quiet
+            wp search-replace "https://$source_domain" "https://$target_domain" --allow-root --quiet
+            wp search-replace "$source_domain" "$target_domain" --allow-root --quiet
         fi
     fi
 
-    # REMOVE CONFLICTING CONFIGS (Critical for open_basedir errors)
-    log_info "Đang dọn dẹp cấu hình cũ gây xung đột..."
-    find "/var/www/$target_domain/public_html" -name ".user.ini" -delete
-    find "/var/www/$target_domain/public_html" -name ".htaccess" -delete
-    
-    # Clean temporary files if any remain
-    if [ -n "$tmp_extract" ] && [ -d "$tmp_extract" ]; then
-        rm -rf "$tmp_extract"
-    fi
-
-    # FINAL PERMISSIONS FIX (AGAIN to cover new files)
-    log_info "Đang thiết lập quyền (Permissions) chuẩn cho WordPress..."
+    # 5. Permission & Cleanup
+    log_info "Phân quyền & Dọn dẹp..."
     chown -R www-data:www-data "/var/www/$target_domain/public_html"
     find "/var/www/$target_domain/public_html" -type d -exec chmod 755 {} \;
     find "/var/www/$target_domain/public_html" -type f -exec chmod 644 {} \;
     
-    log_info "Restore hoàn tất!"
+    # Remove bad configs
+    find "/var/www/$target_domain/public_html" -name ".user.ini" -delete
+    
+    log_info "✅ Smart Restore hoàn tất cho $target_domain"
+}
+
+restore_site_manual_upload() {
+    echo -e "${YELLOW}--- Restore từ File Upload thủ công ---${NC}"
+    echo -e "Vui lòng upload file backup (.zip / .sql) vào thư mục: /var/www/TEN_MIEN/public_html"
+    
+    source "$(dirname "${BASH_SOURCE[0]}")/site.sh"
+    select_site || return
+    local target_domain="$SELECTED_DOMAIN"
+    local search_dir="/var/www/$target_domain/public_html"
+
+    # Detect files
+    local code_file=$(find "$search_dir" -maxdepth 1 \( -name "*.zip" -o -name "*.tar.gz" \) -type f | head -n 1)
+    local db_file=$(find "$search_dir" -maxdepth 1 \( -name "*.sql" -o -name "*.sql.gz" \) -type f | head -n 1)
+    
+    if [ -z "$code_file" ] && [ -z "$db_file" ]; then 
+        echo -e "${RED}Lỗi: Không tìm thấy file .zip hoặc .sql trong public_html${NC}"
+        pause; return 
+    fi
+    
+    echo -e "Code Found: ${CYAN}$(basename "$code_file" 2>/dev/null)${NC}"
+    echo -e "DB Found  : ${CYAN}$(basename "$db_file" 2>/dev/null)${NC}"
+    
+    read -p "Tiến hành Restore? (y/n): " c
+    if [[ "$c" == "y" ]]; then
+        perform_smart_restore "$target_domain" "$code_file" "$db_file"
+    fi
+    pause
+}
+
+restore_site_gdrive() {
+    echo -e "${YELLOW}--- Restore từ Google Drive (Smart) ---${NC}"
+    
+    source "$(dirname "${BASH_SOURCE[0]}")/site.sh"
+    select_site || return
+    local target_domain="$SELECTED_DOMAIN"
+    
+    # List Remotes
+    echo -e "\n${CYAN}Danh sách Remote:${NC}"
+    local remotes=()
+    # Check if rclone is installed
+    if ! command -v rclone &> /dev/null; then
+        echo -e "${RED}Rclone chưa được cài đặt. Vui lòng cấu hình trước.${NC}"
+        pause; return
+    fi
+
+    while IFS= read -r line; do
+        # 'rclone listremotes' returns names with colon, e.g., 'gdrive:'
+        # Remove the trailing colon
+        r_name=${line%:}
+        remotes+=("$r_name")
+    done < <(rclone listremotes 2>/dev/null)
+
+    if [ ${#remotes[@]} -eq 0 ]; then
+        echo -e "${YELLOW}Chưa tìm thấy remote nào. Sẽ sử dụng mặc định 'gdrive'.${NC}"
+        remote="gdrive"
+    else
+        # Display list
+        for r in "${!remotes[@]}"; do
+             echo -e "$((r+1)). ${remotes[$r]}"
+        done
+        
+        echo -e "0. Nhập thủ công tên khác"
+        read -p "Chọn Remote Store [1-${#remotes[@]}] (mặc định: ${remotes[0]%%:}): " r_choice
+        
+        if [[ "$r_choice" == "0" ]]; then
+             read -p "Nhập tên remote: " remote
+        elif [[ "$r_choice" =~ ^[0-9]+$ ]] && [ "$r_choice" -ge 1 ] && [ "$r_choice" -le "${#remotes[@]}" ]; then
+             remote="${remotes[$((r_choice-1))]%%:}"
+        else
+             # Default to first one or 'gdrive' if invalid
+             remote="${remotes[0]%%:}" 
+             echo -e "${YELLOW}Lựa chọn không hợp lệ. Tự động chọn: $remote${NC}"
+        fi
+    fi
+    
+    # Final check
+    remote=${remote:-gdrive}
+    echo -e "Remote được chọn: ${GREEN}$remote${NC}"
+
+    # List Files in domain folder
+    echo -e "\n${CYAN}File trên Cloud ($remote:vps_backups/$target_domain/):${NC}"
+    rclone lsl "$remote:vps_backups/$target_domain/" | tail -n 10
+    
+    echo -e "\nCopy-paste tên file cần restore:"
+    read -p "File Code (.zip) [Enter để bỏ qua]: " cloud_code
+    read -p "File DB (.sql.gz) [Enter để bỏ qua]: " cloud_db
+    
+    if [ -z "$cloud_code" ] && [ -z "$cloud_db" ]; then return; fi
+    
+    # Download logic
+    local tmp_dir="/root/restore_cloud_tmp"
+    rm -rf "$tmp_dir"; mkdir -p "$tmp_dir"
+    
+    local local_code=""
+    local local_db=""
+    
+    if [ -n "$cloud_code" ]; then
+        log_info "Đang tải Code: $cloud_code ..."
+        rclone copy "$remote:vps_backups/$target_domain/$cloud_code" "$tmp_dir/" --progress
+        local_code="$tmp_dir/$cloud_code"
+    fi
+    
+    if [ -n "$cloud_db" ]; then
+        log_info "Đang tải DB: $cloud_db ..."
+        rclone copy "$remote:vps_backups/$target_domain/$cloud_db" "$tmp_dir/" --progress
+        local_db="$tmp_dir/$cloud_db"
+    fi
+    
+    # Execute Smart Restore
+    perform_smart_restore "$target_domain" "$local_code" "$local_db"
+    
+    # Cleanup download
+    rm -rf "$tmp_dir"
     pause
 }
 
@@ -532,7 +523,7 @@ setup_gdrive() {
     fi
     
     echo -e "${YELLOW}--- HƯỚNG DẪN CẤU HÌNH GOOGLE DRIVE (KHÔNG CẦN CÀI Rclone TRÊN MÁY MẸ) ---${NC}"
-    echo -e "${GREEN}MẸO: Sử dụng SSH Tunnel để xác thực trực tiếp trên trình duyệt máy tính.${NC}"
+    echo -e "MẸO: Sử dụng SSH Tunnel để xác thực trực tiếp trên trình duyệt máy tính.${NC}"
     echo -e "1. Thoát SSH hiện tại (gõ exit)."
     echo -e "2. Kết nối lại SSH với tham số chuyển tiếp port:"
     echo -e "   ${CYAN}ssh -L 53682:127.0.0.1:53682 root@IP_VPS_CUA_BAN${NC}"
@@ -566,13 +557,19 @@ backup_site_local() {
     backup_dir="/root/backups/$domain"
     mkdir -p "$backup_dir"
     
+    ensure_zip_installed
+    
     log_info "Backing up Code..."
-    zip -r "$backup_dir/code_$timestamp.zip" "/var/www/$domain/public_html" -x "*.log"
+    zip -r "$backup_dir/code_$timestamp.zip" "/var/www/$domain/public_html" -x "*.log" -q
     
     db_name=$(echo "$domain" | tr -d '.-' | cut -c1-16)
     log_info "Backing up DB..."
-    mysqldump "$db_name" > "$backup_dir/db_$timestamp.sql"
-    gzip "$backup_dir/db_$timestamp.sql"
+    if mysql -e "USE $db_name" 2>/dev/null; then
+        mysqldump "$db_name" > "$backup_dir/db_$timestamp.sql"
+        gzip "$backup_dir/db_$timestamp.sql"
+    else
+        log_warn "Database $db_name không tồn tại."
+    fi
     
     log_info "Backup hoàn tất tại $backup_dir"
     cleanup_old_backups "$backup_dir" 7
