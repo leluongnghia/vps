@@ -506,33 +506,96 @@ setup_image_optimization() {
 # 10. HTTP/2 & Brotli
 enable_http2_brotli() {
     log_info "Enabling HTTP/2 and Brotli compression..."
-    
-    # Check if Nginx supports HTTP/2
-    if nginx -V 2>&1 | grep -q "http_v2"; then
-        log_info "HTTP/2 already supported"
+
+    # ── HTTP/2 check ─────────────────────────────────────────
+    if nginx -V 2>&1 | grep -q "http_v2\|http_v3"; then
+        log_info "HTTP/2 already supported (built-in)"
     else
-        log_warn "Nginx doesn't support HTTP/2. Upgrade Nginx first."
+        log_warn "Nginx không hỗ trợ HTTP/2. Nâng cấp Nginx lên mainline."
     fi
-    
-    # Install Brotli module
-    if ! nginx -V 2>&1 | grep -q "brotli"; then
-        log_warn "Brotli module not compiled. Using gzip only."
+
+    # ── Brotli check ─────────────────────────────────────────
+    local brotli_ok=0
+    if nginx -V 2>&1 | grep -qi "brotli"; then
+        brotli_ok=1
+        log_info "Brotli module: ✅ đã cài"
+    else
+        log_warn "Brotli module chưa có trong Nginx build hiện tại."
+        echo ""
+        echo -e "Muốn thử cài module Brotli không?"
+        echo -e "  1. Cài libnginx-mod-http-brotli (apt)"
+        echo -e "  2. Bỏ qua, chỉ dùng Gzip"
+        read -p "Chọn [1/2]: " bc
+
+        if [[ "$bc" == "1" ]]; then
+            apt-get install -y libnginx-mod-http-brotli 2>/dev/null
+            if nginx -V 2>&1 | grep -qi "brotli"; then
+                brotli_ok=1
+                log_info "✅ Brotli module đã cài thành công"
+            else
+                log_warn "Cài thất bại hoặc Nginx build riêng. Dùng Gzip."
+            fi
+        fi
     fi
-    
-    # Enable Brotli in Nginx
-    cat > /etc/nginx/conf.d/brotli.conf <<EOF
+
+    # ── Xóa brotli.conf cũ nếu Brotli KHÔNG có (tránh nginx fail) ──
+    if [ "$brotli_ok" -eq 0 ] && [ -f /etc/nginx/conf.d/brotli.conf ]; then
+        log_warn "Xóa /etc/nginx/conf.d/brotli.conf cũ (module không tồn tại)"
+        rm -f /etc/nginx/conf.d/brotli.conf
+    fi
+
+    # ── Gzip (luôn áp dụng, hoạt động mọi Nginx build) ──────
+    if ! grep -q "gzip on" /etc/nginx/nginx.conf 2>/dev/null \
+       && ! [ -f /etc/nginx/conf.d/gzip.conf ]; then
+        cat > /etc/nginx/conf.d/gzip.conf << 'GEOF'
+# Gzip Compression (universal fallback)
+gzip on;
+gzip_vary on;
+gzip_proxied any;
+gzip_comp_level 6;
+gzip_min_length 256;
+gzip_types
+    text/plain text/css text/xml text/javascript
+    application/javascript application/x-javascript
+    application/json application/xml application/xml+rss
+    application/rss+xml application/atom+xml
+    image/svg+xml font/woff2 font/woff font/ttf;
+GEOF
+        log_info "Gzip config tạo tại /etc/nginx/conf.d/gzip.conf"
+    else
+        log_info "Gzip đã được cấu hình"
+    fi
+
+    # ── Brotli config (chỉ khi module có mặt) ─────────────
+    if [ "$brotli_ok" -eq 1 ]; then
+        cat > /etc/nginx/conf.d/brotli.conf << 'BEOF'
 # Brotli Compression
 brotli on;
 brotli_comp_level 6;
-brotli_types text/plain text/css text/xml text/javascript application/x-javascript application/javascript application/xml+rss application/json image/svg+xml;
-EOF
-    
-    nginx -t && systemctl reload nginx
-    
-    log_info "Compression optimized"
-    echo -e "${YELLOW}Note: HTTP/2 requires SSL certificate${NC}"
+brotli_static on;
+brotli_types text/plain text/css text/xml text/javascript
+    application/javascript application/x-javascript
+    application/json application/xml application/rss+xml
+    image/svg+xml font/woff2 font/woff;
+BEOF
+        log_info "Brotli config tạo tại /etc/nginx/conf.d/brotli.conf"
+    fi
+
+    # ── Test & Reload ─────────────────────────────────────
+    echo ""
+    if nginx -t; then
+        systemctl reload nginx
+        log_info "✅ Compression đã áp dụng thành công"
+        echo -e "${YELLOW}Note: HTTP/2 cần SSL certificate (HTTPS)${NC}"
+        [ "$brotli_ok" -eq 1 ] \
+            && echo -e "${GREEN}  → Brotli + Gzip: cả hai đang hoạt động${NC}" \
+            || echo -e "${YELLOW}  → Chỉ Gzip: Brotli cần module riêng${NC}"
+    else
+        log_error "Nginx config lỗi. Kiểm tra /etc/nginx/conf.d/"
+    fi
     pause
 }
+
 
 # 11. Benchmark Test
 benchmark_wordpress() {
