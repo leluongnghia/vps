@@ -26,74 +26,81 @@ get_installed_php_version() {
 }
 
 wp_performance_menu() {
-    clear
-    echo -e "${BLUE}=================================================${NC}"
-    echo -e "${GREEN}    WordPress Performance Optimization${NC}"
-    echo -e "${BLUE}=================================================${NC}"
-    echo -e "1. 🚀 Auto-Optimize (All-in-One - Recommended)"
-    echo -e "2. ⚡ PHP-FPM Tuning (Memory, Workers)"
-    echo -e "3. 💾 OPcache Optimization"
-    echo -e "4. 🗄️  MySQL/MariaDB Tuning"
-    echo -e "5. 🔥 Nginx FastCGI Micro-Caching"
-    echo -e "6. 🧹 Database Cleanup & Optimization"
-    echo -e "7. 📦 Enable Object Cache (Redis/Memcached)"
-    echo -e "8. 🎯 Disable WordPress Bloat (Heartbeat, Embeds, etc.)"
-    echo -e "9. 🖼️  Image Optimization Setup"
-    echo -e "10. 🌐 HTTP/2 & Brotli Compression"
-    echo -e "11. 📊 Performance Benchmark Test"
-    echo -e "0. Back to Main Menu"
-    echo -e "${BLUE}=================================================${NC}"
-    read -p "Select [0-11]: " choice
+    while true; do
+        clear
+        echo -e "${BLUE}=================================================${NC}"
+        echo -e "${GREEN}    🚀 WordPress Performance Optimization${NC}"
+        echo -e "${BLUE}=================================================${NC}"
+        echo -e "${CYAN}--- ⚙️  Server-level (Toàn bộ server) ---${NC}"
+        echo -e "1. 🚀 Auto-Optimize Server (PHP + MySQL + Nginx + OPcache)"
+        echo -e "2. ⚡ PHP-FPM Tuning (Memory, Workers)"
+        echo -e "3. 💾 OPcache Optimization"
+        echo -e "4. 🗄️  MySQL/MariaDB Tuning"
+        echo -e "5. 🔥 Nginx FastCGI Micro-Caching"
+        echo -e "6. 📦 Enable Object Cache (Redis/Memcached)"
+        echo -e "7. 🌐 HTTP/2 & Brotli Compression"
+        echo -e ""
+        echo -e "${CYAN}--- 🌐 Per-Site (Chọn từng website) ---${NC}"
+        echo -e "8.  🧹 Database Cleanup & Optimization"
+        echo -e "9.  🎯 Disable WordPress Bloat (Heartbeat, Embeds...)"
+        echo -e "10. 🖼️  Image Optimization Setup"
+        echo -e "11. 📊 Performance Benchmark Test"
+        echo -e ""
+        echo -e "0. Back to Main Menu"
+        echo -e "${BLUE}=================================================${NC}"
+        read -p "Select [0-11]: " choice
 
-    case $choice in
-        1) auto_optimize_wordpress ;;
-        2) tune_php_fpm ;;
-        3) optimize_opcache ;;
-        4) tune_mysql ;;
-        5) setup_fastcgi_microcache ;;
-        6) cleanup_wordpress_db ;;
-        7) setup_object_cache ;;
-        8) disable_wordpress_bloat ;;
-        9) setup_image_optimization ;;
-        10) enable_http2_brotli ;;
-        11) benchmark_wordpress ;;
-        0) return ;;
-        *) echo -e "${RED}Invalid choice!${NC}"; pause ;;
-    esac
+        case $choice in
+            1) auto_optimize_server ;;
+            2) tune_php_fpm ;;
+            3) optimize_opcache ;;
+            4) tune_mysql ;;
+            5) setup_fastcgi_microcache ;;
+            6) setup_object_cache ;;
+            7) enable_http2_brotli ;;
+            8) cleanup_wordpress_db ;;
+            9) disable_wordpress_bloat ;;
+            10) setup_image_optimization ;;
+            11) benchmark_wordpress ;;
+            0) return ;;
+            *) echo -e "${RED}Invalid choice!${NC}"; pause ;;
+        esac
+    done
 }
 
-# 1. Auto-Optimize Everything
-auto_optimize_wordpress() {
-    log_info "Starting comprehensive WordPress optimization..."
-    
-    echo -e "${YELLOW}This will optimize:${NC}"
-    echo "  ✓ PHP-FPM settings"
-    echo "  ✓ OPcache configuration"
-    echo "  ✓ MySQL/MariaDB"
-    echo "  ✓ Nginx caching"
-    echo "  ✓ WordPress database"
-    echo "  ✓ Disable bloat features"
+# 1. Auto-Optimize SERVER (server-level settings only, NOT per-site)
+auto_optimize_server() {
+    clear
+    echo -e "${BLUE}=================================================${NC}"
+    echo -e "${GREEN}    🚀 Auto-Optimize Server${NC}"
+    echo -e "${BLUE}=================================================${NC}"
+    echo -e "${CYAN}Các cài đặt này áp dụng cho TOÀN BỘ server${NC}"
+    echo -e "(Không đụng vào wp-config.php của bất kỳ site nào)"
     echo ""
-    read -p "Continue? [y/N]: " confirm
-    
-    if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
-        return
-    fi
-    
-    # Run all optimizations
+    echo -e "Đị sẽ tối ưu:"
+    echo "  ✓ PHP-FPM (workers, memory dựa theo RAM thực tế)"
+    echo "  ✓ OPcache + JIT compilation"
+    echo "  ✓ MySQL/MariaDB InnoDB buffer (50% RAM)"
+    echo "  ✓ Nginx FastCGI Cache zone (100MB)"
+    echo ""
+    echo -e "${YELLOW}Không ảnh hưởng đến:${NC}"
+    echo "  ✓ wp-config.php → dùng Option 9 cho từng site"
+    echo "  ✓ Database WordPress → dùng Option 8 cho từng site"
+    echo ""
+    read -p "Tiếp tục? [y/N]: " confirm
+    if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then return; fi
+
     tune_php_fpm "auto"
     optimize_opcache "auto"
     tune_mysql "auto"
     setup_fastcgi_microcache "auto"
-    cleanup_wordpress_db "auto"
-    disable_wordpress_bloat "auto"
-    
-    log_info "✅ WordPress optimization complete!"
-    echo -e "${GREEN}Your WordPress site should now be significantly faster!${NC}"
-    echo -e "${YELLOW}Recommended next steps:${NC}"
-    echo "  1. Install a caching plugin (WP Rocket, W3 Total Cache)"
-    echo "  2. Enable object cache (Option 7)"
-    echo "  3. Run benchmark test (Option 11)"
+
+    echo ""
+    log_info "✅ Server optimization complete!"
+    echo -e "${YELLOW}Bước tiếp theo (per-site):${NC}"
+    echo "  → Option 8: Dọn Database từng site"
+    echo "  → Option 9: Tắt Bloat từng site"
+    echo "  → Option 11: Benchmark từng site"
     pause
 }
 
@@ -254,53 +261,74 @@ EOF
     if [ -z "$auto_mode" ]; then pause; fi
 }
 
-# 6. Database Cleanup
+# 8. Database Cleanup
 cleanup_wordpress_db() {
-    local auto_mode=$1
-    
-    # Select WordPress site
-    if [ -z "$auto_mode" ]; then
-        source "$(dirname "${BASH_SOURCE[0]}")/wordpress_tool.sh"
-        select_wp_site || return
-        ensure_wp_cli
-    else
-        # Auto mode: clean all WP sites
-        log_info "Cleaning all WordPress databases..."
-        for d in /var/www/*; do
-            if [[ -d "$d" && -f "$d/public_html/wp-config.php" ]]; then
-                local domain=$(basename "$d")
-                WEB_ROOT="/var/www/$domain/public_html"
-                WP_CMD="wp --path=$WEB_ROOT --allow-root"
-                
-                log_info "Cleaning $domain database..."
-                $WP_CMD transient delete --all 2>/dev/null
-                $WP_CMD post delete $($WP_CMD post list --post_type='revision' --format=ids 2>/dev/null) --force 2>/dev/null
-                $WP_CMD comment delete $($WP_CMD comment list --status=spam --format=ids 2>/dev/null) --force 2>/dev/null
-                $WP_CMD db optimize 2>/dev/null
-            fi
-        done
+    clear
+    echo -e "${BLUE}=================================================${NC}"
+    echo -e "${GREEN}     🧹 Database Cleanup & Optimization${NC}"
+    echo -e "${BLUE}=================================================${NC}"
+    echo -e "Phạm vi áp dụng:"
+    echo -e "  1. Chọn 1 website cụ thể"
+    echo -e "  2. Áp dụng cho TẤT CẢ WordPress sites"
+    echo -e "  0. Hủy"
+    read -p "Chọn: " scope
+
+    case $scope in
+        1)
+            source "$(dirname "${BASH_SOURCE[0]}")/wordpress_tool.sh"
+            select_wp_site || return
+            ensure_wp_cli
+            _do_db_cleanup "$SELECTED_DOMAIN"
+            ;;
+        2)
+            echo -e "${YELLOW}Sẽ dọn database TẤT CẢ WordPress sites:${NC}"
+            local found=0
+            for d in /var/www/*/public_html/wp-config.php; do
+                [ ! -f "$d" ] && continue
+                local domain
+                domain=$(basename "$(dirname "$(dirname "$d")")")
+                echo "  → $domain"
+                found=$((found+1))
+            done
+            [ "$found" -eq 0 ] && echo -e "${RED}Không có site WordPress nào.${NC}" && pause && return
+            echo ""
+            read -p "Tiếp tục dọn $found site? [y/N]: " c
+            [[ "$c" != "y" && "$c" != "Y" ]] && return
+            for d in /var/www/*/public_html/wp-config.php; do
+                [ ! -f "$d" ] && continue
+                local domain
+                domain=$(basename "$(dirname "$(dirname "$d")")")
+                _do_db_cleanup "$domain"
+            done
+            ;;
+        0) return ;;
+    esac
+    pause
+}
+
+_do_db_cleanup() {
+    local domain=$1
+    local WEB_ROOT="/var/www/$domain/public_html"
+    local WP_CMD="wp --path=$WEB_ROOT --allow-root"
+
+    if [ ! -f "$WEB_ROOT/wp-config.php" ]; then
+        echo -e "${RED}$domain không phải WordPress site.${NC}"
         return
     fi
-    
-    log_info "Cleaning WordPress database for $SELECTED_DOMAIN..."
-    
-    # Delete transients
-    $WP_CMD transient delete --all
-    
-    # Delete post revisions
-    $WP_CMD post delete $($WP_CMD post list --post_type='revision' --format=ids) --force 2>/dev/null
-    
-    # Delete spam comments
-    $WP_CMD comment delete $($WP_CMD comment list --status=spam --format=ids) --force 2>/dev/null
-    
-    # Delete trashed comments
-    $WP_CMD comment delete $($WP_CMD comment list --status=trash --format=ids) --force 2>/dev/null
-    
-    # Optimize database tables
-    $WP_CMD db optimize
-    
-    log_info "Database cleaned and optimized"
-    pause
+
+    log_info "Dọn database: $domain"
+    $WP_CMD transient delete --all 2>/dev/null && echo "  ✓ Transients"
+    local rev_ids
+    rev_ids=$($WP_CMD post list --post_type='revision' --format=ids 2>/dev/null)
+    [ -n "$rev_ids" ] && $WP_CMD post delete $rev_ids --force 2>/dev/null && echo "  ✓ Revisions"
+    local spam_ids
+    spam_ids=$($WP_CMD comment list --status=spam --format=ids 2>/dev/null)
+    [ -n "$spam_ids" ] && $WP_CMD comment delete $spam_ids --force 2>/dev/null && echo "  ✓ Spam"
+    local trash_ids
+    trash_ids=$($WP_CMD comment list --status=trash --format=ids 2>/dev/null)
+    [ -n "$trash_ids" ] && $WP_CMD comment delete $trash_ids --force 2>/dev/null && echo "  ✓ Trash"
+    $WP_CMD db optimize 2>/dev/null && echo "  ✓ DB Optimized"
+    log_info "✅ $domain: Database cleaned"
 }
 
 # 7. Object Cache Setup
@@ -354,50 +382,72 @@ setup_object_cache() {
     pause
 }
 
-# 8. Disable WordPress Bloat
+# 9. Disable WordPress Bloat
 disable_wordpress_bloat() {
-    local auto_mode=$1
-    
-    if [ -z "$auto_mode" ]; then
-        source "$(dirname "${BASH_SOURCE[0]}")/wordpress_tool.sh"
-        select_wp_site || return
-        ensure_wp_cli
-    else
-        # Auto mode: apply to all sites
-        for d in /var/www/*; do
-            if [[ -d "$d" && -f "$d/public_html/wp-config.php" ]]; then
-                local domain=$(basename "$d")
-                WEB_ROOT="/var/www/$domain/public_html"
-                WP_CMD="wp --path=$WEB_ROOT --allow-root"
-                
-                # Apply optimizations
-                $WP_CMD config set WP_POST_REVISIONS 3 --raw --type=constant 2>/dev/null
-                $WP_CMD config set AUTOSAVE_INTERVAL 300 --raw --type=constant 2>/dev/null
-                $WP_CMD config set EMPTY_TRASH_DAYS 7 --raw --type=constant 2>/dev/null
-                $WP_CMD config set WP_CRON_LOCK_TIMEOUT 60 --raw --type=constant 2>/dev/null
-            fi
-        done
-        return
-    fi
-    
-    log_info "Disabling WordPress bloat features..."
-    
-    # Limit post revisions
-    $WP_CMD config set WP_POST_REVISIONS 3 --raw --type=constant
-    
-    # Increase autosave interval (5 minutes)
-    $WP_CMD config set AUTOSAVE_INTERVAL 300 --raw --type=constant
-    
-    # Auto-empty trash after 7 days
-    $WP_CMD config set EMPTY_TRASH_DAYS 7 --raw --type=constant
-    
-    # Increase cron lock timeout
-    $WP_CMD config set WP_CRON_LOCK_TIMEOUT 60 --raw --type=constant
-    
-    log_info "WordPress bloat features optimized"
-    echo -e "${YELLOW}Recommended: Disable embeds, heartbeat via plugin${NC}"
+    clear
+    echo -e "${BLUE}=================================================${NC}"
+    echo -e "${GREEN}     🎯 Disable WordPress Bloat${NC}"
+    echo -e "${BLUE}=================================================${NC}"
+    echo -e "Sẽ tắt: Heartbeat limits, Embeds, Post Revisions (wp-config.php)"
+    echo ""
+    echo -e "Phạm vi áp dụng:"
+    echo -e "  1. Chọn 1 website cụ thể"
+    echo -e "  2. Áp dụng cho TẤT CẢ WordPress sites"
+    echo -e "  0. Hủy"
+    read -p "Chọn: " scope
+
+    case $scope in
+        1)
+            source "$(dirname "${BASH_SOURCE[0]}")/wordpress_tool.sh"
+            select_wp_site || return
+            ensure_wp_cli
+            _do_disable_bloat "$SELECTED_DOMAIN"
+            ;;
+        2)
+            echo -e "${YELLOW}Áp dụng cho TẤT CẢ WordPress sites:${NC}"
+            local found=0
+            for d in /var/www/*/public_html/wp-config.php; do
+                [ ! -f "$d" ] && continue
+                local domain
+                domain=$(basename "$(dirname "$(dirname "$d")")")
+                echo "  → $domain"
+                found=$((found+1))
+            done
+            [ "$found" -eq 0 ] && echo -e "${RED}Không có site WordPress nào.${NC}" && pause && return
+            echo ""
+            read -p "Tiếp tục cho $found site? [y/N]: " c
+            [[ "$c" != "y" && "$c" != "Y" ]] && return
+            for d in /var/www/*/public_html/wp-config.php; do
+                [ ! -f "$d" ] && continue
+                local domain
+                domain=$(basename "$(dirname "$(dirname "$d")")")
+                _do_disable_bloat "$domain"
+            done
+            ;;
+        0) return ;;
+    esac
     pause
 }
+
+_do_disable_bloat() {
+    local domain=$1
+    local WEB_ROOT="/var/www/$domain/public_html"
+    local WP_CMD="wp --path=$WEB_ROOT --allow-root"
+
+    if [ ! -f "$WEB_ROOT/wp-config.php" ]; then
+        echo -e "${RED}$domain không phải WordPress site.${NC}"
+        return
+    fi
+
+    log_info "Disable Bloat: $domain"
+    $WP_CMD config set WP_POST_REVISIONS 3 --raw --type=constant 2>/dev/null && echo "  ✓ Revisions limit = 3"
+    $WP_CMD config set AUTOSAVE_INTERVAL 300 --raw --type=constant 2>/dev/null && echo "  ✓ Autosave = 5 phút"
+    $WP_CMD config set EMPTY_TRASH_DAYS 7 --raw --type=constant 2>/dev/null && echo "  ✓ Trash = 7 ngày"
+    $WP_CMD config set WP_CRON_LOCK_TIMEOUT 60 --raw --type=constant 2>/dev/null && echo "  ✓ Cron timeout"
+    log_info "✅ $domain: Bloat disabled"
+    echo -e "${YELLOW}Gợi ý: Dùng plugin (Perfmatters / Asset CleanUp) để tắt Heartbeat, Embeds per-page${NC}"
+}
+
 
 # 9. Image Optimization Setup
 setup_image_optimization() {
