@@ -181,48 +181,56 @@ location ~ /wp-content/cache/min/.*(js|css)$ {
 EOF
 
     echo -e "${YELLOW}Bạn có muốn tự động áp dụng cấu hình này cho website không?${NC}"
-    echo -e "1. Áp dụng cho TẤT CẢ website"
-    echo -e "2. Chọn website cụ thể"
-    echo -e "0. Không (Chỉ tạo file)"
+    echo -e "  1. Áp dụng cho TẤT CẢ website WordPress"
+    echo -e "  2. Chọn website cụ thể"
+    echo -e "  0. Không (Chỉ tạo file snippet)"
     read -p "Chọn: " c
-    
+
     if [[ "$c" == "0" ]]; then return; fi
-    
+
     apply_rocket() {
         local domain=$1
         local conf="/etc/nginx/sites-available/$domain"
         if [ -f "$conf" ]; then
-            # 1. Include Config
             if ! grep -q "wp-rocket.conf" "$conf"; then
                 sed -i "/server_name/a \    include $snippet;" "$conf"
                 log_info "Đã thêm include wp-rocket.conf cho $domain"
             fi
-            
-            # 2. Optimize try_files (Serve Static HTML directly)
-            # This makes site EXTREMELY fast by bypassing PHP
-            if grep -q "try_files \$uri \$uri/ /index.php?\$args;" "$conf"; then
-                # Backup first
+            if grep -q 'try_files \$uri \$uri/ /index.php?\$args;' "$conf"; then
                 cp "$conf" "$conf.bak_rocket"
-                # Replace standard try_files with Rocket try_files
-                # Using | delimiter for sed because path contains /
-                # We want to insert the cache path check BEFORE $uri
-                rocket_path="/wp-content/cache/wp-rocket/\$http_host\$request_uri/index-https.html /wp-content/cache/wp-rocket/\$http_host\$request_uri/index.html"
-                
+                rocket_path='/wp-content/cache/wp-rocket/$http_host$request_uri/index-https.html /wp-content/cache/wp-rocket/$http_host$request_uri/index.html'
                 sed -i "s|try_files \$uri \$uri/ /index.php?\$args;|try_files $rocket_path \$uri \$uri/ /index.php?\$args;|" "$conf"
-                log_info "Đã tối ưu try_files (Static Serve) cho $domain"
+                log_info "Đã tối ưu try_files cho $domain"
             fi
         fi
     }
-    
+
+    # Chỉ áp dụng cho domain thật: có /var/www/$d/public_html, không phải .bak/.old/000-*
+    _is_real_site() {
+        local d="$1"
+        [[ "$d" == "default" || "$d" == "html" ]] && return 1
+        [[ "$d" == 000-* ]] && return 1
+        [[ "$d" == *.bak* || "$d" == *.old || "$d" == *.disabled || "$d" == *.bak_* ]] && return 1
+        [ -d "/var/www/$d/public_html" ] || return 1
+        return 0
+    }
+
     if [[ "$c" == "1" ]]; then
+        local applied=0
+        local skipped=0
         for conf in /etc/nginx/sites-available/*; do
             d=$(basename "$conf")
-            if [[ "$d" != "default" && "$d" != "html" ]]; then
+            if _is_real_site "$d"; then
                 apply_rocket "$d"
+                applied=$((applied+1))
+            else
+                echo -e "  ${YELLOW}Bỏ qua: $d${NC}"
+                skipped=$((skipped+1))
             fi
         done
+        echo -e "${GREEN}Áp dụng: $applied site | Bỏ qua: $skipped file không hợp lệ${NC}"
         nginx -t && systemctl reload nginx
-        log_info "Hoàn tất setup WP Rocket cho toàn bộ hệ thống."
+        log_info "Hoàn tất setup WP Rocket."
     elif [[ "$c" == "2" ]]; then
         source "$(dirname "${BASH_SOURCE[0]}")/site.sh"
         select_site || return
@@ -230,6 +238,7 @@ EOF
         nginx -t && systemctl reload nginx
         log_info "Hoàn tất setup WP Rocket cho $SELECTED_DOMAIN."
     fi
+
     pause
 }
 
@@ -252,13 +261,13 @@ location ~ /wp-content/cache/minify/.*(js|css)$ {
 EOF
     
     echo -e "${YELLOW}Bạn có muốn tự động áp dụng cho website?${NC}"
-    echo -e "1. Áp dụng cho TẤT CẢ website"
-    echo -e "2. Chọn website cụ thể"
-    echo -e "0. Không"
+    echo -e "  1. Áp dụng cho TẤT CẢ website WordPress"
+    echo -e "  2. Chọn website cụ thể"
+    echo -e "  0. Không"
     read -p "Chọn: " c
-    
+
     if [[ "$c" == "0" ]]; then return; fi
-    
+
     apply_w3tc() {
         local domain=$1
         local conf="/etc/nginx/sites-available/$domain"
@@ -269,14 +278,29 @@ EOF
             fi
         fi
     }
-    
+
+    _is_real_site() {
+        local d="$1"
+        [[ "$d" == "default" || "$d" == "html" ]] && return 1
+        [[ "$d" == 000-* ]] && return 1
+        [[ "$d" == *.bak* || "$d" == *.old || "$d" == *.disabled || "$d" == *.bak_* ]] && return 1
+        [ -d "/var/www/$d/public_html" ] || return 1
+        return 0
+    }
+
     if [[ "$c" == "1" ]]; then
+        local applied=0 skipped=0
         for conf in /etc/nginx/sites-available/*; do
             d=$(basename "$conf")
-            if [[ "$d" != "default" && "$d" != "html" ]]; then
+            if _is_real_site "$d"; then
                 apply_w3tc "$d"
+                applied=$((applied+1))
+            else
+                echo -e "  ${YELLOW}Bỏ qua: $d${NC}"
+                skipped=$((skipped+1))
             fi
         done
+        echo -e "${GREEN}Áp dụng: $applied site | Bỏ qua: $skipped file không hợp lệ${NC}"
         nginx -t && systemctl reload nginx
         log_info "Đã áp dụng W3TC toàn hệ thống."
     elif [[ "$c" == "2" ]]; then
@@ -284,6 +308,7 @@ EOF
         select_site || return
         apply_w3tc "$SELECTED_DOMAIN"
         nginx -t && systemctl reload nginx
+
         log_info "Đã áp dụng W3TC cho $SELECTED_DOMAIN."
     fi
     pause
