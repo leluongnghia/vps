@@ -100,9 +100,9 @@ restore_site_manual_upload() {
     read -p "Xác nhận restore? (y/n): " confirm
     if [[ "$confirm" != "y" ]]; then return; fi
     
-    # Get Target DB Creds
-    target_db_name=$(echo "$target_domain" | tr -d '.')
-    target_db_user="${target_db_name}_user"
+    # Get Target DB Creds (Match logic with site.sh)
+    target_db_name=$(echo "$target_domain" | tr -d '.-' | cut -c1-16)
+    target_db_user="${target_db_name}_u"
     target_db_pass=$(grep "DB_PASSWORD" "/var/www/$target_domain/public_html/wp-config.php" 2>/dev/null | cut -d "'" -f 4)
 
     # RESTORE CODE
