@@ -113,6 +113,11 @@ EOF
          sed -i "s|fastcgi_pass.*;|fastcgi_pass unix:/run/php/php8.3-fpm.sock;|" /etc/nginx/snippets/phpmyadmin.conf
     fi
 
+    # Detect IP
+    VPS_IP=$(curl -s https://ifconfig.me || hostname -I | awk '{print $1}')
+    # Sanitize IP (remove newlines/spaces)
+    VPS_IP=$(echo "$VPS_IP" | tr -d '\n' | tr -d ' ')
+
     # Create a dedicated vhost for IP access to ensure it works
     # This avoids messing with 'default' site which might be broken or overridden
     cat > /etc/nginx/sites-available/000-phpmyadmin <<EOF
@@ -142,19 +147,21 @@ EOF
         ln -s /etc/nginx/sites-available/default /etc/nginx/sites-enabled/
     fi
 
-    nginx -t && systemctl reload nginx
-    
-    # Detect IP
-    VPS_IP=$(curl -s https://ifconfig.me || hostname -I | awk '{print $1}')
-
-    log_info "Cài đặt phpMyAdmin hoàn tất!"
-    echo -e "${YELLOW}--- THÔNG TIN TRUY CẬP ---${NC}"
-    echo -e "URL: http://$VPS_IP/phpmyadmin"
-    echo -e "${CYAN}[Bảo mật lớp 1] HTTP Auth:${NC}"
-    echo -e "  User: $PMA_AUTH_USER"
-    echo -e "  Pass: $PMA_AUTH_PASS"
-    echo -e "${CYAN}[Bảo mật lớp 2] Database Login:${NC}"
-    echo -e "  Dùng User/Pass của Database (Root hoặc User riêng)"
+    if nginx -t; then
+        systemctl reload nginx
+        log_info "Cài đặt phpMyAdmin hoàn tất!"
+        echo -e "${YELLOW}--- THÔNG TIN TRUY CẬP ---${NC}"
+        echo -e "URL: http://$VPS_IP/phpmyadmin"
+        echo -e "${CYAN}[Bảo mật lớp 1] HTTP Auth:${NC}"
+        echo -e "  User: $PMA_AUTH_USER"
+        echo -e "  Pass: $PMA_AUTH_PASS"
+        echo -e "${CYAN}[Bảo mật lớp 2] Database Login:${NC}"
+        echo -e "  Dùng User/Pass của Database (Root hoặc User riêng)"
+    else
+        log_error "Lỗi cấu hình Nginx. Vui lòng kiểm tra lại 'nginx -t'"
+        # Rollback faulty vhost to avoid breaking Nginx
+        rm -f /etc/nginx/sites-enabled/000-phpmyadmin
+    fi
     pause
 }
 
