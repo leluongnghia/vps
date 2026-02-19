@@ -10,6 +10,7 @@ phpmyadmin_menu() {
     echo -e "1. Cài đặt phpMyAdmin"
     echo -e "2. Xóa phpMyAdmin"
     echo -e "3. Secure phpMyAdmin (Đổi URL/Protected)"
+    echo -e "4. Xem User/Pass HTTP Auth"
     echo -e "0. Quay lại"
     echo -e "${BLUE}=================================================${NC}"
     read -p "Chọn: " c
@@ -18,6 +19,7 @@ phpmyadmin_menu() {
         1) install_phpmyadmin ;;
         2) uninstall_phpmyadmin ;;
         3) secure_phpmyadmin ;;
+        4) view_phpmyadmin_auth ;;
         0) return ;;
         *) echo -e "${RED}Sai lựa chọn.${NC}"; pause ;;
     esac
@@ -176,6 +178,35 @@ secure_phpmyadmin() {
         log_warn "Thư mục đã tồn tại."
     else
         log_error "Không tìm thấy thư mục gốc phpMyAdmin."
+    fi
+    pause
+}
+
+view_phpmyadmin_auth() {
+    echo -e "${YELLOW}--- Thông tin phpMyAdmin HTTP Auth ---${NC}"
+    
+    if [ ! -f /etc/nginx/.phpmyadmin_htpasswd ]; then
+        echo -e "${RED}Không tìm thấy file mật khẩu! (Bạn đã cài đặt phpMyAdmin chưa?)${NC}"
+    else
+        echo -e "User: pma_admin"
+        echo -e "${YELLOW}Lưu ý: Mật khẩu này đã được mã hóa trong file htpasswd và KHÔNG THỂ xem lại được.${NC}"
+        echo -e "Nếu bạn quên mật khẩu lớp 1, hãy reset lại."
+        
+        echo -e ""
+        read -p "Bạn có muốn Đặt lại (Reset) mật khẩu lớp 1 không? (y/n): " rs
+        if [[ "$rs" == "y" ]]; then
+             if ! command -v htpasswd &> /dev/null; then apt-get install -y apache2-utils; fi
+             
+             read -p "Nhập mật khẩu mới (Để trống sẽ sinh ngẫu nhiên): " new_pass
+             if [ -z "$new_pass" ]; then
+                new_pass=$(openssl rand -base64 12 | tr -dc 'a-zA-Z0-9')
+             fi
+             
+             htpasswd -cb /etc/nginx/.phpmyadmin_htpasswd "pma_admin" "$new_pass"
+             echo -e "${GREEN}Đã đặt lại mật khẩu thành công!${NC}"
+             echo -e "User: pma_admin"
+             echo -e "Pass: $new_pass"
+        fi
     fi
     pause
 }
