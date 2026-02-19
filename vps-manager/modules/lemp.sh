@@ -20,6 +20,14 @@ install_lemp_menu() {
             install_nginx
             install_mariadb
             install_php
+            
+            # Auto-install phpMyAdmin
+            if [ -f "$ROOT_DIR/modules/phpmyadmin.sh" ]; then
+                log_info "Tự động cài đặt phpMyAdmin..."
+                source "$ROOT_DIR/modules/phpmyadmin.sh"
+                install_phpmyadmin
+            fi
+            
             pause
             ;;
         2)

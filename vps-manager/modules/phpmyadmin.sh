@@ -68,12 +68,23 @@ install_phpmyadmin() {
     # Ensure default site or specific location exists
     # We will append a location block to the default site if it exists, or suggest URL
     
-    # Create a snippet for phpMyAdmin
+    # Create a snippet for phpMyAdmin with HTTP Basic Auth
+    # Generate Http Auth Password
+    if ! command -v htpasswd &> /dev/null; then apt-get install -y apache2-utils; fi
+    
+    PMA_AUTH_USER="pma_admin"
+    PMA_AUTH_PASS=$(openssl rand -base64 12 | tr -dc 'a-zA-Z0-9')
+    htpasswd -cb /etc/nginx/.phpmyadmin_htpasswd "$PMA_AUTH_USER" "$PMA_AUTH_PASS"
+
     cat > /etc/nginx/snippets/phpmyadmin.conf <<EOF
 location /phpmyadmin {
     root /var/www/html;
     index index.php index.html index.htm;
     try_files \$uri \$uri/ =404;
+
+    # HTTP Basic Auth Protection
+    auth_basic "Restricted Access";
+    auth_basic_user_file /etc/nginx/.phpmyadmin_htpasswd;
 
     location ~ ^/phpmyadmin/(.+\.php)$ {
         alias /var/www/html/phpmyadmin/\$1;
@@ -103,9 +114,6 @@ EOF
     # Check if default site exists
     if [ -f "/etc/nginx/sites-available/default" ]; then
         if ! grep -q "include snippets/phpmyadmin.conf;" "/etc/nginx/sites-available/default"; then
-             # Remove default location / if it conflicts or just insert before end of server block
-             # Ideally, we just tell user to include it or we add it to the server block
-             # Simple way: add to default server block
              sed -i '/server_name _;/a \    include snippets/phpmyadmin.conf;' /etc/nginx/sites-available/default
         fi
     else
@@ -135,9 +143,14 @@ EOF
 
     nginx -t && systemctl reload nginx
     
-    log_info "Cài đặt hoàn tất!"
-    echo -e "Truy cập tại: http://<IP_VPS>/phpmyadmin"
-    echo -e "User: root (MySQL root) hoặc user database bất kỳ."
+    log_info "Cài đặt phpMyAdmin hoàn tất!"
+    echo -e "${YELLOW}--- THÔNG TIN TRUY CẬP ---${NC}"
+    echo -e "URL: http://<IP_VPS>/phpmyadmin"
+    echo -e "${CYAN}[Bảo mật lớp 1] HTTP Auth:${NC}"
+    echo -e "  User: $PMA_AUTH_USER"
+    echo -e "  Pass: $PMA_AUTH_PASS"
+    echo -e "${CYAN}[Bảo mật lớp 2] Database Login:${NC}"
+    echo -e "  Dùng User/Pass của Database (Root hoặc User riêng)"
     pause
 }
 
