@@ -103,25 +103,156 @@ ssl_revoke() {
 }
 
 ssl_auto_renew_setup() {
-    echo -e "${YELLOW}--- Cấu hình Auto-Renew SSL ---${NC}"
+    clear
+    echo -e "${BLUE}=================================================${NC}"
+    echo -e "${GREEN}     🔒 Cấu hình Auto-Renew SSL${NC}"
+    echo -e "${BLUE}=================================================${NC}"
 
-    CRON_JOB="0 3 * * * /usr/bin/certbot renew --quiet && systemctl reload nginx"
+    # ── Kiểm tra certbot ────────────────────────────────────────
+    if ! command -v certbot &>/dev/null; then
+        echo -e "${RED}❌ Certbot chưa được cài đặt!${NC}"
+        echo -e "${YELLOW}Cài certbot: apt-get install -y certbot python3-certbot-nginx${NC}"
+        pause; return
+    fi
 
+    # ── Giải thích cơ chế hoạt động ────────────────────────────
+    echo -e "${CYAN}📚 Thông tin về SSL và Auto-Renew:${NC}"
+    echo -e ""
+    echo -e "  • ${YELLOW}Let's Encrypt / ZeroSSL${NC}: Hết hạn sau ${YELLOW}90 ngày${NC}"
+    echo -e "  • ${YELLOW}Certbot${NC} tự động ${GREEN}chỉ renew khi còn < 30 ngày${NC} (không renew sớm)"
+    echo -e "  • Chạy cron ${GREEN}hàng ngày${NC} là chuẩn — certbot tự bỏ qua nếu chưa cần"
+    echo -e "  • Không gây tốn tài nguyên vì check rất nhanh (~1 giây/cert)"
+    echo -e ""
+    echo -e "${BLUE}=================================================${NC}"
+
+    # ── Scan tất cả cert hiện có ────────────────────────────────
+    echo -e "${CYAN}📋 Trạng thái SSL hiện tại:${NC}"
+    echo ""
+
+    local has_cert=0
+    local min_days=999
+    local urgent_domains=()
+
+    for cert_dir in /etc/letsencrypt/live/*/; do
+        [ ! -d "$cert_dir" ] && continue
+        local domain
+        domain=$(basename "$cert_dir")
+        [[ "$domain" == "README" ]] && continue
+
+        local cert_file="$cert_dir/fullchain.pem"
+        if [ ! -f "$cert_file" ]; then continue; fi
+
+        has_cert=1
+        local expiry
+        expiry=$(openssl x509 -enddate -noout -in "$cert_file" 2>/dev/null | cut -d= -f2)
+        local expiry_ts
+        expiry_ts=$(date -d "$expiry" +%s 2>/dev/null || echo 0)
+        local now_ts
+        now_ts=$(date +%s)
+        local days_left=$(( (expiry_ts - now_ts) / 86400 ))
+        local issued_ts
+        issued_ts=$(openssl x509 -startdate -noout -in "$cert_file" 2>/dev/null | cut -d= -f2)
+        issued_ts=$(date -d "$issued_ts" +%s 2>/dev/null || echo 0)
+        local total_days=$(( (expiry_ts - issued_ts) / 86400 ))
+
+        # Track minimum days for recommendation
+        [ "$days_left" -lt "$min_days" ] && min_days="$days_left"
+
+        # Status indicator
+        if [ "$days_left" -gt 30 ]; then
+            local status="${GREEN}✅ OK${NC}"
+        elif [ "$days_left" -gt 7 ]; then
+            local status="${YELLOW}⚠️  Sắp hết hạn${NC}"
+            urgent_domains+=("$domain")
+        else
+            local status="${RED}🔴 KHẨN CẤP${NC}"
+            urgent_domains+=("$domain")
+        fi
+
+        printf "  %-35s %s ${CYAN}%d ngày còn lại${NC} / tổng %d ngày\n" \
+            "$domain" "$(echo -e "$status")" "$days_left" "$total_days"
+    done
+
+    if [ "$has_cert" -eq 0 ]; then
+        echo -e "  ${YELLOW}Chưa có SSL nào được cài đặt qua certbot.${NC}"
+    fi
+
+    echo ""
+
+    # ── Cảnh báo nếu có domain sắp hết ────────────────────────
+    if [ "${#urgent_domains[@]}" -gt 0 ]; then
+        echo -e "${RED}⚠️  Các domain cần renew ngay:${NC}"
+        for d in "${urgent_domains[@]}"; do
+            echo -e "   → $d"
+        done
+        echo -e "${YELLOW}Gợi ý: Chạy 'certbot renew' ngay bây giờ (option 4 trong menu SSL)${NC}"
+        echo ""
+    fi
+
+    # ── Tư vấn lịch cron dựa trên thực tế ──────────────────────
+    echo -e "${CYAN}🕐 Khuyến nghị lịch Cron:${NC}"
+    echo ""
+    if [ "$has_cert" -eq 0 ]; then
+        echo -e "  • Chưa có cert nào — cron hàng ngày sẵn sàng khi cài SSL"
+    elif [ "$min_days" -gt 60 ]; then
+        echo -e "  • Cert còn > 60 ngày → ${GREEN}Cron hàng ngày (3:00 AM) là tối ưu${NC}"
+        echo -e "  • Certbot sẽ tự bỏ qua cho đến khi còn < 30 ngày"
+    elif [ "$min_days" -gt 30 ]; then
+        echo -e "  • Cert còn 30-60 ngày → ${YELLOW}Certbot sẽ renew trong vài ngày tới${NC}"
+        echo -e "  • ${GREEN}Cron hàng ngày (3:00 AM) đảm bảo không bỏ lỡ${NC}"
+    else
+        echo -e "  • Cert còn < 30 ngày → ${RED}Cần renew sớm!${NC}"
+        echo -e "  • Bật cron ngay + chạy renew thủ công nếu cần"
+    fi
+
+    echo ""
+    echo -e "${BLUE}=================================================${NC}"
+
+    # ── Kiểm tra cron hiện tại ──────────────────────────────────
     if crontab -l 2>/dev/null | grep -q "certbot renew"; then
-        echo -e "${GREEN}✅ Auto-Renew đã được cấu hình trước đó.${NC}"
-        echo -e "Cron hiện tại:"
+        echo -e "${GREEN}✅ Auto-Renew đã đang chạy:${NC}"
         crontab -l | grep "certbot"
         echo ""
-        read -p "Cập nhật lại? (y/n): " c
+        read -p "Cập nhật lại lịch? (y/n): " c
         if [[ "$c" != "y" ]]; then pause; return; fi
         crontab -l | grep -v "certbot" | crontab -
     fi
 
+    # ── Chọn lịch ──────────────────────────────────────────────
+    echo -e "Chọn lịch Auto-Renew:"
+    echo -e "  1. Hàng ngày lúc ${GREEN}3:00 AM${NC} ${YELLOW}(khuyến nghị - chuẩn certbot)${NC}"
+    echo -e "  2. Hàng ngày lúc ${GREEN}2:00 AM${NC}"
+    echo -e "  3. 2 lần/ngày (3:00 AM và 3:00 PM) - cho cert sắp hết hạn"
+    echo -e "  0. Hủy"
+    read -p "Chọn: " sched
+
+    local CRON_TIME CRON_DESC
+    case "$sched" in
+        1) CRON_TIME="0 3 * * *";     CRON_DESC="Hàng ngày 3:00 AM" ;;
+        2) CRON_TIME="0 2 * * *";     CRON_DESC="Hàng ngày 2:00 AM" ;;
+        3) CRON_TIME="0 3,15 * * *";  CRON_DESC="2 lần/ngày (3:00 AM & 3:00 PM)" ;;
+        0) pause; return ;;
+        *) CRON_TIME="0 3 * * *";     CRON_DESC="Hàng ngày 3:00 AM (mặc định)" ;;
+    esac
+
+    local CERTBOT_BIN
+    CERTBOT_BIN=$(which certbot)
+    local CRON_JOB="${CRON_TIME} ${CERTBOT_BIN} renew --quiet --post-hook 'systemctl reload nginx' # ssl-auto-renew"
+
     (crontab -l 2>/dev/null; echo "$CRON_JOB") | crontab -
-    log_info "Đã thiết lập Auto-Renew SSL lúc 3:00 AM hàng ngày."
-    echo -e "  Cron: ${CYAN}$CRON_JOB${NC}"
+
+    echo ""
+    echo -e "${GREEN}✅ Đã bật Auto-Renew SSL!${NC}"
+    echo -e "   Lịch: ${CYAN}${CRON_DESC}${NC}"
+    echo -e "   Cron: ${CYAN}${CRON_JOB}${NC}"
+    echo ""
+    echo -e "${YELLOW}💡 Lưu ý:${NC}"
+    echo -e "   • Certbot ${GREEN}chỉ renew khi cert còn < 30 ngày${NC} — không bao giờ renew sớm"
+    echo -e "   • Sau khi renew, Nginx tự được reload (--post-hook)"
+    echo -e "   • Log: ${CYAN}/var/log/letsencrypt/letsencrypt.log${NC}"
     pause
 }
+
 
 
 install_ssl() {
