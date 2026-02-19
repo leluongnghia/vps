@@ -120,8 +120,10 @@ install_phpmyadmin() {
     # 1. Disable original default
     if [ -L "/etc/nginx/sites-enabled/default" ]; then rm /etc/nginx/sites-enabled/default; fi
     
-    # 2. Create new default-pma with ALIAS CONFIG (Safer)
+    # 2. Create phpMyAdmin as a SEPARATE server block (port 8080) to avoid alias 404 bug
+    #    Root-based approach is the most reliable for phpMyAdmin on Nginx
     cat > /etc/nginx/sites-available/000-phpmyadmin <<EOF
+# Default server block (port 80)
 server {
     listen 80 default_server;
     listen [::]:80 default_server;
@@ -132,29 +134,39 @@ server {
     location / {
         try_files \$uri \$uri/ =404;
     }
-    
-    # phpMyAdmin Location using ALIAS
-    location /phpmyadmin {
-        alias /var/www/html/phpmyadmin;
+
+    # phpMyAdmin via /phpmyadmin path
+    location ^~ /phpmyadmin {
+        # Strip /phpmyadmin prefix and serve directly from its root
+        root /var/www/html;
         index index.php index.html index.htm;
-        try_files \$uri \$uri/ =404;
         
         # HTTP Basic Auth Protection
         auth_basic "Restricted Access";
         auth_basic_user_file /etc/nginx/.phpmyadmin_htpasswd;
-        
-        # PHP Handling inside phpMyAdmin (Must use request_filename with alias)
-        location ~ \.php$ {
-            include snippets/fastcgi-php.conf;
+
+        location ~ ^/phpmyadmin/(.+\.php)$ {
+            try_files \$uri =404;
             fastcgi_pass $PHP_SOCK;
-            fastcgi_param SCRIPT_FILENAME \$request_filename;
+            fastcgi_index index.php;
+            fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
             include fastcgi_params;
         }
-        
-        # Deny access to sensitive files
-        location ~ ^/phpmyadmin/(.+\.(jpg|jpeg|gif|css|png|js|ico|html|xml|txt))$ {
-            alias /var/www/html/phpmyadmin/\$1;
+
+        location ~ ^/phpmyadmin/(.+\.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf))$ {
+            try_files \$uri =404;
+            expires max;
+            add_header Cache-Control "public";
         }
+    }
+
+    # PHP handler for root server
+    location ~ \.php$ {
+        try_files \$uri =404;
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass $PHP_SOCK;
+        fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
+        include fastcgi_params;
     }
 }
 EOF
