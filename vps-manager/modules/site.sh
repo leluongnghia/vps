@@ -443,6 +443,23 @@ rewrite_vhost_config() {
     
     create_nginx_config "$domain"
     log_info "Đã tạo lại file cấu hình Nginx cho $domain."
+    
+    # SSL Check/Restore
+    echo -e "${YELLOW}Bạn có muốn cài đặt/khôi phục SSL cho $domain không?${NC}"
+    echo -e "1. Có (Let's Encrypt - Auto)"
+    echo -e "2. Không (Chỉ dùng HTTP 80)"
+    read -p "Chọn [1-2]: " ssl_c
+    
+    if [[ "$ssl_c" == "1" ]]; then
+        source "$(dirname "${BASH_SOURCE[0]}")/ssl.sh"
+        # Force non-interactive letsencrypt if possible
+        if command -v certbot &> /dev/null; then
+             certbot --nginx -d "$domain" -d "www.$domain" --non-interactive --agree-tos --register-unsafely-without-email --redirect
+             echo -e "${GREEN}Đã khôi phục SSL thành công.${NC}"
+        else
+             install_ssl "$domain"
+        fi
+    fi
     pause
 }
 
