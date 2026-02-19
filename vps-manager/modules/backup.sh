@@ -105,29 +105,9 @@ restore_site_manual_upload() {
     target_db_user="${target_db_name}_u"
     target_db_pass=$(grep "DB_PASSWORD" "/var/www/$target_domain/public_html/wp-config.php" 2>/dev/null | cut -d "'" -f 4)
 
-    # RESTORE CODE
-    if [ -n "$code_file" ]; then
-        log_info "Giải nén Code..."
-        
-        tmp_extract="/root/restore_tmp_$target_domain"
-        rm -rf "$tmp_extract"; mkdir -p "$tmp_extract"
-        
-    # PRESERVE DATABASE CREDENTIALS
-    # Before unzipping code (which overwrites wp-config.php), we must save the CORRECT credentials of the new server
-    log_info "Đang lưu thông tin Database hiện tại..."
-    # We already have target_db_name and target_db_user from logic above
-    # We need to ensure we have the correct password.
-    # If the site was just created, wp-config.php has the correct pass.
-    current_db_pass=$(grep "DB_PASSWORD" "/var/www/$target_domain/public_html/wp-config.php" 2>/dev/null | cut -d "'" -f 4)
-    
-    if [ -z "$current_db_pass" ]; then
-        # Fallback: maybe double quotes?
-        current_db_pass=$(grep "DB_PASSWORD" "/var/www/$target_domain/public_html/wp-config.php" 2>/dev/null | cut -d '"' -f 4)
-    fi
-
-    # RESTORE CODE
-    if [ -n "$code_file" ]; then
-        log_info "Giải nén Code..."
+    # Init temp dir
+    tmp_extract="/root/restore_tmp_$target_domain"
+    rm -rf "$tmp_extract"; mkdir -p "$tmp_extract"
         mkdir -p "$tmp_extract"
         
         if [[ "$code_file" == *.zip ]]; then
