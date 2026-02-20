@@ -343,7 +343,16 @@ cleanup_wordpress_db() {
 _do_db_cleanup() {
     local domain=$1
     local WEB_ROOT="/var/www/$domain/public_html"
-    local WP_CMD="wp --path=$WEB_ROOT --allow-root"
+    
+    local WP_PHP_BIN="php"
+    local SITE_CONF="/etc/nginx/sites-available/$domain"
+    if [ -f "$SITE_CONF" ]; then
+        local SITE_PHP_VER=$(grep -shoP 'unix:/run/php/php\K[0-9.]+(?=-fpm.sock)' "$SITE_CONF" | head -n 1)
+        if [ -n "$SITE_PHP_VER" ] && command -v "php$SITE_PHP_VER" >/dev/null 2>&1; then
+            WP_PHP_BIN="php$SITE_PHP_VER"
+        fi
+    fi
+    local WP_CMD="$WP_PHP_BIN /usr/local/bin/wp --path=$WEB_ROOT --allow-root"
 
     if [ ! -f "$WEB_ROOT/wp-config.php" ]; then
         echo -e "${RED}$domain không phải WordPress site.${NC}"
@@ -466,7 +475,16 @@ disable_wordpress_bloat() {
 _do_disable_bloat() {
     local domain=$1
     local WEB_ROOT="/var/www/$domain/public_html"
-    local WP_CMD="wp --path=$WEB_ROOT --allow-root"
+    
+    local WP_PHP_BIN="php"
+    local SITE_CONF="/etc/nginx/sites-available/$domain"
+    if [ -f "$SITE_CONF" ]; then
+        local SITE_PHP_VER=$(grep -shoP 'unix:/run/php/php\K[0-9.]+(?=-fpm.sock)' "$SITE_CONF" | head -n 1)
+        if [ -n "$SITE_PHP_VER" ] && command -v "php$SITE_PHP_VER" >/dev/null 2>&1; then
+            WP_PHP_BIN="php$SITE_PHP_VER"
+        fi
+    fi
+    local WP_CMD="$WP_PHP_BIN /usr/local/bin/wp --path=$WEB_ROOT --allow-root"
 
     if [ ! -f "$WEB_ROOT/wp-config.php" ]; then
         echo -e "${RED}$domain không phải WordPress site.${NC}"

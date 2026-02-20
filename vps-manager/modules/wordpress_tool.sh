@@ -56,7 +56,16 @@ select_wp_site() {
     
     SELECTED_DOMAIN="${sites[$((w_choice-1))]}"
     WEB_ROOT="/var/www/$SELECTED_DOMAIN/public_html"
-    WP_CMD="wp --path=$WEB_ROOT --allow-root"
+    
+    WP_PHP_BIN="php"
+    SITE_CONF="/etc/nginx/sites-available/$SELECTED_DOMAIN"
+    if [ -f "$SITE_CONF" ]; then
+        SITE_PHP_VER=$(grep -shoP 'unix:/run/php/php\K[0-9.]+(?=-fpm.sock)' "$SITE_CONF" | head -n 1)
+        if [ -n "$SITE_PHP_VER" ] && command -v "php$SITE_PHP_VER" >/dev/null 2>&1; then
+            WP_PHP_BIN="php$SITE_PHP_VER"
+        fi
+    fi
+    WP_CMD="$WP_PHP_BIN /usr/local/bin/wp --path=$WEB_ROOT --allow-root"
     
     echo -e "${GREEN}Đã chọn: $SELECTED_DOMAIN${NC}"
     return 0
@@ -64,30 +73,11 @@ select_wp_site() {
 
 ensure_wp_cli() {
     # 1. Install WP-CLI if missing
-    if ! command -v wp &> /dev/null; then
+    if ! command -v wp &> /dev/null && [ ! -f /usr/local/bin/wp ]; then
         echo -e "${YELLOW}Installing WP-CLI...${NC}"
-        curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+        curl -sO https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
         chmod +x wp-cli.phar
         mv wp-cli.phar /usr/local/bin/wp
-    fi
-    
-    # 2. Force Install & Enable PHP MySQL & XML Extensions (Required for WP-CLI & Plugins)
-    # Check if critical modules are missing
-    if ! php -m | grep -q "mysql" || ! php -m | grep -q "dom" || ! php -m | grep -q "mbstring"; then
-        echo -e "${YELLOW}Đang cài đặt PHP Extensions (MySQL, XML, MBString)...${NC}"
-        apt-get update -qq
-        # Install for all supported versions to be safe
-        apt-get install -y php-mysql php8.1-mysql php8.2-mysql php8.3-mysql \
-                           php-xml php8.1-xml php8.2-xml php8.3-xml \
-                           php-mbstring php8.1-mbstring php8.2-mbstring php8.3-mbstring \
-                           php-curl php8.1-curl php8.2-curl php8.3-curl \
-                           php-zip php8.1-zip php8.2-zip php8.3-zip
-        
-        # 3. Enable modules properly
-        if command -v phpenmod &> /dev/null; then
-            phpenmod -v ALL mysql mysqli pdo_mysql xml dom mbstring curl zip
-        fi
-        echo -e "${GREEN}Đã cài đặt và kích hoạt các extension cần thiết.${NC}"
     fi
 }
 
