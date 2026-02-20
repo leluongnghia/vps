@@ -105,6 +105,13 @@ install_php() {
     log_info "Installing PHP $ver..."
     apt-get install -y php$ver php$ver-fpm php$ver-mysql php$ver-common php$ver-cli php$ver-curl php$ver-xml php$ver-mbstring php$ver-zip php$ver-bcmath php$ver-intl php$ver-gd php$ver-imagick
     
+    # Configure PHP Upload Limits
+    local php_ini="/etc/php/$ver/fpm/php.ini"
+    if [ -f "$php_ini" ]; then
+        sed -i "s/^upload_max_filesize.*/upload_max_filesize = 128M/" "$php_ini"
+        sed -i "s/^post_max_size.*/post_max_size = 128M/" "$php_ini"
+    fi
+    
     systemctl enable php$ver-fpm
     systemctl start php$ver-fpm
     log_info "PHP $ver installed successfully."

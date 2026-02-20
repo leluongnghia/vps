@@ -154,6 +154,7 @@ server {
     server_name $domain www.$domain;
     root /var/www/$domain/public_html;
     index index.php index.html index.htm;
+    client_max_body_size 128M;
 
     location / {
         try_files \$uri \$uri/ /index.php?\$args;
