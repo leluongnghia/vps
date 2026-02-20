@@ -361,7 +361,7 @@ _do_db_cleanup() {
             fi
         done
     fi
-    local WP_CMD="$WP_PHP_BIN /usr/local/bin/wp --path=$WEB_ROOT --allow-root"
+    local WP_CMD="$WP_PHP_BIN -d display_errors=0 /usr/local/bin/wp --path=$WEB_ROOT --allow-root"
 
     if [ ! -f "$WEB_ROOT/wp-config.php" ]; then
         echo -e "${RED}$domain không phải WordPress site.${NC}"
@@ -502,7 +502,7 @@ _do_disable_bloat() {
             fi
         done
     fi
-    local WP_CMD="$WP_PHP_BIN /usr/local/bin/wp --path=$WEB_ROOT --allow-root"
+    local WP_CMD="$WP_PHP_BIN -d display_errors=0 /usr/local/bin/wp --path=$WEB_ROOT --allow-root"
 
     if [ ! -f "$WEB_ROOT/wp-config.php" ]; then
         echo -e "${RED}$domain không phải WordPress site.${NC}"

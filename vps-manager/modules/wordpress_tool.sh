@@ -76,7 +76,7 @@ select_wp_site() {
         done
     fi
     
-    WP_CMD="$WP_PHP_BIN /usr/local/bin/wp --path=$WEB_ROOT --allow-root"
+    WP_CMD="$WP_PHP_BIN -d display_errors=0 /usr/local/bin/wp --path=$WEB_ROOT --allow-root"
     
     echo -e "${GREEN}Đã chọn: $SELECTED_DOMAIN${NC}"
     return 0
