@@ -161,10 +161,10 @@ tune_php_fpm() {
     
     # Increase memory limit for WordPress
     local php_ini="/etc/php/${php_ver}/fpm/php.ini"
-    sed -i "s/^memory_limit = .*/memory_limit = 256M/" "$php_ini"
-    sed -i "s/^max_execution_time = .*/max_execution_time = 300/" "$php_ini"
-    sed -i "s/^upload_max_filesize = .*/upload_max_filesize = 64M/" "$php_ini"
-    sed -i "s/^post_max_size = .*/post_max_size = 64M/" "$php_ini"
+    sed -i -E "s/^[; ]*memory_limit.*/memory_limit = 256M/" "$php_ini"
+    sed -i -E "s/^[; ]*max_execution_time.*/max_execution_time = 300/" "$php_ini"
+    sed -i -E "s/^[; ]*upload_max_filesize.*/upload_max_filesize = 128M/" "$php_ini"
+    sed -i -E "s/^[; ]*post_max_size.*/post_max_size = 128M/" "$php_ini"
     
     systemctl restart php${php_ver}-fpm
     
