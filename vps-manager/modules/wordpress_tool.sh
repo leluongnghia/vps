@@ -383,6 +383,7 @@ wp_config_tool_menu() {
     echo "4. Enable WP-Cron"
     echo "5. Enable Maintenance Mode"
     echo "6. Disable Maintenance Mode"
+    echo "7. Fix Upload Limits (Sửa lỗi tải file 2MB & 413 Error)"
     echo "0. Back"
     read -p "Select: " c
     
@@ -407,5 +408,34 @@ wp_config_tool_menu() {
             ;;
         5) $WP_CMD maintenance-mode activate; pause ;;
         6) $WP_CMD maintenance-mode deactivate; pause ;;
+        7)
+            log_info "Đang sửa giới hạn dung lượng tải lên toàn server..."
+            
+            # Fix PHP-FPM for all installed PHP versions
+            for php_ini in /etc/php/*/fpm/php.ini; do
+                if [ -f "$php_ini" ]; then
+                    sed -i "s/^upload_max_filesize.*/upload_max_filesize = 128M/" "$php_ini"
+                    sed -i "s/^post_max_size.*/post_max_size = 128M/" "$php_ini"
+                    sed -i "s/^memory_limit.*/memory_limit = 256M/" "$php_ini"
+                fi
+            done
+            
+            # Fix Nginx Global configuration (Client max body)
+            if [ -f /etc/nginx/nginx.conf ]; then
+                if ! grep -q "client_max_body_size" /etc/nginx/nginx.conf; then
+                    sed -i '/http {/a \        client_max_body_size 128M;' /etc/nginx/nginx.conf
+                else
+                    sed -i "s/client_max_body_size.*/client_max_body_size 128M;/" /etc/nginx/nginx.conf
+                fi
+            fi
+            
+            # Restart services
+            systemctl reload nginx
+            systemctl restart php*-fpm 2>/dev/null
+            
+            log_info "Đã tăng giới hạn Upload lên 128MB thành công!"
+            echo -e "${GREEN}Hãy tải lại trang và upload plugin/file lại nhé.${NC}"
+            pause
+            ;;
     esac
 }
