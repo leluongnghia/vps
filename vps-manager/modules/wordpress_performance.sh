@@ -352,6 +352,15 @@ _do_db_cleanup() {
             WP_PHP_BIN="php$SITE_PHP_VER"
         fi
     fi
+    
+    if ! "$WP_PHP_BIN" -m 2>/dev/null | grep -qEi "(mysqli|pdo_mysql)"; then
+        for v in 8.3 8.4 8.5 8.2 8.1 8.0 7.4; do
+            if command -v "php$v" >/dev/null 2>&1 && "php$v" -m 2>/dev/null | grep -qEi "(mysqli|pdo_mysql)"; then
+                WP_PHP_BIN="php$v"
+                break
+            fi
+        done
+    fi
     local WP_CMD="$WP_PHP_BIN /usr/local/bin/wp --path=$WEB_ROOT --allow-root"
 
     if [ ! -f "$WEB_ROOT/wp-config.php" ]; then
@@ -483,6 +492,15 @@ _do_disable_bloat() {
         if [ -n "$SITE_PHP_VER" ] && command -v "php$SITE_PHP_VER" >/dev/null 2>&1; then
             WP_PHP_BIN="php$SITE_PHP_VER"
         fi
+    fi
+    
+    if ! "$WP_PHP_BIN" -m 2>/dev/null | grep -qEi "(mysqli|pdo_mysql)"; then
+        for v in 8.3 8.4 8.5 8.2 8.1 8.0 7.4; do
+            if command -v "php$v" >/dev/null 2>&1 && "php$v" -m 2>/dev/null | grep -qEi "(mysqli|pdo_mysql)"; then
+                WP_PHP_BIN="php$v"
+                break
+            fi
+        done
     fi
     local WP_CMD="$WP_PHP_BIN /usr/local/bin/wp --path=$WEB_ROOT --allow-root"
 

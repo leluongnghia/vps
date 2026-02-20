@@ -65,6 +65,17 @@ select_wp_site() {
             WP_PHP_BIN="php$SITE_PHP_VER"
         fi
     fi
+    
+    # Fallback to ANY valid PHP version with MySQL module if the above fails
+    if ! "$WP_PHP_BIN" -m 2>/dev/null | grep -qEi "(mysqli|pdo_mysql)"; then
+        for v in 8.3 8.4 8.5 8.2 8.1 8.0 7.4; do
+            if command -v "php$v" >/dev/null 2>&1 && "php$v" -m 2>/dev/null | grep -qEi "(mysqli|pdo_mysql)"; then
+                WP_PHP_BIN="php$v"
+                break
+            fi
+        done
+    fi
+    
     WP_CMD="$WP_PHP_BIN /usr/local/bin/wp --path=$WEB_ROOT --allow-root"
     
     echo -e "${GREEN}Đã chọn: $SELECTED_DOMAIN${NC}"
