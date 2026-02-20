@@ -59,6 +59,12 @@ install_nginx() {
         log_info "Installing Nginx..."
         apt-get update
         apt-get install -y nginx
+        
+        # Increase global upload limit right after install
+        if [ -f /etc/nginx/nginx.conf ]; then
+            sed -i '/http {/a \        client_max_body_size 128M;' /etc/nginx/nginx.conf
+        fi
+        
         systemctl enable nginx
         systemctl start nginx
         log_info "Nginx installed successfully."
