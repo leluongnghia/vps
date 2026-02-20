@@ -205,8 +205,11 @@ clear_all_cache() {
     log_info "Đang restart Memcached..."
     systemctl restart memcached 2>/dev/null
     
-    log_info "Đang reload PHP-FPM..."
+    log_info "Đang reload PHP-FPM (Clear OPcache)..."
     systemctl reload php*-fpm
+    
+    log_info "Đang xóa thư mục Cache của plugin (WP Rocket, W3TC...)"
+    rm -rf /var/www/*/public_html/wp-content/cache/* 2>/dev/null
     
     log_info "Đã xóa sạch Cache hệ thống."
     pause
