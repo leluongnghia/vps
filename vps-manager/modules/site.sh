@@ -156,6 +156,17 @@ server {
     index index.php index.html index.htm;
     client_max_body_size 128M;
 
+    # FastCGI Cache Bypass Rules
+    set \$skip_cache 0;
+    if (\$request_method = POST) { set \$skip_cache 1; }
+    if (\$query_string != "") { set \$skip_cache 1; }
+    if (\$request_uri ~* "/wp-admin/|/xmlrpc.php|wp-.*.php|^/feed/*|/tag/.*/feed/*|index.php|/.*sitemap.*\.(xml|xsl)") {
+        set \$skip_cache 1;
+    }
+    if (\$http_cookie ~* "comment_author|wordpress_[a-f0-9]+|wp-postpass|wordpress_no_cache|wordpress_logged_in") {
+        set \$skip_cache 1;
+    }
+
     location / {
         try_files \$uri \$uri/ /index.php?\$args;
     }
@@ -170,6 +181,8 @@ server {
         fastcgi_cache_use_stale error timeout updating invalid_header http_500 http_503;
         fastcgi_cache_min_uses 1;
         fastcgi_cache_lock on;
+        fastcgi_cache_bypass \$skip_cache;
+        fastcgi_no_cache \$skip_cache;
         add_header X-FastCGI-Cache \$upstream_cache_status;
     }
 
