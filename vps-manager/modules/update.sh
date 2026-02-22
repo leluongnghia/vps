@@ -65,6 +65,30 @@ do_update() {
 
     echo -e "${YELLOW}Đang kiểm tra cập nhật từ GitHub...${NC}"
 
+    # ── Fetch Remote Version ──
+    local LOCAL_VERSION="1.0.0"
+    if [ -f "$INSTALL_DIR/VERSION" ]; then
+        LOCAL_VERSION=$(cat "$INSTALL_DIR/VERSION")
+    fi
+
+    local REMOTE_VERSION
+    REMOTE_VERSION=$(curl -s "https://raw.githubusercontent.com/leluongnghia/vps/$BRANCH/vps-manager/VERSION")
+
+    # Clean versions from whitespace/newlines
+    LOCAL_VERSION=$(echo "$LOCAL_VERSION" | tr -d '[:space:]')
+    REMOTE_VERSION=$(echo "$REMOTE_VERSION" | tr -d '[:space:]')
+
+    if [ -n "$REMOTE_VERSION" ] && [ "$LOCAL_VERSION" = "$REMOTE_VERSION" ]; then
+        echo -e "${GREEN}✅ Script đã là phiên bản mới nhất (v$LOCAL_VERSION)!${NC}"
+        pause; return 0
+    fi
+
+    if [ -n "$REMOTE_VERSION" ]; then
+        echo -e "${GREEN}Phát hiện phiên bản mới: v$LOCAL_VERSION -> v$REMOTE_VERSION${NC}"
+    else
+        echo -e "${YELLOW}Không thể lấy thông tin phiên bản, tiếp tục cập nhật...${NC}"
+    fi
+
     # ── Cách 1: git pull nếu đây là git repo (nhanh nhất) ─────
     if [ -d "$INSTALL_DIR/.git" ]; then
         echo -e "${GREEN}Tìm thấy git repo, đang pull...${NC}"
@@ -74,14 +98,6 @@ do_update() {
         git -C "$INSTALL_DIR" config http.postBuffer 524288000 2>/dev/null
 
         git -C "$INSTALL_DIR" fetch origin "$BRANCH" 2>/dev/null
-        local LOCAL REMOTE
-        LOCAL=$(git -C "$INSTALL_DIR" rev-parse HEAD 2>/dev/null)
-        REMOTE=$(git -C "$INSTALL_DIR" rev-parse origin/$BRANCH 2>/dev/null)
-
-        if [ "$LOCAL" = "$REMOTE" ]; then
-            echo -e "${GREEN}✅ Script đã là phiên bản mới nhất!${NC}"
-            pause; return 0
-        fi
 
         echo -e "${GREEN}Đã tìm thấy phiên bản mới! Đang cập nhật...${NC}"
         git -C "$INSTALL_DIR" pull origin "$BRANCH"

@@ -9,10 +9,15 @@ ROOT_DIR="$(dirname "$DIR")"
 source "$ROOT_DIR/core/utils.sh"
 
 main_menu() {
+    local script_version="1.0.0"
+    if [ -f "$ROOT_DIR/VERSION" ]; then
+        script_version=$(cat "$ROOT_DIR/VERSION")
+    fi
+
     while true; do
         clear
         echo -e "${BLUE}=================================================${NC}"
-        echo -e "${GREEN}          VPS MANAGEMENT SCRIPT v1.0${NC}"
+        echo -e "${GREEN}          VPS MANAGEMENT SCRIPT v${script_version}${NC}"
         echo -e "${BLUE}=================================================${NC}"
         echo -e "1. Cài đặt LEMP Stack (Nginx, MariaDB, PHP)"
         echo -e "2. Quản lý Domain & Website"
