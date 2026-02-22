@@ -60,10 +60,11 @@ wp_performance_menu() {
         echo -e "9.  🎯 Disable WordPress Bloat (Heartbeat, Embeds...)"
         echo -e "10. 🖼️  Image Optimization Setup"
         echo -e "11. 📊 Performance Benchmark Test"
+        echo -e "12. 🔧 System Kernel Tuning (TCP BBR, File Limits)"
         echo -e ""
         echo -e "0. Back to Main Menu"
         echo -e "${BLUE}=================================================${NC}"
-        read -p "Select [0-11]: " choice
+        read -p "Select [0-12]: " choice
 
         case $choice in
             1) auto_optimize_server ;;
@@ -77,10 +78,37 @@ wp_performance_menu() {
             9) disable_wordpress_bloat ;;
             10) setup_image_optimization ;;
             11) benchmark_wordpress ;;
+            12) optimize_system_kernel ;;
             0) return ;;
             *) echo -e "${RED}Invalid choice!${NC}"; pause ;;
         esac
     done
+}
+
+# 12. Optimize System Kernel (Merged from optimize.sh)
+optimize_system_kernel() {
+    log_info "Đang tối ưu hóa hệ thống (Kernel & Network)..."
+
+    # 1. Enable TCP BBR
+    if ! grep -q "net.core.default_qdisc=fq" /etc/sysctl.conf; then
+        echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
+        echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
+        sysctl -p
+        log_info "TCP BBR đã được kích hoạt."
+    else
+        log_info "TCP BBR đã được cấu hình từ trước."
+    fi
+
+    # 2. Increase File Limits
+    if ! grep -q "fs.file-max" /etc/sysctl.conf; then
+        echo "fs.file-max = 2097152" >> /etc/sysctl.conf
+        sysctl -p
+        log_info "Đã tăng giới hạn fs.file-max."
+    else
+        log_info "fs.file-max đã được cấu hình từ trước."
+    fi
+    
+    pause
 }
 
 # 1. Auto-Optimize SERVER (server-level settings only, NOT per-site)
@@ -630,6 +658,19 @@ brotli_types text/plain text/css text/xml text/javascript
     image/svg+xml font/woff2 font/woff;
 BEOF
         log_info "Brotli config tạo tại /etc/nginx/conf.d/brotli.conf"
+    fi
+
+    # ── Browser Caching Snippet ───────────────────────────
+    if [ ! -f /etc/nginx/snippets/browser_caching.conf ]; then
+        mkdir -p /etc/nginx/snippets
+        cat > /etc/nginx/snippets/browser_caching.conf << 'CEOF'
+location ~* \.(jpg|jpeg|gif|png|ico|svg|css|js|woff|woff2|ttf|eot)$ {
+    expires 365d;
+    add_header Cache-Control "public, no-transform";
+    access_log off;
+}
+CEOF
+        log_info "Browser caching config tạo tại /etc/nginx/snippets/browser_caching.conf"
     fi
 
     # ── Test & Reload ─────────────────────────────────────
