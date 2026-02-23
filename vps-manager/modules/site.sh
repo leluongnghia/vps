@@ -156,13 +156,18 @@ server {
     index index.php index.html index.htm;
     client_max_body_size 128M;
 
-    # FastCGI Cache Bypass Rules
+    # ============================================================
+    # FastCGI Cache Skip Rules
+    # Bỏ qua cache cho admin và login để tránh lỗi đăng nhập
+    # ============================================================
     set \$skip_cache 0;
     if (\$request_method = POST) { set \$skip_cache 1; }
     if (\$query_string != "") { set \$skip_cache 1; }
-    if (\$request_uri ~* "/wp-admin/|/xmlrpc.php|wp-.*.php|^/feed/*|/tag/.*/feed/*|index.php|/.*sitemap.*\.(xml|xsl)") {
+    # Bỏ qua cache cho wp-admin/, wp-login.php, xmlrpc, feed, sitemap
+    if (\$request_uri ~* "/wp-admin/|/wp-login\.php|/xmlrpc\.php|/wp-.*\.php|^/feed/|/tag/.*/feed/|/.*sitemap.*\.(xml|xsl)") {
         set \$skip_cache 1;
     }
+    # Bỏ qua cache cho user đã đăng nhập (WordPress cookies)
     if (\$http_cookie ~* "comment_author|wordpress_[a-f0-9]+|wp-postpass|wordpress_no_cache|wordpress_logged_in") {
         set \$skip_cache 1;
     }
