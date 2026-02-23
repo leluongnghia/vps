@@ -23,6 +23,7 @@ Sau khi cài, gõ `vps` để mở menu bất kỳ lúc nào.
 ---
 
 <a name="giới-thiệu-tiếng-việt"></a>
+
 # 🇻🇳 Giới thiệu (Tiếng Việt)
 
 Script Bash toàn diện giúp quản lý VPS **Ubuntu/Debian** qua menu tương tác, không cần nhớ lệnh phức tạp. Bao gồm **22 module** quản lý toàn bộ vòng đời server từ cài đặt đến bảo mật và backup.
@@ -61,8 +62,9 @@ Script Bash toàn diện giúp quản lý VPS **Ubuntu/Debian** qua menu tương
 ## ✨ Tính năng Nổi bật
 
 ### 🚀 Cài đặt & Quản lý Website
+
 - **LEMP Stack tự động**: Nginx + MariaDB + PHP multi-version (8.1, 8.2, 8.3) một lệnh
-- **Quản lý Domain toàn diện**: Thêm, Xóa, Rename, Clone, Parked Domain, Redirect
+- **Quản lý Domain toàn diện**: Thêm, Xóa, Rename, Clone, Parked Domain, Redirect, **Bật/Tắt FastCGI Cache (Dev Mode)**
 - **WordPress Manager**:
   - Cài đặt WordPress + Database an toàn tự động
   - WP-CLI tích hợp: Core/Plugin/Theme update, User management
@@ -71,6 +73,7 @@ Script Bash toàn diện giúp quản lý VPS **Ubuntu/Debian** qua menu tương
   - Tạo Admin mới với password random
 
 ### 🔒 SSL Management (Menu 21)
+
 - **Let's Encrypt** (Certbot) — miễn phí, tự động
 - **Cloudflare Origin SSL** — hỗ trợ paste key từ dashboard
 - **ZeroSSL** — qua acme.sh
@@ -78,6 +81,7 @@ Script Bash toàn diện giúp quản lý VPS **Ubuntu/Debian** qua menu tương
 - **Auto-Renew Cron** tự gia hạn lúc 3:00 AM hàng ngày
 
 ### 💾 Backup & Restore thông minh (Menu 5 & 22)
+
 - Backup Code + DB về **Local** hoặc **Google Drive** (rclone)
 - **Auto Backup Cron**: Lịch hàng ngày (3:00 AM) hoặc hàng tuần
 - **Space Saving Mode**: Tự động xóa file trên VPS sau khi upload thành công lên Google Drive (tiết kiệm dung lượng)
@@ -92,6 +96,7 @@ Script Bash toàn diện giúp quản lý VPS **Ubuntu/Debian** qua menu tương
 - Config retention: giữ bao nhiêu bản (mặc định 7 ngày)
 
 ### 🗄️ phpMyAdmin (Menu 20)
+
 - Cài đặt tự động phpMyAdmin 5.2.1
 - **HTTP Basic Auth** bảo vệ lớp 1
 - Đổi URL ẩn để bảo mật
@@ -99,6 +104,7 @@ Script Bash toàn diện giúp quản lý VPS **Ubuntu/Debian** qua menu tương
 - Hiển thị thông tin login đầy đủ sau cài đặt
 
 ### 🛡️ Bảo mật
+
 - UFW Firewall + Fail2ban chống brute force SSH
 - Thay đổi SSH port — **tự động xóa port cũ khỏi UFW** (tránh bị lock out)
 - Rate Limiting Nginx (chống DDoS cơ bản)
@@ -112,6 +118,7 @@ Script Bash toàn diện giúp quản lý VPS **Ubuntu/Debian** qua menu tương
 Để đạt hiệu suất cao nhất, hãy thực hiện theo thứ tự ưu tiên sau:
 
 ### 🥇 Tier 1 — Quan trọng nhất (Server-level & Database)
+
 | Option | Tác dụng |
 |--------|----------|
 | **1. Auto-Optimize Server** | Tối ưu PHP-FPM, OPcache, MySQL, Nginx FastCGI ở cấp server. Ảnh hưởng tích cực toàn bộ các site. |
@@ -119,6 +126,7 @@ Script Bash toàn diện giúp quản lý VPS **Ubuntu/Debian** qua menu tương
 | **8. Database Cleanup** | Dọn dẹp revision, spam, transient giúp query database nhanh hơn. |
 
 ### 🥈 Tier 2 — Caching (Sau khi server ổn định)
+
 | Option | Tác dụng |
 |--------|----------|
 | **5. Nginx FastCGI Cache** | Cache PHP response, giúp bypass PHP hoàn toàn cho khách truy cập lại. |
@@ -126,12 +134,13 @@ Script Bash toàn diện giúp quản lý VPS **Ubuntu/Debian** qua menu tương
 | **6. Object Cache (Redis)** | Cache database queries vào RAM, giảm tải cho MySQL 60-80%. |
 
 ### 🥉 Tier 3 — Tối ưu bổ sung
+
 | Option | Tác dụng |
 |--------|----------|
 | **7. HTTP/2 + Brotli/Gzip** | Cần SSL. Giảm dung lượng truyền tải 60-70%. |
 | **10. Image Optimization** | Cần thiết nếu site có nhiều hình ảnh chưa được tối ưu. |
 
-> **Quy trình khuyến nghị:** 
+> **Quy trình khuyến nghị:**
 > B1 (Opt 1) → B2 (Opt 9) → B3 (Opt 8) → B4 (Cài Cache Plugin) → B5 (Opt 6) → B6 (Opt 7)
 
 ---
@@ -178,6 +187,7 @@ vps-manager/
 ---
 
 <a name="introduction-english"></a>
+
 # 🇬🇧 Introduction (English)
 
 A comprehensive **22-module** Bash script for managing Ubuntu/Debian VPS servers through an interactive menu. No need to memorize complex commands.
@@ -185,6 +195,7 @@ A comprehensive **22-module** Bash script for managing Ubuntu/Debian VPS servers
 ## Key Features
 
 - **LEMP Stack** (Nginx + MariaDB + PHP 8.1/8.2/8.3) automated install
+- **Domain Management** — Add, Remove, Rename, Clone, Aliases, Redirects, **Toggle FastCGI Cache (Dev Mode)**
 - **WordPress Manager Suite** via WP-CLI — Core/Plugin/User/Security/SEO
 - **SSL Management** — Let's Encrypt, Cloudflare Origin, ZeroSSL + Auto-Renew Cron
 - **Smart Backup & Restore** — Local/Google Drive, Auto Backup Cron (daily/weekly), 3-tier credential fallback
