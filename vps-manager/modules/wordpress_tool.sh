@@ -379,11 +379,12 @@ wp_config_tool_menu() {
     echo -e "\n${YELLOW}Config Tools - $SELECTED_DOMAIN${NC}"
     echo "1. Enable WP_DEBUG"
     echo "2. Disable WP_DEBUG"
-    echo "3. Disable WP-Cron (Use System Cron)"
-    echo "4. Enable WP-Cron"
-    echo "5. Enable Maintenance Mode"
-    echo "6. Disable Maintenance Mode"
-    echo "7. Fix Upload Limits (Sửa lỗi tải file 2MB & 413 Error)"
+    echo "3. Thiết lập Real Cron 1 phút (Wget - Khuyên dùng)"
+    echo "4. Thiết lập Real Cron 1 phút (PHP CLI - Nặng)"
+    echo "5. Phục hồi WP-Cron mặc định"
+    echo "6. Enable Maintenance Mode"
+    echo "7. Disable Maintenance Mode"
+    echo "8. Fix Upload Limits (Sửa lỗi tải file 2MB & 413 Error)"
     echo "0. Back"
     read -p "Select: " c
     
@@ -392,23 +393,34 @@ wp_config_tool_menu() {
         2) $WP_CMD config set WP_DEBUG false --raw; pause ;;
         3) 
             $WP_CMD config set DISABLE_WP_CRON true --raw
-            # Add system cron
-            croncmd="curl -s -o /dev/null https://$SELECTED_DOMAIN/wp-cron.php?doing_wp_cron"
-            cronjob="*/15 * * * * $croncmd"
-            (crontab -l 2>/dev/null | grep -v "$SELECTED_DOMAIN"; echo "$cronjob") | crontab -
-            log_info "Disabled WP-Cron and added System Cron (every 15m)."
+            # Setup Real Cron with Wget (1 minute)
+            croncmd="wget -q -O - https://$SELECTED_DOMAIN/wp-cron.php?doing_wp_cron >/dev/null 2>&1"
+            cronjob="* * * * * $croncmd"
+            (crontab -l 2>/dev/null | grep -v "$SELECTED_DOMAIN/wp-cron.php"; echo "$cronjob") | crontab -
+            log_info "Đã tắt WP-Cron mặc định và cài Real Cron (Wget - 1 phút/lần)."
             pause
             ;;
         4)
-            $WP_CMD config set DISABLE_WP_CRON false --raw
-            # Remove system cron
-            crontab -l | grep -v "$SELECTED_DOMAIN" | crontab -
-            log_info "Enabled WP-Cron."
+            $WP_CMD config set DISABLE_WP_CRON true --raw
+            # Setup Real Cron with PHP CLI (1 minute)
+            phpbin=$(command -v $WP_PHP_BIN)
+            if [ -z "$phpbin" ]; then phpbin="/usr/bin/php"; fi
+            croncmd="$phpbin $WEB_ROOT/wp-cron.php >/dev/null 2>&1"
+            cronjob="* * * * * $croncmd"
+            (crontab -l 2>/dev/null | grep -v "$SELECTED_DOMAIN/wp-cron.php"; echo "$cronjob") | crontab -
+            log_info "Đã tắt WP-Cron mặc định và cài Real Cron (PHP CLI - 1 phút/lần)."
             pause
             ;;
-        5) $WP_CMD maintenance-mode activate; pause ;;
-        6) $WP_CMD maintenance-mode deactivate; pause ;;
-        7)
+        5)
+            $WP_CMD config set DISABLE_WP_CRON false --raw
+            # Remove system cron
+            crontab -l 2>/dev/null | grep -v "$SELECTED_DOMAIN/wp-cron.php" | crontab -
+            log_info "Đã phục hồi WP-Cron mặc định (xóa System Cron)."
+            pause
+            ;;
+        6) $WP_CMD maintenance-mode activate; pause ;;
+        7) $WP_CMD maintenance-mode deactivate; pause ;;
+        8)
             log_info "Đang sửa giới hạn dung lượng tải lên toàn server..."
             
             # Fix PHP-FPM for all installed PHP versions
