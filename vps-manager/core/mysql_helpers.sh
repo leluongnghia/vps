@@ -26,10 +26,12 @@ ensure_mysql_access() {
 
     # 3. Check env var
     if [ -n "$MYSQL_ROOT_PASS" ]; then
-         if $cmd -p"$MYSQL_ROOT_PASS" -e "SELECT 1" &>/dev/null; then
-             export MYSQL_CMD_PREFIX="$cmd -p$MYSQL_ROOT_PASS"
+         export MYSQL_PWD="$MYSQL_ROOT_PASS"
+         if $cmd -e "SELECT 1" &>/dev/null; then
+             export MYSQL_CMD_PREFIX="$cmd"
              return 0
          fi
+         unset MYSQL_PWD
     fi
 
     # 4. Prompt user (INTERACTIVE ONLY)
@@ -39,11 +41,13 @@ ensure_mysql_access() {
         read -sp "Enter MySQL root password: " input_pass
         echo ""
         
-        if $cmd -p"$input_pass" -e "SELECT 1" &>/dev/null; then
+        export MYSQL_PWD="$input_pass"
+        if $cmd -e "SELECT 1" &>/dev/null; then
             export MYSQL_ROOT_PASS="$input_pass"
-            export MYSQL_CMD_PREFIX="$cmd -p$input_pass"
+            export MYSQL_CMD_PREFIX="$cmd"
             return 0
         else
+            unset MYSQL_PWD
             log_error "Invalid MySQL password!"
             return 1
         fi

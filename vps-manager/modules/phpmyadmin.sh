@@ -181,7 +181,7 @@ install_phpmyadmin() {
     local PMA_AUTH_USER="pma_admin"
     local PMA_AUTH_PASS
     PMA_AUTH_PASS=$(openssl rand -base64 12 | tr -dc 'a-zA-Z0-9' | head -c 12)
-    htpasswd -cb /etc/nginx/.phpmyadmin_htpasswd "$PMA_AUTH_USER" "$PMA_AUTH_PASS"
+    echo "$PMA_AUTH_PASS" | htpasswd -ci /etc/nginx/.phpmyadmin_htpasswd "$PMA_AUTH_USER"
 
     # Lưu plaintext để xem lại sau
     mkdir -p /root/.vps-manager
@@ -362,7 +362,7 @@ reset_phpmyadmin_auth() {
         new_pass=$(openssl rand -base64 12 | tr -dc 'a-zA-Z0-9' | head -c 12)
     fi
 
-    htpasswd -cb /etc/nginx/.phpmyadmin_htpasswd "pma_admin" "$new_pass"
+    echo "$new_pass" | htpasswd -ci /etc/nginx/.phpmyadmin_htpasswd "pma_admin"
 
     # Lưu plaintext để xem lại sau
     mkdir -p /root/.vps-manager
