@@ -547,24 +547,119 @@ _do_disable_bloat() {
 }
 
 
-# 9. Image Optimization Setup
+# 10. Image Optimization Setup
 setup_image_optimization() {
-    echo -e "${GREEN}Image Optimization Recommendations:${NC}"
+    clear
+    echo -e "${BLUE}=================================================${NC}"
+    echo -e "${GREEN}     🖼️  Image Optimization Setup${NC}"
+    echo -e "${BLUE}=================================================${NC}"
+    echo -e "Script sẽ đảm bảo cài đặt thư viện WebP trên server và"
+    echo -e "tự động cài plugin Imagify vào website WordPress của bạn."
     echo ""
-    echo "1. Install 'Imagify' or 'ShortPixel' plugin"
-    echo "2. Enable WebP conversion"
-    echo "3. Set compression level to 'Aggressive'"
-    echo "4. Enable lazy loading"
-    echo ""
-    echo -e "${YELLOW}Server-side WebP support:${NC}"
-    
-    # Install WebP support
-    local php_ver=$(get_installed_php_version)
-    apt-get install -y php${php_ver}-gd webp
-    
-    log_info "WebP support installed"
-    echo -e "${GREEN}You can now use WebP images in WordPress${NC}"
+    echo -e "Phạm vi áp dụng:"
+    echo -e "  1. Chọn 1 website cụ thể"
+    echo -e "  2. Áp dụng cho TẤT CẢ WordPress sites"
+    echo -e "  0. Hủy"
+    read -p "Chọn: " scope
+
+    case $scope in
+        1)
+            source "$(dirname "${BASH_SOURCE[0]}")/wordpress_tool.sh"
+            select_wp_site || return
+            ensure_wp_cli
+            _install_webp_server
+            _do_image_optimization "$SELECTED_DOMAIN"
+            ;;
+        2)
+            echo -e "${YELLOW}Áp dụng cho TẤT CẢ WordPress sites:${NC}"
+            local found=0
+            for d in /var/www/*/public_html/wp-config.php; do
+                [ ! -f "$d" ] && continue
+                local domain
+                domain=$(basename "$(dirname "$(dirname "$d")")")
+                echo "  → $domain"
+                found=$((found+1))
+            done
+            [ "$found" -eq 0 ] && echo -e "${RED}Không có site WordPress nào.${NC}" && pause && return
+            
+            echo ""
+            read -p "Tiếp tục cho $found site? [y/N]: " c
+            [[ "$c" != "y" && "$c" != "Y" ]] && return
+            
+            _install_webp_server
+            
+            for d in /var/www/*/public_html/wp-config.php; do
+                [ ! -f "$d" ] && continue
+                local domain
+                domain=$(basename "$(dirname "$(dirname "$d")")")
+                _do_image_optimization "$domain"
+            done
+            ;;
+        0) return ;;
+    esac
     pause
+}
+
+_install_webp_server() {
+    local php_ver=$(get_installed_php_version)
+    if ! command -v cwebp >/dev/null 2>&1 || ! dpkg -l | grep -q "php${php_ver}-gd"; then
+        log_info "Đang cài đặt Server-side WebP support..."
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get install -y php${php_ver}-gd webp >/dev/null 2>&1
+        systemctl restart php${php_ver}-fpm >/dev/null 2>&1
+        log_info "WebP support installed."
+    else
+        log_info "Server đã hỗ trợ WebP."
+    fi
+}
+
+_do_image_optimization() {
+    local domain=$1
+    local WEB_ROOT="/var/www/$domain/public_html"
+    
+    local WP_PHP_BIN="php"
+    local SITE_CONF="/etc/nginx/sites-available/$domain"
+    if [ -f "$SITE_CONF" ]; then
+        local SITE_PHP_VER=$(grep -shoP 'unix:/run/php/php\K[0-9.]+(?=-fpm.sock)' "$SITE_CONF" | head -n 1)
+        if [ -n "$SITE_PHP_VER" ] && command -v "php$SITE_PHP_VER" >/dev/null 2>&1; then
+            WP_PHP_BIN="php$SITE_PHP_VER"
+        fi
+    fi
+    
+    if ! "$WP_PHP_BIN" -m 2>/dev/null | grep -qEi "(mysqli|pdo_mysql)"; then
+        for v in 8.3 8.4 8.5 8.2 8.1 8.0 7.4; do
+            if command -v "php$v" >/dev/null 2>&1 && "php$v" -m 2>/dev/null | grep -qEi "(mysqli|pdo_mysql)"; then
+                WP_PHP_BIN="php$v"
+                break
+            fi
+        done
+    fi
+    local WP_CMD="$WP_PHP_BIN -d /usr/local/bin/wp --path=$WEB_ROOT --allow-root"
+
+    if [ ! -f "$WEB_ROOT/wp-config.php" ]; then
+        echo -e "${RED}$domain không phải WordPress site.${NC}"
+        return
+    fi
+
+    log_info "Cài đặt Plugin tối ưu ảnh: $domain"
+    
+    if $WP_CMD plugin is-installed imagify 2>/dev/null; then
+        echo "  ✓ Imagify plugin đã có sẵn."
+        $WP_CMD plugin activate imagify 2>/dev/null
+    elif $WP_CMD plugin is-installed shortpixel-image-optimiser 2>/dev/null; then
+        echo "  ✓ ShortPixel plugin đã có sẵn."
+    elif $WP_CMD plugin is-installed litespeed-cache 2>/dev/null; then
+        echo "  ✓ LiteSpeed Cache đã có sẵn."
+    else
+        echo "  - Đang tải và cài đặt Imagify..."
+        if $WP_CMD plugin install imagify --activate 2>/dev/null; then
+            echo "  ✓ Cài đặt Imagify thành công."
+        else
+            echo "  ✗ Lỗi khi cài đặt Imagify."
+        fi
+    fi
+    
+    echo -e "${YELLOW}Gợi ý: Hãy đăng nhập WP Admin -> Settings -> Imagify để lấy API Key miễn phí và kích hoạt WebP!${NC}"
 }
 
 # 10. HTTP/2 & Brotli
