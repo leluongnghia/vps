@@ -493,15 +493,28 @@ change_site_php() {
     
     if [ ! -f "$conf" ]; then echo -e "${RED}Config Nginx không tồn tại.${NC}"; pause; return; fi
     
-    echo -e "Chọn phiên bản PHP:"
+    # Tìm kiếm version PHP hiện hành trong file config
+    local current_php
+    current_php=$(grep -oP 'unix:/run/php/php\K[0-9.]+(?=-fpm.sock)' "$conf" | head -n 1)
+    
+    if [ -n "$current_php" ]; then
+        echo -e "${CYAN}Phiên bản PHP hiện tại của web: PHP $current_php${NC}"
+    else
+        echo -e "${YELLOW}Không thể xác định phiên bản PHP hiện tại trong config.${NC}"
+    fi
+    echo ""
+
+    echo -e "Chọn phiên bản PHP muốn ĐỔI SANG:"
     echo "1. PHP 8.1"
     echo "2. PHP 8.2"
     echo "3. PHP 8.3"
-    read -p "Chọn [1-3]: " v
+    echo "4. PHP 8.4"
+    read -p "Chọn [1-4]: " v
     case $v in
         1) ver="8.1" ;;
         2) ver="8.2" ;;
         3) ver="8.3" ;;
+        4) ver="8.4" ;;
         *) return ;;
     esac
     

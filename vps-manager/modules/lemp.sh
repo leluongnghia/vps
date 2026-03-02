@@ -87,27 +87,43 @@ install_mariadb() {
 
 install_php() {
     log_info "Adding PHP repository (ondrej/php)..."
-    apt-get install -y software-properties-common
-    add-apt-repository -y ppa:ondrej/php
-    apt-get update
+    apt-get install -y software-properties-common >/dev/null 2>&1
+    add-apt-repository -y ppa:ondrej/php >/dev/null 2>&1
+    apt-get update >/dev/null 2>&1
 
+    local primary_ver="8.3"
+    
     if [ -n "$1" ]; then
-        php_choice=$1
+        primary_ver="$1"
     else
-        echo -e "Select PHP Version:"
-        echo -e "1) PHP 8.3"
-        echo -e "2) PHP 8.2"
-        echo -e "3) PHP 8.1"
-        read -p "Choice [1-3]: " php_choice
+        echo -e "${YELLOW}Cài đặt PHP (Mặc định: PHP 8.3)${NC}"
     fi
 
-    case $php_choice in
-        1|8.3) ver="8.3" ;;
-        2|8.2) ver="8.2" ;;
-        3|8.1) ver="8.1" ;;
-        *) ver="8.3" ;;
-    esac
+    _install_single_php "$primary_ver"
 
+    # Chỉ hỏi cài thêm nếu không điền tham số (khi chạy menu tương tác)
+    if [ -z "$1" ]; then
+        echo ""
+        read -p "Bạn có muốn cài thêm phiên bản PHP phụ không? [y/N]: " install_more
+        if [[ "$install_more" == "y" || "$install_more" == "Y" ]]; then
+            echo -e "Chọn phiên bản PHP muốn cài thêm:"
+            echo -e "1. PHP 8.1"
+            echo -e "2. PHP 8.2"
+            echo -e "3. PHP 8.4"
+            echo -e "0. Bỏ qua"
+            read -p "Chọn [0-3]: " extra_choice
+            case $extra_choice in
+                1) _install_single_php "8.1" ;;
+                2) _install_single_php "8.2" ;;
+                3) _install_single_php "8.4" ;;
+                *) echo "Đã bỏ qua cài thêm PHP phụ." ;;
+            esac
+        fi
+    fi
+}
+
+_install_single_php() {
+    local ver=$1
     log_info "Installing PHP $ver..."
     apt-get install -y php$ver php$ver-fpm php$ver-mysql php$ver-common php$ver-cli php$ver-curl php$ver-xml php$ver-mbstring php$ver-zip php$ver-bcmath php$ver-intl php$ver-gd php$ver-imagick
     
@@ -121,7 +137,7 @@ install_php() {
         sed -i -E "s/^[; ]*max_input_vars.*/max_input_vars = 3000/" "$php_ini"
     fi
     
-    systemctl enable php$ver-fpm
-    systemctl start php$ver-fpm
+    systemctl enable php$ver-fpm >/dev/null 2>&1
+    systemctl start php$ver-fpm >/dev/null 2>&1
     log_info "PHP $ver installed successfully."
 }
