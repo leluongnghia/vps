@@ -195,7 +195,9 @@ setup_object_cache_pro() {
 
 clear_all_cache() {
     log_info "Đang xóa Nginx FastCGI Cache..."
-    rm -rf /var/run/nginx-cache/*
+    rm -rf /var/run/nginx-cache/* 2>/dev/null
+    rm -rf /var/cache/nginx/* 2>/dev/null
+    systemctl reload nginx 2>/dev/null
     
     log_info "Đang Flush Redis..."
     if command -v redis-cli &> /dev/null; then
@@ -206,12 +208,20 @@ clear_all_cache() {
     systemctl restart memcached 2>/dev/null
     
     log_info "Đang reload PHP-FPM (Clear OPcache)..."
-    systemctl reload php*-fpm
+    systemctl reload php*-fpm 2>/dev/null
     
     log_info "Đang xóa thư mục Cache của plugin (WP Rocket, W3TC...)"
     rm -rf /var/www/*/public_html/wp-content/cache/* 2>/dev/null
     
-    log_info "Đã xóa sạch Cache hệ thống."
+    log_info "Đang Flush Object Cache & Transients bằng WP-CLI..."
+    for wp_config in /var/www/*/public_html/wp-config.php; do
+        if [ -f "$wp_config" ]; then
+            site_path=$(dirname "$wp_config")
+            wp cache flush --path="$site_path" --allow-root 2>/dev/null
+        fi
+    done
+    
+    log_info "Đã xóa sạch Cache hệ thống từ Server."
     pause
 }
 
