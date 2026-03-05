@@ -389,8 +389,22 @@ wp_config_tool_menu() {
     read -p "Select: " c
     
     case $c in
-        1) $WP_CMD config set WP_DEBUG true --raw; pause ;;
-        2) $WP_CMD config set WP_DEBUG false --raw; pause ;;
+        1) 
+            $WP_CMD config set WP_DEBUG true --raw
+            $WP_CMD config set WP_DEBUG_LOG true --raw
+            $WP_CMD config set WP_DEBUG_DISPLAY true --raw
+            # Add @ini_set to wp-config.php if not exists
+            if ! $WP_CMD eval "if(strpos(file_get_contents(ABSPATH . 'wp-config.php'), 'display_errors') === false) { file_put_contents(ABSPATH . 'wp-config.php', str_replace(\"define( 'WP_DEBUG', true );\", \"define( 'WP_DEBUG', true );\n@ini_set('display_errors', 1);\", file_get_contents(ABSPATH . 'wp-config.php'))); }"; then
+                echo "Could not inject display_errors via eval."
+            fi
+            pause ;;
+        2) 
+            $WP_CMD config set WP_DEBUG false --raw
+            $WP_CMD config set WP_DEBUG_LOG false --raw
+            $WP_CMD config set WP_DEBUG_DISPLAY false --raw
+            # Remove @ini_set from wp-config.php
+            $WP_CMD eval "file_put_contents(ABSPATH . 'wp-config.php', preg_replace('/@ini_set\\(\\'display_errors\\', [01]\\);\\r?\\n?/', '', file_get_contents(ABSPATH . 'wp-config.php')));"
+            pause ;;
         3) 
             $WP_CMD config set DISABLE_WP_CRON true --raw
             # Setup Real Cron with Wget (1 minute)
