@@ -264,8 +264,54 @@ install_wordpress() {
     chown -R www-data:www-data "/var/www/$domain/public_html"
 }
 
+list_sites() {
+    echo -e "\n${CYAN}Danh sách Website trên VPS:${NC}"
+    echo -e "${BLUE}----------------------------------------------------------------${NC}"
+    printf "%-5s %-35s %-10s %-6s %-10s\n" "STT" "Domain" "SSL" "PHP" "FastCGI"
+    echo -e "${BLUE}----------------------------------------------------------------${NC}"
+
+    local i=1
+    for d in /var/www/*; do
+        if [[ -d "$d" && "$(basename "$d")" != "html" ]]; then
+            domain=$(basename "$d")
+            conf="/etc/nginx/sites-available/$domain"
+
+            # Detect SSL
+            if grep -q "listen 443" "$conf" 2>/dev/null; then
+                ssl="${GREEN}ON${NC}"
+            else
+                ssl="${RED}OFF${NC}"
+            fi
+
+            # Detect PHP version
+            php_ver=$(grep -oP 'php\K[0-9.]+(?=-fpm.sock)' "$conf" 2>/dev/null | head -n 1)
+            [ -z "$php_ver" ] && php_ver="?"
+
+            # Detect FastCGI Cache
+            if grep -q 'skip_cache 1; # DEV_MODE_ACTIVE' "$conf" 2>/dev/null; then
+                cache="${RED}DEV${NC}"
+            elif grep -q 'fastcgi_cache WORDPRESS' "$conf" 2>/dev/null; then
+                cache="${GREEN}ON${NC}"
+            else
+                cache="${YELLOW}OFF${NC}"
+            fi
+
+            printf "%-5s %-35s " "$i." "$domain"
+            echo -e "$ssl    $php_ver    $cache"
+            ((i++))
+        fi
+    done
+
+    if [ "$i" -eq 1 ]; then
+        echo -e "${RED}Không tìm thấy website nào!${NC}"
+    fi
+    echo -e "${BLUE}----------------------------------------------------------------${NC}"
+    pause
+}
+
 # Helper: Select Site
 select_site() {
+
     echo -e "\n${CYAN}Danh sách Website trên VPS:${NC}"
     sites=()
     i=1
