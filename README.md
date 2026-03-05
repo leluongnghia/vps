@@ -30,32 +30,30 @@ Script Bash toàn diện giúp quản lý VPS **Ubuntu/Debian** qua menu tương
 
 ---
 
-## 📋 Menu Chính (22 Tùy chọn)
+## 📋 Menu Chính (20 Tùy chọn)
 
 | # | Tính năng | Mô tả |
 |---|-----------|--------|
 | 1 | 🏗️ **Cài đặt LEMP Stack** | Nginx + MariaDB + PHP (8.1/8.2/8.3) tự động |
 | 2 | 🌐 **Quản lý Domain & Website** | Thêm/Xóa/Clone/Rename site, Parked domain, Redirect |
 | 3 | 🔧 **Quản lý WordPress** | WP-CLI: Core/Plugin/User, Security, SEO, Database |
-| 4 | 🛡️ **Bảo mật & Tường lửa** | UFW, Fail2ban, SSH port, WAF, DDoS protection |
-| 5 | 💾 **Backup & Restore** | Local, Google Drive, restore thông minh |
-| 6 | ⚙️ **Công cụ Hệ thống** | Optimize, Logs, System tools |
-| 7 | 🐘 **Quản lý PHP** | Đổi version, cấu hình, extensions |
-| 8 | ⏰ **Quản lý Cronjob** | Thêm/Xóa lịch chạy |
-| 9 | 🔄 **Quản lý Services** | Nginx/MySQL/PHP-FPM restart/stop/status |
-| 10 | 🗃️ **Quản lý Database** | Tạo/Xóa DB, import/export, credentials |
-| 11 | ⚡ **Quản lý Cache** | Redis, Memcached, FastCGI Cache |
-| 12 | 🧠 **Quản lý Swap** | RAM ảo, tối ưu swappiness |
-| 13 | 💿 **Quản lý Ổ đĩa** | Dọn dẹp logs, disk usage |
-| 14 | 🛠️ **AppAdmin & Công cụ** | Phpinfo, bổ trợ |
-| 15 | 📐 **Quản lý Nginx** | Cấu hình, snippets |
-| 16 | 🚀 **Tối ưu Hiệu năng** | Redis/BBR/Brotli/Swap/Limits |
-| 17 | 🔄 **Cập nhật Script** | Self-update từ GitHub (git pull hoặc clone) |
-| 18 | 🏥 **Health Check** | Chẩn đoán toàn diện RAM/Disk/Services/Logs |
-| 19 | ⚡ **WordPress Performance** | Tối ưu chuyên sâu cho WordPress |
-| 20 | 🗄️ **Quản lý phpMyAdmin** | Cài đặt, HTTP Auth, URL ẩn |
-| 21 | 🔒 **Quản lý SSL** | Status, Install, Renew, Revoke, Auto-renew Cron |
-| 22 | ⏰ **Auto Backup Cron** | Lịch backup tự động hàng ngày/tuần |
+| 4 | 🛡️ **Bảo mật & Tối ưu hóa** | UFW, Fail2ban, SSH port, WAF, DDoS protection |
+| 5 | 💾 **Sao lưu & Khôi phục (Backup/Restore)** | Local, Google Drive, restore thông minh |
+| 6 | 🐘 **Quản lý Phiên bản PHP** | Đổi version, cấu hình, extensions |
+| 7 | ⏰ **Quản lý Cronjob (Lịch biểu)** | Thêm/Xóa lịch chạy |
+| 8 | 🔄 **Quản lý Services** | Khởi động lại/Stop Nginx, MySQL, PHP-FPM... |
+| 9 | 🗃️ **Quản lý Database** | Tạo/Xóa DB, import/export, credentials |
+| 10 | ⚡ **Quản lý Cache** | Redis, Memcached, FastCGI Cache |
+| 11 | 🧠 **Quản lý Swap** | RAM ảo, tối ưu swappiness |
+| 12 | 💿 **Quản lý Ổ đĩa & Dọn dẹp Logs** | Dọn dẹp logs, kiểm tra disk usage |
+| 13 | 🛠️ **AppAdmin & Công cụ bổ trợ** | Phpinfo, ứng dụng bổ trợ |
+| 14 | 📐 **Quản lý Nginx (Cấu hình)** | Cấu hình Virtual Hosts, snippets |
+| 15 | 🔄 **Cập nhật Script (Từ GitHub)** | Tự động nâng cấp script lên bản mới nhất |
+| 16 | 🏥 **Chẩn đoán Hệ thống (Health Check)** | Health Check tổng thể RAM/Disk/Services/Logs |
+| 17 | 🚀 **Tối ưu WordPress Performance** | Tinh chỉnh cấp cao cho toàn hệ thống & website |
+| 18 | 🗄️ **Quản lý phpMyAdmin** | Cài đặt tự động, bảo mật bằng HTTP Auth, URL ẩn |
+| 19 | 🔒 **Quản lý SSL (Let's Encrypt / Renew)**| Cài đặt SSL, tự động gia hạn, kiểm tra trạng thái |
+| 20 | ⏰ **Backup Tự động (Auto Backup Cron)** | Lập lịch backup source, DB hàng ngày/tuần |
 
 ---
 
@@ -72,7 +70,7 @@ Script Bash toàn diện giúp quản lý VPS **Ubuntu/Debian** qua menu tương
   - SEO Nginx rules (RankMath/Yoast)
   - Tạo Admin mới với password random
 
-### 🔒 SSL Management (Menu 21)
+### 🔒 SSL Management (Menu 19)
 
 - **Let's Encrypt** (Certbot) — miễn phí, tự động
 - **Cloudflare Origin SSL** — hỗ trợ paste key từ dashboard
@@ -80,7 +78,7 @@ Script Bash toàn diện giúp quản lý VPS **Ubuntu/Debian** qua menu tương
 - **Xem trạng thái SSL** tất cả domain + số ngày còn hạn
 - **Auto-Renew Cron** tự gia hạn lúc 3:00 AM hàng ngày
 
-### 💾 Backup & Restore thông minh (Menu 5 & 22)
+### 💾 Backup & Restore thông minh (Menu 5 & 20)
 
 - Backup Code + DB về **Local** hoặc **Google Drive** (rclone)
 - **Auto Backup Cron**: Lịch hàng ngày (3:00 AM) hoặc hàng tuần
@@ -95,7 +93,7 @@ Script Bash toàn diện giúp quản lý VPS **Ubuntu/Debian** qua menu tương
 - **Auto fix table prefix**, DB repair sau restore
 - Config retention: giữ bao nhiêu bản (mặc định 7 ngày)
 
-### 🗄️ phpMyAdmin (Menu 20)
+### 🗄️ phpMyAdmin (Menu 18)
 
 - Cài đặt tự động phpMyAdmin 5.2.1
 - **HTTP Basic Auth** bảo vệ lớp 1
@@ -120,7 +118,7 @@ Quy trình này kết hợp hoàn hảo giữa cài cắm Plugin của anh và s
 ### Bước 1: Tối ưu lõi Server bằng VPS Script (Rất quan trọng)
 Mở SSH lên, gõ `vps` để vào Tool, sau đó làm theo các menu sau:
 
-1. **Vào Menu 19 (WordPress Performance) -> Chọn tính năng 1 (Auto-Optimize)**
+1. **Vào Menu 17 (WordPress Performance) -> Chọn tính năng 1 (Auto-Optimize)**
    - Script sẽ tính toán cấu hình RAM của VPS để tự động nâng cấp sức mạnh cho PHP-FPM, Mở rộng OPcache lên mức 256MB, và tinh chỉnh cấu hình MySQL/MariaDB.
    - Khi chạy xong bước này, web của bạn đã có thể **tải nhanh hơn khoảng 50%**, giảm độ trễ Time-to-First-Byte (TTFB).
 
