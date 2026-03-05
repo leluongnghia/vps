@@ -186,7 +186,15 @@ setup_object_cache_pro() {
     fi
     
     # 3. Check PHP Redis
-    toggle_extension "redis" "on" # Ensure enabled
+    # Call toggle_extension with an environment variable or flag to auto-select ALL and ON, or just use commands directly
+    if ! dpkg -s php-redis &> /dev/null; then
+        apt-get update -qq
+        apt-get install -y php-redis php8.1-redis php8.2-redis php8.3-redis 2>/dev/null
+    fi
+    for v in 8.1 8.2 8.3; do
+        phpenmod -v $v redis 2>/dev/null
+        systemctl restart php$v-fpm 2>/dev/null
+    done
     
     echo -e "${GREEN}Hoàn tất tối ưu cho Object Cache Pro!${NC}"
     echo -e "Lưu ý: Bạn cần cài đặt plugin Object Cache Pro trong WordPress và điền key bản quyền."
