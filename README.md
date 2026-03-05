@@ -113,35 +113,40 @@ Script Bash toàn diện giúp quản lý VPS **Ubuntu/Debian** qua menu tương
 
 ---
 
-## 🚀 Thứ tự ưu tiên tăng tốc WordPress
+## 🚀 Hướng dẫn Tối ưu tốc độ Web với Script (3 Bước Chuẩn)
 
-Để đạt hiệu suất cao nhất, hãy thực hiện theo thứ tự ưu tiên sau:
+Quy trình này kết hợp hoàn hảo giữa cài cắm Plugin của anh và sự can thiệp từ VPS:
 
-### 🥇 Tier 1 — Quan trọng nhất (Server-level & Database)
+### Bước 1: Tối ưu lõi Server bằng VPS Script (Rất quan trọng)
+Mở SSH lên, gõ `vps` để vào Tool, sau đó làm theo các menu sau:
 
-| Option | Tác dụng |
-|--------|----------|
-| **1. Auto-Optimize Server** | Tối ưu PHP-FPM, OPcache, MySQL, Nginx FastCGI ở cấp server. Ảnh hưởng tích cực toàn bộ các site. |
-| **9. Disable Bloat** | Tắt Heartbeat, XML-RPC, Embeds... giúp giảm request không cần thiết. |
-| **8. Database Cleanup** | Dọn dẹp revision, spam, transient giúp query database nhanh hơn. |
+1. **Vào Menu 19 (WordPress Performance) -> Chọn tính năng 1 (Auto-Optimize)**
+   - Script sẽ tính toán cấu hình RAM của VPS để tự động nâng cấp sức mạnh cho PHP-FPM, Mở rộng OPcache lên mức 256MB, và tinh chỉnh cấu hình MySQL/MariaDB.
+   - Khi chạy xong bước này, web của bạn đã có thể **tải nhanh hơn khoảng 50%**, giảm độ trễ Time-to-First-Byte (TTFB).
 
-### 🥈 Tier 2 — Caching (Sau khi server ổn định)
+2. **Vào Menu 10 (Quản lý Cache) -> Chọn tính năng 7 (Tối ưu Server cho Object Cache)**
+   - Kích hoạt sức mạnh cho Database trên RAM.
 
-| Option | Tác dụng |
-|--------|----------|
-| **5. Nginx FastCGI Cache** | Cache PHP response, giúp bypass PHP hoàn toàn cho khách truy cập lại. |
-| **Cache Plugin (Rocket/W3TC)** | Tạo Static HTML giúp giảm TTFB xuống dưới 50ms. |
-| **6. Object Cache (Redis)** | Cache database queries vào RAM, giảm tải cho MySQL 60-80%. |
+3. **(Nếu dùng WP Rocket)**: **Vào Menu 10 -> Chọn tính năng 5 (Setup Nginx for WP Rocket)**
+   - Ép Nginx nhận diện thư mục cache của Rocket để bỏ qua tầng trung gian PHP. Điểm mấu chốt để web chịu tải được lượng traffic lớn.
 
-### 🥉 Tier 3 — Tối ưu bổ sung
+### Bước 2: Cài đặt Plugin trên WordPress
+Đăng nhập vào trang quản trị wp-admin của web và cài 3 loại plugin sau:
 
-| Option | Tác dụng |
-|--------|----------|
-| **7. HTTP/2 + Brotli/Gzip** | Cần SSL. Giảm dung lượng truyền tải 60-70%. |
-| **10. Image Optimization** | Cần thiết nếu site có nhiều hình ảnh chưa được tối ưu. |
+1. **Caching Plugin (Nên dùng WP Rocket hoặc W3 Total Cache):**
+   - Chỉ cần bật tính năng cơ bản: *Enable Page Caching, Minify CSS/JS*. Do đã setup Nginx ở Bước 1 nên tốc độ load bây giờ sẽ được boot lên tối đa.
+2. **Object Cache Plugin (Bắt buộc phải có để giảm tải Database):**
+   - Cài Plugin **"Redis Object Cache"** (Của Till Krüss phát hành - bản miễn phí).
+   - Truy cập Cài đặt -> Redis -> Nhấn "Enable Object Cache" -> Chờ nó chuyển sang chữ *Connected* màu xanh là xong (Khoảng 90% câu lệnh Database sẽ bị triệt tiêu).
+3. **Image Optimization:**
+   - Ảnh là thứ làm web nặng nhất. Cài Plugin **Imagify** hoặc **ShortPixel**, thiết lập tự động Converter ảnh sang đuôi `.webp` và dồn nén chất lượng khoảng 80-85%.
 
-> **Quy trình khuyến nghị:**
-> B1 (Opt 1) → B2 (Opt 9) → B3 (Opt 8) → B4 (Cài Cache Plugin) → B5 (Opt 6) → B6 (Opt 7)
+### Bước 3: Dọn dẹp rác & Test tốc độ
+Cuối cùng, mở lại Menu của VPS CLI Script:
+- Vào **Menu 10 (Quản lý Cache) -> Chọn Tùy chọn 1 (Xóa Cache FastCGI, Redis, Memcached)** để khởi động lại bộ nhớ một cách sạch sẽ nhất.
+- Kiểm tra tốc độ thực tế thông qua các công cụ như `PageSpeed Insights` (Của Google) hoặc `GTmetrix` để xem độ cải thiện của Time-To-First-Byte. 
+
+> **Lưu ý:** Mọi quy trình trên đều cực kỳ an toàn, hãy luôn backup lại web qua Menu của Script trước khi làm để đề phòng. Nếu web có sử dụng **Cloudflare**, đừng quên nút *Purge Cache* trên bảng điều khiển Cloudflare.
 
 ---
 
