@@ -80,8 +80,22 @@ install_mariadb() {
         systemctl enable mariadb
         systemctl start mariadb
         
-        # Secure installation automation could go here
-        log_info "MariaDB installed. Please run 'mysql_secure_installation' manually for security."
+        # Tự động tạo mật khẩu root an toàn và cấu hình
+        local root_pass
+        root_pass=$(openssl rand -base64 12 | tr -dc 'a-zA-Z0-9' | head -c 12)
+        
+        mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '${root_pass}';"
+        mysql -e "DELETE FROM mysql.user WHERE User='';"
+        mysql -e "DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');"
+        mysql -e "DROP DATABASE IF EXISTS test;"
+        mysql -e "DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';"
+        mysql -e "FLUSH PRIVILEGES;"
+        
+        # Lưu vào .my.cnf
+        echo -e "[client]\nuser=root\npassword=\"${root_pass}\"" > /root/.my.cnf
+        chmod 600 /root/.my.cnf
+        
+        log_info "MariaDB installed and secured! Tự động tạo cấu hình Root."
     fi
 }
 
