@@ -727,43 +727,75 @@ check_wp_core() {
 
 toggle_site_cache() {
     echo -e "${YELLOW}--- Bật/Tắt FastCGI Cache (Dev Mode) ---${NC}"
-    echo -e "Chế độ Dev Mode sẽ buộc Nginx bỏ qua cache hoàn toàn cho website này."
+    echo -e "Chế độ Dev Mode sẽ buộc Nginx bỏ qua cache hoàn toàn."
     echo -e "Rất hữu ích khi bạn đang thiết kế hoặc chỉnh sửa code."
     
-    select_site || return
-    local domain="$SELECTED_DOMAIN"
-    local conf="/etc/nginx/sites-available/$domain"
+    echo -e "1. Tùy chỉnh cho MỘT website cụ thể (Chọn từ danh sách)"
+    echo -e "2. BẬT cache cho TẤT CẢ website (Production Mode)"
+    echo -e "3. TẮT cache cho TẤT CẢ website (Dev Mode toàn hệ thống)"
+    read -p "Chọn [1-3]: " mode_c
     
-    if [ ! -f "$conf" ]; then 
-        echo -e "${RED}Config Nginx không tồn tại: $conf${NC}"
-        pause; return 
+    if [[ "$mode_c" == "2" ]]; then
+        log_info "Đang BẬT cache cho TOÀN BỘ hệ thống..."
+        for conf in /etc/nginx/sites-available/*; do
+            if [ -f "$conf" ] && grep -q "\$skip_cache" "$conf"; then
+                sed -i 's/set \$skip_cache 1; # DEV_MODE_ACTIVE/set \$skip_cache 0;/' "$conf"
+            fi
+        done
+        nginx -t && systemctl reload nginx
+        log_info "Hoàn tất! Hệ thống đã chạy ở tốc độ tối đa."
+        pause; return
     fi
     
-    # Kiểm tra trạng thái hiện tại
-    if grep -q "set \$skip_cache 1; # DEV_MODE_ACTIVE" "$conf"; then
-        echo -e "Trạng thái FastCGI Cache: ${RED}ĐANG TẮT (Dev Mode)${NC}"
-        read -p "Bạn muốn BẬT LẠI cache không? (y/n): " c
-        if [[ "$c" == "y" || "$c" == "Y" ]]; then
-            sed -i 's/set \$skip_cache 1; # DEV_MODE_ACTIVE/set \$skip_cache 0;/' "$conf"
-            nginx -t && systemctl reload nginx
-            log_info "Đã BẬT LẠI Cache cho $domain. Web sẽ load nhanh như chớp!"
-        fi
-    elif grep -q "set \$skip_cache 0;" "$conf"; then
-        echo -e "Trạng thái FastCGI Cache: ${GREEN}ĐANG BẬT (Production Mode)${NC}"
-        read -p "Bạn muốn TẮT cache (chuyển sang Dev Mode) không? (y/n): " c
-        if [[ "$c" == "y" || "$c" == "Y" ]]; then
-            sed -i 's/set \$skip_cache 0;/set \$skip_cache 1; # DEV_MODE_ACTIVE/' "$conf"
-            
-            # Xóa sạch array cache local để chắc chắn thay đổi áp dụng liền
-            rm -rf /var/run/nginx-cache/* 2>/dev/null
-            
-            nginx -t && systemctl reload nginx
-            log_info "Đã TẮT Cache cho $domain. Phù hợp để chỉnh sửa code/giao diện."
-        fi
-    else
-        echo -e "${RED}Không tìm thấy cấu hình \$skip_cache trong file config của Nginx!${NC}"
-        echo -e "Bạn có thể thử dùng tính năng '14. Cấu hình lại Nginx (Rewrite Vhost)' để thiết lập lại file chuẩn."
+    if [[ "$mode_c" == "3" ]]; then
+        log_info "Đang TẮT cache cho TOÀN BỘ hệ thống..."
+        for conf in /etc/nginx/sites-available/*; do
+            if [ -f "$conf" ] && grep -q "\$skip_cache" "$conf"; then
+                sed -i 's/set \$skip_cache 0;/set \$skip_cache 1; # DEV_MODE_ACTIVE/' "$conf"
+            fi
+        done
+        rm -rf /var/run/nginx-cache/* 2>/dev/null
+        nginx -t && systemctl reload nginx
+        log_info "Hoàn tất! Hệ thống đã ở chế độ Dev Mode."
+        pause; return
     fi
     
-    pause
+    if [[ "$mode_c" == "1" ]]; then
+        select_site || return
+        local domain="$SELECTED_DOMAIN"
+        local conf="/etc/nginx/sites-available/$domain"
+        
+        if [ ! -f "$conf" ]; then 
+            echo -e "${RED}Config Nginx không tồn tại: $conf${NC}"
+            pause; return 
+        fi
+        
+        # Kiểm tra trạng thái hiện tại
+        if grep -q "set \$skip_cache 1; # DEV_MODE_ACTIVE" "$conf"; then
+            echo -e "Trạng thái FastCGI Cache: ${RED}ĐANG TẮT (Dev Mode)${NC}"
+            read -p "Bạn muốn BẬT LẠI cache không? (y/n): " c
+            if [[ "$c" == "y" || "$c" == "Y" ]]; then
+                sed -i 's/set \$skip_cache 1; # DEV_MODE_ACTIVE/set \$skip_cache 0;/' "$conf"
+                nginx -t && systemctl reload nginx
+                log_info "Đã BẬT LẠI Cache cho $domain. Web sẽ load nhanh như chớp!"
+            fi
+        elif grep -q "set \$skip_cache 0;" "$conf"; then
+            echo -e "Trạng thái FastCGI Cache: ${GREEN}ĐANG BẬT (Production Mode)${NC}"
+            read -p "Bạn muốn TẮT cache (chuyển sang Dev Mode) không? (y/n): " c
+            if [[ "$c" == "y" || "$c" == "Y" ]]; then
+                sed -i 's/set \$skip_cache 0;/set \$skip_cache 1; # DEV_MODE_ACTIVE/' "$conf"
+                
+                # Xóa sạch array cache local để chắc chắn thay đổi áp dụng liền
+                rm -rf /var/run/nginx-cache/* 2>/dev/null
+                
+                nginx -t && systemctl reload nginx
+                log_info "Đã TẮT Cache cho $domain. Phù hợp để chỉnh sửa code/giao diện."
+            fi
+        else
+            echo -e "${RED}Không tìm thấy cấu hình \$skip_cache trong file config của Nginx!${NC}"
+            echo -e "Bạn có thể thử dùng tính năng '14. Cấu hình lại Nginx (Rewrite Vhost)' để thiết lập lại file chuẩn."
+        fi
+        
+        pause
+    fi
 }
