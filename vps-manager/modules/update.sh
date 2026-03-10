@@ -72,7 +72,7 @@ do_update() {
     fi
 
     local REMOTE_VERSION
-    REMOTE_VERSION=$(curl -s "https://raw.githubusercontent.com/leluongnghia/vps/$BRANCH/vps-manager/VERSION")
+    REMOTE_VERSION=$(curl -s "https://raw.githubusercontent.com/leluongnghia/vps/$BRANCH/vps-manager/VERSION?t=$(date +%s)")
 
     # Clean versions from whitespace/newlines
     LOCAL_VERSION=$(echo "$LOCAL_VERSION" | tr -d '[:space:]')
