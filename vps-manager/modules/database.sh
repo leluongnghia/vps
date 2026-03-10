@@ -72,12 +72,25 @@ delete_database() {
 }
 
 change_db_pass() {
-    read -p "Nhập tên DB User: " db_user
-    read -p "Nhập mật khẩu mới: " new_pass
+    read -p "Nhập tên DB User (Ví dụ: root): " db_user
+    read -p "Nhập mật khẩu mới (Để trống để tự tạo ngẫu nhiên): " new_pass
+    
+    if [ -z "$new_pass" ]; then
+        new_pass=$(openssl rand -base64 12 | tr -dc 'a-zA-Z0-9' | head -c 12)
+        echo -e "Mật khẩu tự tạo: ${GREEN}$new_pass${NC}"
+    fi
     
     mysql -e "ALTER USER '${db_user}'@'localhost' IDENTIFIED BY '${new_pass}';"
     mysql -e "FLUSH PRIVILEGES;"
     log_info "Đã đổi mật khẩu cho user $db_user."
+
+    # Nếu đổi mật khẩu root, lưu cấu hình vào .my.cnf để phpMyAdmin và Script nhận dạng
+    if [ "$db_user" == "root" ]; then
+        echo -e "[client]\nuser=root\npassword=\"${new_pass}\"" > /root/.my.cnf
+        chmod 600 /root/.my.cnf
+        log_info "Đã cập nhật file /root/.my.cnf cho truy cập MySQL Root."
+    fi
+
     pause
 }
 
