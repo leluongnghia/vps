@@ -7,25 +7,46 @@ disk_menu() {
     echo -e "${BLUE}=================================================${NC}"
     echo -e "${GREEN}          Quản lý Disk & Logs${NC}"
     echo -e "${BLUE}=================================================${NC}"
-    echo -e "1. Xem dung lượng ổ đĩa (Disk Usage)"
-    echo -e "2. Cảnh báo dung lượng (>90%)"
-    echo -e "3. Dọn dẹp hệ thống (Log cũ, apt cache)"
-    echo -e "4. Xem Logs (Nginx, PHP, MySQL)"
+    echo -e "1. Xem dung lượng tổng quan (df -h)"
+    echo -e "2. Top 10 thư mục lớn nhất trong /var/www (du)"
+    echo -e "3. Quét hệ thống trực quan với ncdu"
+    echo -e "4. Cảnh báo dung lượng (>90%)"
+    echo -e "5. Dọn dẹp hệ thống (Log cũ, apt cache, /tmp)"
+    echo -e "6. Xem Logs (Nginx, PHP, MySQL)"
     echo -e "0. Quay lại"
     read -p "Chọn: " choice
     
     case $choice in
         1) 
+            clear
+            echo -e "${GREEN}--- Dung lượng tổng quan (df -h) ---${NC}"
             df -h
-            echo "--- Top 10 thư mục lớn nhất trong /var/www ---"
-            du -sh /var/www/* | sort -rh | head -10
             pause 
             ;;
-        2) check_disk_usage ;;
-        3) clean_system ;;
-        4) view_logs ;;
+        2) 
+            clear
+            echo -e "${GREEN}--- Top 10 thư mục lớn nhất trong /var/www ---${NC}"
+            du -sh /var/www/* 2>/dev/null | sort -rh | head -10
+            pause 
+            ;;
+        3) check_and_run_ncdu ;;
+        4) check_disk_usage ;;
+        5) clean_system ;;
+        6) view_logs ;;
         0) return ;;
     esac
+}
+
+check_and_run_ncdu() {
+    clear
+    if ! command -v ncdu &> /dev/null; then
+        echo -e "${YELLOW}Công cụ ncdu chưa được cài đặt. Đang tiến hành cài đặt...${NC}"
+        apt-get update
+        apt-get install -y ncdu
+    fi
+    echo -e "${GREEN}Đang mở giao diện ncdu để quét toàn bộ VPS... (Bấm phím 'q' để thoát)${NC}"
+    sleep 2
+    ncdu /
 }
 
 check_disk_usage() {
