@@ -164,15 +164,14 @@ view_db_by_website() {
             echo -e "${YELLOW}👤 User:${NC} $db_user"
             echo -e "${YELLOW}🔑 Password:${NC} $db_pass"
                 
-                # Get database size
-                local db_size=$(mysql -e "SELECT ROUND(SUM(data_length + index_length) / 1024 / 1024, 2) FROM information_schema.tables WHERE table_schema = '$db_name';" 2>/dev/null | tail -1)
-                if [ -n "$db_size" ] && [ "$db_size" != "NULL" ]; then
-                    echo -e "${YELLOW}💾 Size:${NC} ${db_size} MB"
-                fi
-                
-                echo ""
-                found=$((found + 1))  # FIX: increment counter
+            # Get database size
+            local db_size=$(mysql -e "SELECT ROUND(SUM(data_length + index_length) / 1024 / 1024, 2) FROM information_schema.tables WHERE table_schema = '$db_name';" 2>/dev/null | tail -1)
+            if [ -n "$db_size" ] && [ "$db_size" != "NULL" ]; then
+                echo -e "${YELLOW}💾 Size:${NC} ${db_size} MB"
             fi
+            
+            echo ""
+            found=$((found + 1))  # FIX: increment counter
         fi
     done
     
