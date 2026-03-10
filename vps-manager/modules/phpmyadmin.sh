@@ -14,7 +14,7 @@ _detect_php_sock() {
     ver=$(php -r "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;" 2>/dev/null)
     for v in "$ver" "8.3" "8.2" "8.1" "8.0" "7.4"; do
         [ -z "$v" ] && continue
-        if [ -S "/run/php/php${v}-fpm.sock" ]; then
+        if [[ -S "/run/php/php${v}-fpm.sock" ]]; then
             echo "unix:/run/php/php${v}-fpm.sock"
             return 0
         fi
@@ -22,7 +22,7 @@ _detect_php_sock() {
     # Fallback: find any socket
     local sock
     sock=$(find /run/php -name "php*-fpm.sock" 2>/dev/null | sort -V | tail -1)
-    if [ -n "$sock" ]; then
+    if [[ -n "$sock" ]]; then
         echo "unix:$sock"
         return 0
     fi
@@ -36,7 +36,7 @@ phpmyadmin_menu() {
         echo -e "${GREEN}          🗄️  Quản lý phpMyAdmin${NC}"
         echo -e "${BLUE}=================================================${NC}"
 
-        if [ -d "/var/www/html/phpmyadmin" ]; then
+        if [[ -d "/var/www/html/phpmyadmin" ]]; then
             echo -e "Trạng thái: ${GREEN}● Đã cài đặt${NC}"
         else
             echo -e "Trạng thái: ${RED}● Chưa cài đặt${NC}"
@@ -69,7 +69,7 @@ install_phpmyadmin() {
     echo -e "${GREEN}============================================${NC}"
 
     # ── Kiểm tra root ─────────────────────────────────────────
-    if [ "$EUID" -ne 0 ]; then
+    if [[ "$EUID" -ne 0 ]]; then
         _pma_err "Cần chạy với quyền root!"
         pause; return 1
     fi
@@ -82,7 +82,7 @@ install_phpmyadmin() {
     _pma_log "Step 1/7: Cài đặt dependencies..."
     apt-get update -qq 2>/dev/null
     apt-get install -y php-mbstring php-zip php-gd php-curl php-xml apache2-utils wget unzip 2>/dev/null
-    if [ $? -ne 0 ]; then
+    if [[ $? -ne 0 ]]; then
         _pma_warn "Một số package có thể chưa được cài. Tiếp tục..."
     fi
 
@@ -104,7 +104,7 @@ install_phpmyadmin() {
         rm -rf "$TEMP_DIR"; pause; return 1
     fi
 
-    if [ ! -f "$TEMP_DIR/$tarball" ] || [ ! -s "$TEMP_DIR/$tarball" ]; then
+    if [[ ! -f "$TEMP_DIR/$tarball" ]] || [[ ! -s "$TEMP_DIR/$tarball" ]]; then
         _pma_err "Tải thất bại! Kiểm tra kết nối mạng."
         _pma_err "Thử thủ công: wget '$url'"
         rm -rf "$TEMP_DIR"; pause; return 1
@@ -114,7 +114,7 @@ install_phpmyadmin() {
     # ── Step 3: Extract ────────────────────────────────────────
     _pma_log "Step 3/7: Giải nén..."
     tar xzf "$TEMP_DIR/$tarball" -C "$TEMP_DIR"
-    if [ $? -ne 0 ]; then
+    if [[ $? -ne 0 ]]; then
         _pma_err "Giải nén thất bại! File có thể bị hỏng."
         rm -rf "$TEMP_DIR"; pause; return 1
     fi
@@ -126,7 +126,7 @@ install_phpmyadmin() {
     local extracted_dir
     extracted_dir=$(find "$TEMP_DIR" -maxdepth 1 -type d -name "phpMyAdmin-*" | head -1)
 
-    if [ -z "$extracted_dir" ]; then
+    if [[ -z "$extracted_dir" ]]; then
         _pma_err "Không tìm thấy thư mục sau giải nén!"
         ls -la "$TEMP_DIR"
         rm -rf "$TEMP_DIR"; pause; return 1
@@ -135,7 +135,7 @@ install_phpmyadmin() {
     mv "$extracted_dir" "$PMA_DIR"
     rm -rf "$TEMP_DIR"
 
-    if [ ! -d "$PMA_DIR" ]; then
+    if [[ ! -d "$PMA_DIR" ]]; then
         _pma_err "Di chuyển thư mục thất bại!"
         pause; return 1
     fi
@@ -143,7 +143,7 @@ install_phpmyadmin() {
 
     # ── Step 5: Config ─────────────────────────────────────────
     _pma_log "Step 5/7: Tạo config..."
-    if [ -f "$PMA_DIR/config.sample.inc.php" ]; then
+    if [[ -f "$PMA_DIR/config.sample.inc.php" ]]; then
         cp "$PMA_DIR/config.sample.inc.php" "$PMA_DIR/config.inc.php"
         local SECRET
         SECRET=$(openssl rand -base64 32 | tr -dc 'a-zA-Z0-9' | head -c 32)
@@ -192,7 +192,7 @@ install_phpmyadmin() {
     # ── Detect PHP Socket ──────────────────────────────────────
     local PHP_SOCK
     PHP_SOCK=$(_detect_php_sock)
-    if [ -z "$PHP_SOCK" ]; then
+    if [[ -z "$PHP_SOCK" ]]; then
         _pma_err "Không tìm thấy PHP-FPM socket!"
         _pma_err "Kiểm tra: ls /run/php/"
         _pma_warn "Cài số: apt-get install -y php-fpm"
@@ -260,7 +260,7 @@ install_phpmyadmin() {
     # ── Test & Reload ──────────────────────────────────────────
     echo ""
     nginx -t
-    if [ $? -eq 0 ]; then
+    if [[ $? -eq 0 ]]; then
         systemctl reload nginx
         echo ""
         echo -e "${GREEN}╔══════════════════════════════════════════════╗${NC}"
@@ -275,7 +275,7 @@ install_phpmyadmin() {
         echo -e "   Pass: ${PMA_AUTH_PASS}"
         echo ""
         echo -e "${CYAN}🔐 [Lớp 2] Database Login:${NC}"
-        if [ -f /root/.my.cnf ]; then
+        if [[ -f /root/.my.cnf ]]; then
             local root_pass
             root_pass=$(grep "^password" /root/.my.cnf | head -1 | cut -d'=' -f2 | tr -d ' "')
             echo -e "   MySQL Root → User: root | Pass: ${root_pass}"
@@ -283,7 +283,7 @@ install_phpmyadmin() {
             echo -e "   Dùng user/pass MySQL của bạn."
         fi
         local data_file="$HOME/.vps-manager/sites_data.conf"
-        if [ -f "$data_file" ]; then
+        if [[ -f "$data_file" ]]; then
             echo ""
             echo -e "${CYAN}   Website DB Users:${NC}"
             while IFS='|' read -r dom dbn dbu dbp; do
@@ -318,19 +318,19 @@ secure_phpmyadmin() {
     echo -e "${YELLOW}--- Đổi URL phpMyAdmin (Ẩn đường dẫn) ---${NC}"
     read -p "Nhập tên đường dẫn mới (vd: manage_db_2025): " new_path
 
-    if [ -z "$new_path" ]; then
+    if [[ -z "$new_path" ]]; then
         echo -e "${RED}Tên đường dẫn không được rỗng.${NC}"
         pause; return
     fi
 
     local NGINX_CONF="/etc/nginx/sites-available/000-phpmyadmin"
-    if [ ! -f "$NGINX_CONF" ]; then
+    if [[ ! -f "$NGINX_CONF" ]]; then
         _pma_err "Chưa cài đặt phpMyAdmin hoặc thiếu cấu hình Nginx."
         pause; return
     fi
 
     # Rename folder
-    if [ -d "/var/www/html/phpmyadmin" ]; then
+    if [[ -d "/var/www/html/phpmyadmin" ]]; then
         mv "/var/www/html/phpmyadmin" "/var/www/html/${new_path}"
         _pma_log "Đã đổi thư mục thành /var/www/html/${new_path}"
     fi
@@ -358,7 +358,7 @@ reset_phpmyadmin_auth() {
     fi
 
     read -p "Nhập mật khẩu mới (Để trống = sinh ngẫu nhiên): " new_pass
-    if [ -z "$new_pass" ]; then
+    if [[ -z "$new_pass" ]]; then
         new_pass=$(openssl rand -base64 12 | tr -dc 'a-zA-Z0-9' | head -c 12)
     fi
 
@@ -384,7 +384,7 @@ view_phpmyadmin_info() {
     VPS_IP=$(curl -4 -s --connect-timeout 5 https://ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
 
     local NGINX_CONF="/etc/nginx/sites-available/000-phpmyadmin"
-    if [ -f "$NGINX_CONF" ]; then
+    if [[ -f "$NGINX_CONF" ]]; then
         local PMA_PATH
         PMA_PATH=$(grep "location \^~" "$NGINX_CONF" | awk '{print $3}')
         echo -e "${CYAN}URL:${NC} http://${VPS_IP}${PMA_PATH}"
@@ -394,11 +394,11 @@ view_phpmyadmin_info() {
 
     echo ""
     echo -e "${CYAN}[Lớp 1] HTTP Basic Auth:${NC}"
-    if [ -f /root/.vps-manager/phpmyadmin_auth.conf ]; then
+    if [[ -f /root/.vps-manager/phpmyadmin_auth.conf ]]; then
         source /root/.vps-manager/phpmyadmin_auth.conf
         echo -e "   User: ${PMA_USER:-pma_admin}"
         echo -e "   Pass: ${GREEN}${PMA_PASS}${NC}"
-    elif [ -f /etc/nginx/.phpmyadmin_htpasswd ]; then
+    elif [[ -f /etc/nginx/.phpmyadmin_htpasswd ]]; then
         echo -e "   User: pma_admin"
         echo -e "   Pass: ${YELLOW}(chưa lưu plaintext — dùng option 4 để reset và lưu lại)${NC}"
     else
@@ -407,7 +407,7 @@ view_phpmyadmin_info() {
 
     echo ""
     echo -e "${CYAN}[Lớp 2] Database Credentials:${NC}"
-    if [ -f /root/.my.cnf ]; then
+    if [[ -f /root/.my.cnf ]]; then
         local root_pass
         root_pass=$(grep "^password" /root/.my.cnf | head -1 | cut -d'=' -f2 | tr -d ' "')
         echo -e "   ${RED}MySQL Root${NC} → User: root | Pass: ${root_pass}"
@@ -416,7 +416,7 @@ view_phpmyadmin_info() {
     fi
 
     local data_file="$HOME/.vps-manager/sites_data.conf"
-    if [ -f "$data_file" ]; then
+    if [[ -f "$data_file" ]]; then
         echo ""
         echo -e "${CYAN}   Website DB Users:${NC}"
         while IFS='|' read -r dom dbn dbu dbp; do

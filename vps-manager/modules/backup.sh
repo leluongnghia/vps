@@ -116,7 +116,7 @@ for site_dir in /var/www/*; do
     mkdir -p "\$backup_dir"
 
     # Backup code
-    if [ -d "\$site_dir/public_html" ]; then
+    if [[ -d "\$site_dir/public_html" ]]; then
         zip -r "\$backup_dir/code_\${timestamp}.zip" "\$site_dir/public_html" -x "*.log" -x "*.tmp" -q
         echo "[\$timestamp] Code backup: \$domain OK" >> "\$LOG"
     fi
@@ -135,7 +135,7 @@ for site_dir in /var/www/*; do
 done
 
 # Sync to Google Drive if enabled
-if [ "$use_gdrive" = "true" ]; then
+if [[ "$use_gdrive" = "true" ]]; then
     echo "[\$timestamp] Moving backups to Google Drive (gdrive:vps_backups)..." >> "\$LOG"
     
     # Use 'move' instead of 'sync' or 'copy'. 
@@ -180,7 +180,7 @@ BACKUPSCRIPT
     (crontab -l 2>/dev/null; echo "$CRON_TIME $script_path # vps-manager-backup") | crontab -
 
     log_info "Đã bật Auto Backup: $SCHEDULE_DESC"
-    if [ "$use_gdrive" = "true" ]; then
+    if [[ "$use_gdrive" = "true" ]]; then
          echo -e "  Mode: ${GREEN}Upload & Delete Local (Tiết kiệm dung lượng VPS)${NC}"
          echo -e "  Dest: ${GREEN}Google Drive (gdrive:vps_backups)${NC}"
     else
@@ -217,7 +217,7 @@ backup_all_sites() {
 
         echo -e "\n${CYAN}📦 Backup: $domain${NC}"
 
-        if [ -d "$site_dir/public_html" ]; then
+        if [[ -d "$site_dir/public_html" ]]; then
             zip -r "$backup_dir/code_${timestamp}.zip" "$site_dir/public_html" -x "*.log" -q
             echo -e "  ✅ Code: $(du -sh "$backup_dir/code_${timestamp}.zip" | cut -f1)"
         fi
@@ -237,14 +237,14 @@ backup_all_sites() {
 
 auto_backup_view_history() {
     echo -e "${CYAN}--- Lịch sử Backup ---${NC}"
-    if [ -f /var/log/vps-auto-backup.log ]; then
+    if [[ -f /var/log/vps-auto-backup.log ]]; then
         tail -n 50 /var/log/vps-auto-backup.log
     else
         echo -e "${YELLOW}Chưa có log backup tự động.${NC}"
     fi
 
     echo -e "\n${CYAN}--- Dung lượng Backup theo Site ---${NC}"
-    if [ -d /root/backups ]; then
+    if [[ -d /root/backups ]]; then
         du -sh /root/backups/* 2>/dev/null || echo "Chưa có backup nào."
         echo -e "\nTổng: $(du -sh /root/backups 2>/dev/null | cut -f1)"
     fi
@@ -288,18 +288,18 @@ perform_smart_restore() {
     local target_db_pass=""
     
     local data_file="$HOME/.vps-manager/sites_data.conf"
-    if [ -f "$data_file" ]; then
+    if [[ -f "$data_file" ]]; then
         target_db_pass=$(grep "^$target_domain|" "$data_file" | cut -d'|' -f4)
     fi
     
-    if [ -z "$target_db_pass" ]; then
+    if [[ -z "$target_db_pass" ]]; then
         # Check wp-config
         target_db_pass=$(grep "DB_PASSWORD" "/var/www/$target_domain/public_html/wp-config.php" 2>/dev/null | cut -d "'" -f 4)
         [ -z "$target_db_pass" ] && target_db_pass=$(grep "DB_PASSWORD" "/var/www/$target_domain/public_html/wp-config.php" 2>/dev/null | cut -d '"' -f 4)
     fi
     
     # Auto Reset if missing
-    if [ -z "$target_db_pass" ]; then
+    if [[ -z "$target_db_pass" ]]; then
         log_warn "Không tìm thấy mật khẩu DB. Đang tạo mới..."
         target_db_pass=$(openssl rand -base64 18 | tr -dc 'a-zA-Z0-9' | head -c 16)
         mysql -e "ALTER USER '${target_db_user}'@'localhost' IDENTIFIED BY '${target_db_pass}';" 2>/dev/null || \
@@ -313,7 +313,7 @@ perform_smart_restore() {
     fi
 
     # 2. Restore Code
-    if [ -n "$code_zip" ] && [ -f "$code_zip" ]; then
+    if [[ -n "$code_zip" ]] && [[ -f "$code_zip" ]]; then
         log_info "Giải nén Code..."
         local tmp_extract="/root/restore_tmp_$target_domain"
         rm -rf "$tmp_extract"; mkdir -p "$tmp_extract"
@@ -326,7 +326,7 @@ perform_smart_restore() {
         
         # Move content
         local wp_root=$(find "$tmp_extract" -name "wp-config.php" -exec dirname {} \; | head -n 1)
-        if [ -n "$wp_root" ]; then
+        if [[ -n "$wp_root" ]]; then
             cp -a "$wp_root/." "/var/www/$target_domain/public_html/"
         else
             cp -a "$tmp_extract/." "/var/www/$target_domain/public_html/"
@@ -335,7 +335,7 @@ perform_smart_restore() {
         
         # Update wp-config
         local wp_conf="/var/www/$target_domain/public_html/wp-config.php"
-        if [ -f "$wp_conf" ]; then
+        if [[ -f "$wp_conf" ]]; then
             sed -i "s|define([ ]*['\"]DB_NAME['\"],.*)|define( 'DB_NAME', '$target_db_name' );|" "$wp_conf"
             sed -i "s|define([ ]*['\"]DB_USER['\"],.*)|define( 'DB_USER', '$target_db_user' );|" "$wp_conf"
             sed -i "s|define([ ]*['\"]DB_PASSWORD['\"],.*)|define( 'DB_PASSWORD', '$target_db_pass' );|" "$wp_conf"
@@ -343,7 +343,7 @@ perform_smart_restore() {
     fi
 
     # 3. Restore DB
-    if [ -n "$db_sql" ] && [ -f "$db_sql" ]; then
+    if [[ -n "$db_sql" ]] && [[ -f "$db_sql" ]]; then
         log_info "Import Database..."
         if [[ "$db_sql" == *.gz ]]; then
             zcat "$db_sql" | mysql "$target_db_name"
@@ -354,9 +354,9 @@ perform_smart_restore() {
         
         # Table Prefix Fix
         local detected_table=$(mysql -N -B -e "SHOW TABLES LIKE '%_users'" "$target_db_name" | head -n 1)
-        if [ -n "$detected_table" ]; then
+        if [[ -n "$detected_table" ]]; then
             local new_prefix=${detected_table%users}
-            if [ -n "$new_prefix" ]; then
+            if [[ -n "$new_prefix" ]]; then
                 sed -i "s/\\\$table_prefix\s*=\s*'.*';/\\\$table_prefix = '$new_prefix';/" "/var/www/$target_domain/public_html/wp-config.php"
             fi
         fi
@@ -375,7 +375,7 @@ perform_smart_restore() {
         local old_url=$(wp option get siteurl --allow-root 2>/dev/null)
         local source_domain=$(echo "$old_url" | sed -e 's|^[^/]*//||' -e 's|/.*$||')
         
-        if [ -n "$source_domain" ] && [ "$source_domain" != "$target_domain" ]; then
+        if [[ -n "$source_domain" ]] && [[ "$source_domain" != "$target_domain" ]]; then
             log_info "Migrate Domain: $source_domain -> $target_domain"
             wp search-replace "http://$source_domain" "http://$target_domain" --allow-root --quiet
             wp search-replace "https://$source_domain" "https://$target_domain" --allow-root --quiet
@@ -408,7 +408,7 @@ restore_site_manual_upload() {
     local code_file=$(find "$search_dir" -maxdepth 1 \( -name "*.zip" -o -name "*.tar.gz" \) -type f | head -n 1)
     local db_file=$(find "$search_dir" -maxdepth 1 \( -name "*.sql" -o -name "*.sql.gz" \) -type f | head -n 1)
     
-    if [ -z "$code_file" ] && [ -z "$db_file" ]; then 
+    if [[ -z "$code_file" ]] && [[ -z "$db_file" ]]; then 
         echo -e "${RED}Lỗi: Không tìm thấy file .zip hoặc .sql trong public_html${NC}"
         pause; return 
     fi
@@ -446,7 +446,7 @@ restore_site_gdrive() {
         remotes+=("$r_name")
     done < <(rclone listremotes 2>/dev/null)
 
-    if [ ${#remotes[@]} -eq 0 ]; then
+    if [[ ${#remotes[@]} -eq 0 ]]; then
         echo -e "${YELLOW}Chưa tìm thấy remote nào. Sẽ sử dụng mặc định 'gdrive'.${NC}"
         remote="gdrive"
     else
@@ -460,7 +460,7 @@ restore_site_gdrive() {
         
         if [[ "$r_choice" == "0" ]]; then
              read -p "Nhập tên remote: " remote
-        elif [[ "$r_choice" =~ ^[0-9]+$ ]] && [ "$r_choice" -ge 1 ] && [ "$r_choice" -le "${#remotes[@]}" ]; then
+        elif [[ "$r_choice" =~ ^[0-9]+$ ]] && [[ "$r_choice" -ge 1 ]] && [[ "$r_choice" -le "${#remotes[@]}" ]]; then
              remote="${remotes[$((r_choice-1))]%%:}"
         else
              # Default to first one or 'gdrive' if invalid
@@ -481,7 +481,7 @@ restore_site_gdrive() {
     read -p "File Code (.zip) [Enter để bỏ qua]: " cloud_code
     read -p "File DB (.sql.gz) [Enter để bỏ qua]: " cloud_db
     
-    if [ -z "$cloud_code" ] && [ -z "$cloud_db" ]; then return; fi
+    if [[ -z "$cloud_code" ]] && [[ -z "$cloud_db" ]]; then return; fi
     
     # Download logic
     local tmp_dir="/root/restore_cloud_tmp"
@@ -490,13 +490,13 @@ restore_site_gdrive() {
     local local_code=""
     local local_db=""
     
-    if [ -n "$cloud_code" ]; then
+    if [[ -n "$cloud_code" ]]; then
         log_info "Đang tải Code: $cloud_code ..."
         rclone copy "$remote:vps_backups/$target_domain/$cloud_code" "$tmp_dir/" --progress
         local_code="$tmp_dir/$cloud_code"
     fi
     
-    if [ -n "$cloud_db" ]; then
+    if [[ -n "$cloud_db" ]]; then
         log_info "Đang tải DB: $cloud_db ..."
         rclone copy "$remote:vps_backups/$target_domain/$cloud_db" "$tmp_dir/" --progress
         local_db="$tmp_dir/$cloud_db"
@@ -595,7 +595,7 @@ perform_gdrive_backup() {
     local db_file="$backup_dir/db_$timestamp.sql.gz"
     
     # 1. Backup Code
-    if [ -d "/var/www/$domain/public_html" ]; then
+    if [[ -d "/var/www/$domain/public_html" ]]; then
         log_info "Đang nén mã nguồn (Code)..."
         zip -r "$zip_file" "/var/www/$domain/public_html" -x "*.log" -x "*.tmp" -q
     else
@@ -613,12 +613,12 @@ perform_gdrive_backup() {
     
     # 3. Upload & Remove Local
     # Use rclone move to upload and delete source file if successful
-    if [ -f "$zip_file" ]; then
+    if [[ -f "$zip_file" ]]; then
         log_info "Đang upload Code lên Google Drive (và xóa cục bộ)..."
         rclone move "$zip_file" "$remote:vps_backups/$domain/"
     fi
     
-    if [ -f "$db_file" ]; then
+    if [[ -f "$db_file" ]]; then
         log_info "Đang upload DB lên Google Drive (và xóa cục bộ)..."
         rclone move "$db_file" "$remote:vps_backups/$domain/"
     fi
@@ -642,7 +642,7 @@ backup_to_gdrive() {
         fi
     done
     
-    if [ ${#sites[@]} -eq 0 ]; then
+    if [[ ${#sites[@]} -eq 0 ]]; then
         echo -e "${RED}Không tìm thấy website nào!${NC}"
         pause
         return
@@ -671,7 +671,7 @@ backup_to_gdrive() {
         remotes+=("$r_name")
     done < <(rclone listremotes 2>/dev/null)
     
-    if [ ${#remotes[@]} -eq 0 ]; then
+    if [[ ${#remotes[@]} -eq 0 ]]; then
         echo -e "${YELLOW}Chưa tìm thấy remote nào. Sẽ sử dụng mặc định 'gdrive'.${NC}"
         remote="gdrive"
     else
@@ -685,7 +685,7 @@ backup_to_gdrive() {
         
         if [[ "$r_choice" == "0" ]]; then
              read -p "Nhập tên remote: " remote
-        elif [[ "$r_choice" =~ ^[0-9]+$ ]] && [ "$r_choice" -ge 1 ] && [ "$r_choice" -le "${#remotes[@]}" ]; then
+        elif [[ "$r_choice" =~ ^[0-9]+$ ]] && [[ "$r_choice" -ge 1 ]] && [[ "$r_choice" -le "${#remotes[@]}" ]]; then
              remote="${remotes[$((r_choice-1))]}"
         else
              # Default to first one or 'gdrive' if invalid
@@ -703,7 +703,7 @@ backup_to_gdrive() {
         for domain in "${sites[@]}"; do
             perform_gdrive_backup "$domain" "$remote"
         done
-    elif [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#sites[@]}" ]; then
+    elif [[ "$choice" =~ ^[0-9]+$ ]] && [[ "$choice" -ge 1 ]] && [[ "$choice" -le "${#sites[@]}" ]]; then
         # Backup Single
         domain="${sites[$((choice-1))]}"
         perform_gdrive_backup "$domain" "$remote"
@@ -732,12 +732,12 @@ restore_site_local() {
     # 2. Select Source Backup (From /root/backups)
     echo -e "\n${CYAN}Chọn Nguồn Backup (Domain gốc của bản sao lưu):${NC}"
     local backup_root="/root/backups"
-    if [ ! -d "$backup_root" ]; then echo -e "${RED}Không có backup nào.${NC}"; pause; return; fi
+    if [[ ! -d "$backup_root" ]]; then echo -e "${RED}Không có backup nào.${NC}"; pause; return; fi
     
     source_folders=()
     j=1
     for d in "$backup_root"/*; do
-        if [ -d "$d" ]; then
+        if [[ -d "$d" ]]; then
             s_domain=$(basename "$d")
             source_folders+=("$s_domain")
             echo -e "$j. $s_domain"
@@ -746,7 +746,7 @@ restore_site_local() {
     done
     
     read -p "Chọn nguồn backup [1-${#source_folders[@]}]: " s_choice
-    if ! [[ "$s_choice" =~ ^[0-9]+$ ]] || [ "$s_choice" -lt 1 ] || [ "$s_choice" -gt "${#source_folders[@]}" ]; then
+    if ! [[ "$s_choice" =~ ^[0-9]+$ ]] || [[ "$s_choice" -lt 1 ]] || [[ "$s_choice" -gt "${#source_folders[@]}" ]]; then
         echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause; return
     fi
     source_domain="${source_folders[$((s_choice-1))]}"
@@ -785,7 +785,7 @@ restore_site_local() {
     db_file=""
     if [[ -n "$db_sel" && "$db_sel" =~ ^[0-9]+$ ]]; then db_file="${db_files[$((db_sel-1))]}"; fi
     
-    if [ -z "$code_file" ] && [ -z "$db_file" ]; then echo -e "${RED}Không chọn file nào.${NC}"; pause; return; fi
+    if [[ -z "$code_file" ]] && [[ -z "$db_file" ]]; then echo -e "${RED}Không chọn file nào.${NC}"; pause; return; fi
 
     # Confirm
     echo -e "${RED}CẢNH BÁO: Dữ liệu trên $target_domain sẽ bị ghi đè!${NC}"
@@ -799,26 +799,26 @@ restore_site_local() {
 
     # 1. Try persistent store
     local data_file="$HOME/.vps-manager/sites_data.conf"
-    if [ -f "$data_file" ]; then
+    if [[ -f "$data_file" ]]; then
         local db_info=$(grep "^$target_domain|" "$data_file")
-        if [ -n "$db_info" ]; then
+        if [[ -n "$db_info" ]]; then
             target_db_pass=$(echo "$db_info" | cut -d'|' -f4)
             log_info "Lấy mật khẩu từ kho lưu trữ hệ thống."
         fi
     fi
 
     # 2. Fallback: wp-config.php
-    if [ -z "$target_db_pass" ] && [ -f "/var/www/$target_domain/public_html/wp-config.php" ]; then
+    if [[ -z "$target_db_pass" ]] && [[ -f "/var/www/$target_domain/public_html/wp-config.php" ]]; then
         target_db_pass=$(grep "DB_PASSWORD" "/var/www/$target_domain/public_html/wp-config.php" | cut -d "'" -f 4)
         [ -z "$target_db_pass" ] && target_db_pass=$(grep "DB_PASSWORD" "/var/www/$target_domain/public_html/wp-config.php" | cut -d '"' -f 4)
     fi
 
     # 3. Last resort: generate new password
-    if [ -z "$target_db_pass" ]; then
+    if [[ -z "$target_db_pass" ]]; then
         log_warn "Không tìm thấy mật khẩu DB. Tạo mật khẩu mới..."
         target_db_pass=$(openssl rand -base64 18 | tr -dc 'a-zA-Z0-9' | head -c 16)
         mysql -e "ALTER USER '${target_db_user}'@'localhost' IDENTIFIED BY '${target_db_pass}';" 2>/dev/null
-        if [ $? -ne 0 ]; then
+        if [[ $? -ne 0 ]]; then
             mysql -e "CREATE USER IF NOT EXISTS '${target_db_user}'@'localhost' IDENTIFIED BY '${target_db_pass}';" 2>/dev/null
             mysql -e "GRANT ALL PRIVILEGES ON ${target_db_name}.* TO '${target_db_user}'@'localhost';" 2>/dev/null
             mysql -e "FLUSH PRIVILEGES;"
@@ -830,13 +830,13 @@ restore_site_local() {
     fi
 
     # RESTORE CODE
-    if [ -n "$code_file" ]; then
+    if [[ -n "$code_file" ]]; then
         log_info "Đang giải nén Code..."
         unzip -o "$backup_dir/$code_file" -d "/var/www/$target_domain/"
         chown -R www-data:www-data "/var/www/$target_domain/public_html"
         
         # Update wp-config with TARGET DB info (if we found it)
-        if [ -n "$target_db_pass" ]; then
+        if [[ -n "$target_db_pass" ]]; then
             log_info "Cập nhật wp-config.php theo Database đích..."
             sed -i "s/DB_NAME', '.*'/DB_NAME', '$target_db_name'/" "/var/www/$target_domain/public_html/wp-config.php"
             sed -i "s/DB_USER', '.*'/DB_USER', '$target_db_user'/" "/var/www/$target_domain/public_html/wp-config.php"
@@ -845,7 +845,7 @@ restore_site_local() {
     fi
     
     # RESTORE DB
-    if [ -n "$db_file" ]; then
+    if [[ -n "$db_file" ]]; then
         log_info "Đang import Database..."
         if [[ "$db_file" == *.gz ]]; then
             zcat "$backup_dir/$db_file" | mysql "$target_db_name"
@@ -859,9 +859,9 @@ restore_site_local() {
         # Auto fix Table Prefix
         log_info "Đang kiểm tra Table Prefix..."
         detected_table=$(mysql -N -B -e "SHOW TABLES LIKE '%_users'" "$target_db_name" | head -n 1)
-        if [ -n "$detected_table" ]; then
+        if [[ -n "$detected_table" ]]; then
             new_prefix=${detected_table%users}
-            if [ -n "$new_prefix" ]; then
+            if [[ -n "$new_prefix" ]]; then
                 log_info "Prefix phát hiện: '$new_prefix'. Cập nhật wp-config.php..."
                 sed -i "s/\\\$table_prefix\s*=\s*'.*';/\\\$table_prefix = '$new_prefix';/" "/var/www/$target_domain/public_html/wp-config.php"
             fi
@@ -942,10 +942,10 @@ manage_backups() {
             2)
                 # List Remotes
                 local remotes=($(rclone listremotes 2>/dev/null | grep -v "Alias"))
-                if [ ${#remotes[@]} -eq 0 ]; then echo -e "${RED}Chưa cấu hình rclone.${NC}"; continue; fi
+                if [[ ${#remotes[@]} -eq 0 ]]; then echo -e "${RED}Chưa cấu hình rclone.${NC}"; continue; fi
                 
                 local remote="gdrive"
-                if [ ${#remotes[@]} -eq 1 ]; then
+                if [[ ${#remotes[@]} -eq 1 ]]; then
                     remote=${remotes[0]%%:}
                 else
                     echo "Danh sách Remote:"
@@ -962,7 +962,7 @@ manage_backups() {
                 # 1. Select Site Folder
                 local backup_root="/root/backups"
                 local dirs=($(find "$backup_root" -maxdepth 1 -type d -not -path "$backup_root"))
-                if [ ${#dirs[@]} -eq 0 ]; then echo "Không có backup nào."; continue; fi
+                if [[ ${#dirs[@]} -eq 0 ]]; then echo "Không có backup nào."; continue; fi
                 
                 for i in "${!dirs[@]}"; do echo "$((i+1)). $(basename "${dirs[$i]}")"; done
                 read -p "Chọn Site [1-${#dirs[@]}]: " d_sel
@@ -971,16 +971,16 @@ manage_backups() {
                 
                 # 2. Select File
                 local files=($(find "$target_dir" -maxdepth 1 -type f))
-                if [ ${#files[@]} -eq 0 ]; then echo "Thư mục rỗng."; rmdir "$target_dir"; continue; fi
+                if [[ ${#files[@]} -eq 0 ]]; then echo "Thư mục rỗng."; rmdir "$target_dir"; continue; fi
                 
                 for j in "${!files[@]}"; do echo "$((j+1)). $(basename "${files[$j]}") ($(du -h "${files[$j]}" | cut -f1))"; done
                 echo "$(( ${#files[@]} + 1 )). Xóa HẾT thư mục này"
                 read -p "Chọn File để xóa: " f_sel
                 
-                if [ "$f_sel" -eq "$(( ${#files[@]} + 1 ))" ]; then
+                if [[ "$f_sel" -eq "$(( ${#files[@]} + 1 ))" ]]; then
                     rm -rf "$target_dir"
                     log_info "Đã xóa toàn bộ thư mục $(basename "$target_dir")"
-                elif [[ "$f_sel" =~ ^[0-9]+$ ]] && [ "$f_sel" -le "${#files[@]}" ]; then
+                elif [[ "$f_sel" =~ ^[0-9]+$ ]] && [[ "$f_sel" -le "${#files[@]}" ]]; then
                     rm -f "${files[$((f_sel-1))]}"
                     log_info "Đã xóa file."
                 fi
@@ -989,9 +989,9 @@ manage_backups() {
                 echo -e "${YELLOW}--- Xóa Backup Cloud ---${NC}"
                 # Same remote selection logic
                 local remotes=($(rclone listremotes 2>/dev/null | grep -v "Alias"))
-                if [ ${#remotes[@]} -eq 0 ]; then echo -e "${RED}Chưa cấu hình rclone.${NC}"; continue; fi
+                if [[ ${#remotes[@]} -eq 0 ]]; then echo -e "${RED}Chưa cấu hình rclone.${NC}"; continue; fi
                 local remote="gdrive"
-                if [ ${#remotes[@]} -gt 1 ]; then
+                if [[ ${#remotes[@]} -gt 1 ]]; then
                     for i in "${!remotes[@]}"; do echo -e "$((i+1)). ${remotes[$i]}"; done
                     read -p "Chọn Remote (1-${#remotes[@]}): " r_sel
                     if [[ "$r_sel" =~ ^[0-9]+$ ]]; then remote=${remotes[$((r_sel-1))]%%:}; fi
@@ -1001,7 +1001,7 @@ manage_backups() {
                 
                 # List Cloud Folders
                 local folders=($(rclone lsd "$remote:vps_backups/" | awk '{print $NF}'))
-                if [ ${#folders[@]} -eq 0 ]; then echo "Cloud trống."; continue; fi
+                if [[ ${#folders[@]} -eq 0 ]]; then echo "Cloud trống."; continue; fi
                 
                 for i in "${!folders[@]}"; do echo "$((i+1)). ${folders[$i]}"; done
                 read -p "Chọn Site [1-${#folders[@]}]: " c_sel
@@ -1020,10 +1020,10 @@ manage_backups() {
                 echo "$(( ${#c_files[@]} + 1 )). Xóa HẾT thư mục này trên Cloud"
                 read -p "Chọn File để xóa: " cf_sel
                 
-                if [ "$cf_sel" -eq "$(( ${#c_files[@]} + 1 ))" ]; then
+                if [[ "$cf_sel" -eq "$(( ${#c_files[@]} + 1 ))" ]]; then
                     rclone purge "$remote:vps_backups/$target_folder/"
                     log_info "Đã xóa thư mục $target_folder trên Cloud."
-                elif [[ "$cf_sel" =~ ^[0-9]+$ ]] && [ "$cf_sel" -le "${#c_files[@]}" ]; then
+                elif [[ "$cf_sel" =~ ^[0-9]+$ ]] && [[ "$cf_sel" -le "${#c_files[@]}" ]]; then
                     local file_to_del="${c_files[$((cf_sel-1))]}"
                     rclone deletefile "$remote:vps_backups/$target_folder/$file_to_del"
                     log_info "Đã xóa $file_to_del trên Cloud."

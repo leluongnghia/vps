@@ -42,20 +42,20 @@ ssl_status() {
 
     echo -e "\n${YELLOW}--- Kiểm tra chi tiết từng site ---${NC}"
     for site_dir in /var/www/*; do
-        if [ -d "$site_dir" ]; then
+        if [[ -d "$site_dir" ]]; then
             domain=$(basename "$site_dir")
             [[ "$domain" == "html" ]] && continue
 
             cert_file="/etc/letsencrypt/live/$domain/fullchain.pem"
-            if [ -f "$cert_file" ]; then
+            if [[ -f "$cert_file" ]]; then
                 expiry=$(openssl x509 -enddate -noout -in "$cert_file" 2>/dev/null | cut -d= -f2)
                 expiry_ts=$(date -d "$expiry" +%s 2>/dev/null || date -j -f "%b %d %T %Y %Z" "$expiry" +%s 2>/dev/null)
                 now_ts=$(date +%s)
                 days_left=$(( (expiry_ts - now_ts) / 86400 ))
 
-                if [ "$days_left" -gt 30 ]; then
+                if [[ "$days_left" -gt 30 ]]; then
                     status="${GREEN}✅ OK${NC}"
-                elif [ "$days_left" -gt 7 ]; then
+                elif [[ "$days_left" -gt 7 ]]; then
                     status="${YELLOW}⚠️  Sắp hết hạn (${days_left} ngày)${NC}"
                 else
                     status="${RED}🔴 Nguy hiểm! (${days_left} ngày)${NC}"
@@ -140,7 +140,7 @@ ssl_auto_renew_setup() {
         [[ "$domain" == "README" ]] && continue
 
         local cert_file="$cert_dir/fullchain.pem"
-        if [ ! -f "$cert_file" ]; then continue; fi
+        if [[ ! -f "$cert_file" ]]; then continue; fi
 
         has_cert=1
         local expiry
@@ -159,9 +159,9 @@ ssl_auto_renew_setup() {
         [ "$days_left" -lt "$min_days" ] && min_days="$days_left"
 
         # Status indicator
-        if [ "$days_left" -gt 30 ]; then
+        if [[ "$days_left" -gt 30 ]]; then
             local status="${GREEN}✅ OK${NC}"
-        elif [ "$days_left" -gt 7 ]; then
+        elif [[ "$days_left" -gt 7 ]]; then
             local status="${YELLOW}⚠️  Sắp hết hạn${NC}"
             urgent_domains+=("$domain")
         else
@@ -173,14 +173,14 @@ ssl_auto_renew_setup() {
             "$domain" "$(echo -e "$status")" "$days_left" "$total_days"
     done
 
-    if [ "$has_cert" -eq 0 ]; then
+    if [[ "$has_cert" -eq 0 ]]; then
         echo -e "  ${YELLOW}Chưa có SSL nào được cài đặt qua certbot.${NC}"
     fi
 
     echo ""
 
     # ── Cảnh báo nếu có domain sắp hết ────────────────────────
-    if [ "${#urgent_domains[@]}" -gt 0 ]; then
+    if [[ "${#urgent_domains[@]}" -gt 0 ]]; then
         echo -e "${RED}⚠️  Các domain cần renew ngay:${NC}"
         for d in "${urgent_domains[@]}"; do
             echo -e "   → $d"
@@ -192,12 +192,12 @@ ssl_auto_renew_setup() {
     # ── Tư vấn lịch cron dựa trên thực tế ──────────────────────
     echo -e "${CYAN}🕐 Khuyến nghị lịch Cron:${NC}"
     echo ""
-    if [ "$has_cert" -eq 0 ]; then
+    if [[ "$has_cert" -eq 0 ]]; then
         echo -e "  • Chưa có cert nào — cron hàng ngày sẵn sàng khi cài SSL"
-    elif [ "$min_days" -gt 60 ]; then
+    elif [[ "$min_days" -gt 60 ]]; then
         echo -e "  • Cert còn > 60 ngày → ${GREEN}Cron hàng ngày (3:00 AM) là tối ưu${NC}"
         echo -e "  • Certbot sẽ tự bỏ qua cho đến khi còn < 30 ngày"
-    elif [ "$min_days" -gt 30 ]; then
+    elif [[ "$min_days" -gt 30 ]]; then
         echo -e "  • Cert còn 30-60 ngày → ${YELLOW}Certbot sẽ renew trong vài ngày tới${NC}"
         echo -e "  • ${GREEN}Cron hàng ngày (3:00 AM) đảm bảo không bỏ lỡ${NC}"
     else
@@ -257,14 +257,14 @@ ssl_auto_renew_setup() {
 
 install_ssl() {
     local domain=$1
-    if [ -z "$domain" ]; then
+    if [[ -z "$domain" ]]; then
         # Select site from list
         source "$(dirname "${BASH_SOURCE[0]}")/site.sh"
         select_site || return
         domain=$SELECTED_DOMAIN
     fi
 
-    if [ ! -d "/var/www/$domain/public_html" ]; then
+    if [[ ! -d "/var/www/$domain/public_html" ]]; then
         echo -e "${RED}Website $domain chưa được thêm trên VPS này!${NC}"
         pause
         return
@@ -283,7 +283,7 @@ install_ssl() {
         *) echo -e "${RED}Lựa chọn mặc định Let's Encrypt...${NC}"; install_letsencrypt "$domain" ;;
     esac
     
-    if [ -z "$1" ]; then pause; fi
+    if [[ -z "$1" ]]; then pause; fi
 }
 
 install_letsencrypt() {
@@ -297,7 +297,7 @@ install_letsencrypt() {
     log_info "Đang yêu cầu chứng chỉ SSL cho $domain..."
     certbot --nginx -d "$domain" -d "www.$domain" --non-interactive --agree-tos --register-unsafely-without-email --redirect
 
-    if [ $? -eq 0 ]; then
+    if [[ $? -eq 0 ]]; then
         echo -e "${GREEN}Cài đặt SSL Let's Encrypt thành công!${NC}"
     else
         echo -e "${RED}Lỗi: Kiểm tra lại DNS hoặc Port 80.${NC}"
@@ -309,7 +309,7 @@ install_zerossl() {
     log_info "Đang cài đặt acme.sh cho ZeroSSL..."
     
     # Install acme.sh
-    if [ ! -f ~/.acme.sh/acme.sh ]; then
+    if [[ ! -f ~/.acme.sh/acme.sh ]]; then
         curl https://get.acme.sh | sh -s email=my@example.com
     fi
     
@@ -322,7 +322,7 @@ install_zerossl() {
     # Nginx mode is easier if nginx is running
     ~/.acme.sh/acme.sh --issue --nginx -d "$domain" -d "www.$domain" --server zerossl
     
-    if [ $? -ne 0 ]; then
+    if [[ $? -ne 0 ]]; then
         echo -e "${RED}Lỗi cấp chứng chỉ ZeroSSL. Kiểm tra DNS!${NC}"
         return
     fi
@@ -385,7 +385,7 @@ install_cloudflare_ssl() {
     conf_file="/etc/nginx/sites-available/$domain"
     
     # Check if config exists
-    if [ ! -f "$conf_file" ]; then
+    if [[ ! -f "$conf_file" ]]; then
         echo -e "${RED}Không tìm thấy file cấu hình Nginx!${NC}"
         return
     fi

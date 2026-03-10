@@ -22,7 +22,7 @@ install_lemp_menu() {
             install_php
             
             # Auto-install phpMyAdmin
-            if [ -f "$ROOT_DIR/modules/phpmyadmin.sh" ]; then
+            if [[ -f "$ROOT_DIR/modules/phpmyadmin.sh" ]]; then
                 log_info "Tự động cài đặt phpMyAdmin..."
                 source "$ROOT_DIR/modules/phpmyadmin.sh"
                 install_phpmyadmin
@@ -61,7 +61,7 @@ install_nginx() {
         apt-get install -y nginx
         
         # Increase global upload limit right after install
-        if [ -f /etc/nginx/nginx.conf ]; then
+        if [[ -f /etc/nginx/nginx.conf ]]; then
             sed -i '/http {/a \        client_max_body_size 128M;' /etc/nginx/nginx.conf
         fi
         
@@ -107,7 +107,7 @@ install_php() {
 
     local primary_ver="8.3"
     
-    if [ -n "$1" ]; then
+    if [[ -n "$1" ]]; then
         primary_ver="$1"
     else
         echo -e "${YELLOW}Cài đặt PHP (Mặc định: PHP 8.3)${NC}"
@@ -116,7 +116,7 @@ install_php() {
     _install_single_php "$primary_ver"
 
     # Chỉ hỏi cài thêm nếu không điền tham số (khi chạy menu tương tác)
-    if [ -z "$1" ]; then
+    if [[ -z "$1" ]]; then
         echo ""
         read -p "Bạn có muốn cài thêm phiên bản PHP phụ không? [y/N]: " install_more
         if [[ "$install_more" == "y" || "$install_more" == "Y" ]]; then
@@ -143,7 +143,7 @@ _install_single_php() {
     
     # Configure PHP Upload Limits
     local php_ini="/etc/php/$ver/fpm/php.ini"
-    if [ -f "$php_ini" ]; then
+    if [[ -f "$php_ini" ]]; then
         sed -i -E "s/^[; ]*upload_max_filesize.*/upload_max_filesize = 128M/" "$php_ini"
         sed -i -E "s/^[; ]*post_max_size.*/post_max_size = 128M/" "$php_ini"
         sed -i -E "s/^[; ]*memory_limit.*/memory_limit = 256M/" "$php_ini"

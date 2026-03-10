@@ -38,7 +38,7 @@ edit_vhost() {
     domain=$SELECTED_DOMAIN
     conf="/etc/nginx/sites-available/$domain"
     
-    if [ ! -f "$conf" ]; then
+    if [[ ! -f "$conf" ]]; then
         echo -e "${RED}File cấu hình không tồn tại!${NC}"
         pause; return
     fi

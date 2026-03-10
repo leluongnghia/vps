@@ -16,14 +16,14 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Check for root
-if [ "$EUID" -ne 0 ]; then
+if [[ "$EUID" -ne 0 ]]; then
   echo -e "${RED}Please run as root.${NC}"
   exit 1
 fi
 
 # Function to check OS
 check_os() {
-    if [ -f /etc/os-release ]; then
+    if [[ -f /etc/os-release ]]; then
         . /etc/os-release
         OS=$NAME
         VER=$VERSION_ID
@@ -69,7 +69,7 @@ update_self() {
         echo -e "${YELLOW}Cloning repository...${NC}"
         git clone -b "$BRANCH" --depth 1 "$REPO_URL" "$TEMP_DIR/vps-repo"
         
-        if [ $? -ne 0 ]; then
+        if [[ $? -ne 0 ]]; then
             echo -e "${RED}Failed to clone repository. Check internet connection.${NC}"
             rm -rf "$TEMP_DIR"
             exit 1
@@ -82,7 +82,7 @@ update_self() {
         cd /tmp
         
         # Move current install to backup instead of deleting immediately
-        if [ -d "$INSTALL_DIR" ]; then
+        if [[ -d "$INSTALL_DIR" ]]; then
             echo -e "${YELLOW}Backing up current version...${NC}"
             mv "$INSTALL_DIR" "$BACKUP_DIR"
         fi
@@ -90,11 +90,11 @@ update_self() {
         mkdir -p "$INSTALL_DIR"
 
         # Move vps-manager content to INSTALL_DIR
-        if [ -d "$TEMP_DIR/vps-repo/vps-manager" ]; then
+        if [[ -d "$TEMP_DIR/vps-repo/vps-manager" ]]; then
             cp -r "$TEMP_DIR/vps-repo/vps-manager/"* "$INSTALL_DIR/"
             
             # Verify critical file exists
-            if [ ! -f "$INSTALL_DIR/install.sh" ]; then
+            if [[ ! -f "$INSTALL_DIR/install.sh" ]]; then
                  echo -e "${RED}Update failed: install.sh missing! Restoring backup...${NC}"
                  rm -rf "$INSTALL_DIR"
                  mv "$BACKUP_DIR" "$INSTALL_DIR"
@@ -150,7 +150,7 @@ auto_install_stack() {
 
     # 1. Swap
     echo -e "${BLUE}[1/4] Setting up Swap...${NC}"
-    if [ ! -f /swapfile ]; then
+    if [[ ! -f /swapfile ]]; then
         source modules/swap.sh
         create_swap 2048 "auto"
     else
@@ -165,7 +165,7 @@ auto_install_stack() {
     install_php "8.1"
 
     # Auto Install phpMyAdmin
-    if [ -f "modules/phpmyadmin.sh" ]; then
+    if [[ -f "modules/phpmyadmin.sh" ]]; then
          echo -e "${BLUE}[2.5/4] Installing phpMyAdmin...${NC}"
          source modules/phpmyadmin.sh
          install_phpmyadmin
@@ -190,13 +190,13 @@ main() {
     # A robust check is: does core/menu.sh exist in the directory of this script?
     
     MY_DIR=$(dirname "$(readlink -f "$0")")
-    if [ ! -f "$MY_DIR/core/menu.sh" ]; then
+    if [[ ! -f "$MY_DIR/core/menu.sh" ]]; then
         # We are likely running from curl | bash or a standalone file
         update_self
     fi
     
     # If we are here, we expect core/menu.sh to exist relative to us
-    if [ -f "$MY_DIR/core/menu.sh" ]; then
+    if [[ -f "$MY_DIR/core/menu.sh" ]]; then
         cd "$MY_DIR"
         source core/menu.sh
         
@@ -206,7 +206,7 @@ main() {
         fi
         
         # Create WWW Shortcut for easier access (On every run to ensure it exists)
-        if [ ! -L /www ] && [ -d /var/www ]; then
+        if [[ ! -L /www ]] && [[ -d /var/www ]]; then
             ln -sfn /var/www /www
             # echo -e "${GREEN}Created shortcut /www -> /var/www${NC}"
         fi

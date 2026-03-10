@@ -42,7 +42,7 @@ secure_php() {
     # Apply to all php.ini
     for ver in 8.1 8.2 8.3; do
         ini="/etc/php/$ver/fpm/php.ini"
-        if [ -f "$ini" ]; then
+        if [[ -f "$ini" ]]; then
             # Check if already disabled or append
             # Simplified regex replace
             sed -i "s/^disable_functions.*/disable_functions = $funcs/" "$ini"
@@ -50,7 +50,7 @@ secure_php() {
             systemctl restart php$ver-fpm
         fi
     done
-    if [ -z "$1" ]; then pause; fi
+    if [[ -z "$1" ]]; then pause; fi
 }
 
 setup_firewall() {
@@ -84,7 +84,7 @@ EOF
     systemctl restart fail2ban
     systemctl enable fail2ban
     log_info "UFW & Fail2ban đã được cài đặt."
-    if [ -z "$1" ]; then pause; fi
+    if [[ -z "$1" ]]; then pause; fi
 }
 
 change_ssh_port() {
@@ -94,7 +94,7 @@ change_ssh_port() {
     echo -e "${YELLOW}Port SSH hiện tại: ${current_port}${NC}"
     
     read -p "Nhập cổng SSH mới (1024-65535): " new_port
-    if [[ ! "$new_port" =~ ^[0-9]+$ ]] || [ "$new_port" -lt 1024 ] || [ "$new_port" -gt 65535 ]; then
+    if [[ ! "$new_port" =~ ^[0-9]+$ ]] || [[ "$new_port" -lt 1024 ]] || [[ "$new_port" -gt 65535 ]]; then
         echo -e "${RED}Cổng không hợp lệ!${NC}"
         pause; return
     fi
@@ -108,9 +108,9 @@ change_ssh_port() {
     
     # UFW: allow new port FIRST, then remove old
     ufw allow $new_port/tcp
-    if [ "$current_port" != "$new_port" ] && [ "$current_port" != "22" ]; then
+    if [[ "$current_port" != "$new_port" ]] && [[ "$current_port" != "22" ]]; then
         ufw delete allow $current_port/tcp 2>/dev/null
-    elif [ "$current_port" == "22" ]; then
+    elif [[ "$current_port" == "22" ]]; then
         ufw delete allow ssh 2>/dev/null
         ufw delete allow 22/tcp 2>/dev/null
     fi
@@ -173,7 +173,7 @@ EOF
     apply_limit() {
         local domain=$1
         local conf="/etc/nginx/sites-available/$domain"
-        if [ -f "$conf" ]; then
+        if [[ -f "$conf" ]]; then
             if ! grep -q "limit_req zone=one" "$conf"; then
                 # Insert after server_name
                 sed -i "/server_name/a \    limit_req zone=one burst=20 nodelay;" "$conf"
@@ -241,7 +241,7 @@ EOF
     apply_waf() {
         local domain=$1
         local conf="/etc/nginx/sites-available/$domain"
-        if [ -f "$conf" ]; then
+        if [[ -f "$conf" ]]; then
             if ! grep -q "basic_waf.conf" "$conf"; then
                 # Insert include
                 sed -i "/server_name/a \    include /etc/nginx/snippets/basic_waf.conf;" "$conf"

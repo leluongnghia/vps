@@ -6,13 +6,13 @@
 UTILS_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
 # Source helper modules
-if [ -f "$UTILS_DIR/nginx_helpers.sh" ]; then
+if [[ -f "$UTILS_DIR/nginx_helpers.sh" ]]; then
     source "$UTILS_DIR/nginx_helpers.sh"
 fi
-if [ -f "$UTILS_DIR/mysql_helpers.sh" ]; then
+if [[ -f "$UTILS_DIR/mysql_helpers.sh" ]]; then
     source "$UTILS_DIR/mysql_helpers.sh"
 fi
-if [ -f "$UTILS_DIR/system_helpers.sh" ]; then
+if [[ -f "$UTILS_DIR/system_helpers.sh" ]]; then
     source "$UTILS_DIR/system_helpers.sh"
 fi
 
@@ -27,7 +27,7 @@ NC='\033[0m'
 # Logger config
 LOG_FILE="/var/log/vps-manager.log"
 # Ensure log file exists and is writable (if running as root)
-if [ "$EUID" -eq 0 ]; then
+if [[ "$EUID" -eq 0 ]]; then
     touch "$LOG_FILE" 2>/dev/null
     chmod 644 "$LOG_FILE" 2>/dev/null
 fi
@@ -42,7 +42,7 @@ log() {
     echo -e "${color}[${level}] ${msg}${NC}"
     
     # Log to file if writable
-    if [ -w "$LOG_FILE" ]; then
+    if [[ -w "$LOG_FILE" ]]; then
         echo "[$timestamp] [${level}] $msg" >> "$LOG_FILE"
     fi
 }

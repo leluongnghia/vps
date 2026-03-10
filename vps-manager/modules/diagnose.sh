@@ -77,7 +77,7 @@ diagnose_system() {
     
     # 5. Log Summary
     echo -e "\n${YELLOW}5. LOG LỖI NGINX GẦN NHẤT (20 dòng):${NC}"
-    if [ -f /var/log/nginx/error.log ]; then
+    if [[ -f /var/log/nginx/error.log ]]; then
         tail -n 20 /var/log/nginx/error.log
     else
         echo "   (Không tìm thấy file log)"

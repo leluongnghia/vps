@@ -53,7 +53,7 @@ optimize_images() {
     domain=$SELECTED_DOMAIN
     target="/var/www/$domain/public_html"
     
-    if [ ! -d "$target" ]; then return; fi
+    if [[ ! -d "$target" ]]; then return; fi
     
     log_info "Đang cài đặt tools..."
     apt-get install -y jpegoptim optipng

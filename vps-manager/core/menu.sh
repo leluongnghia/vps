@@ -10,7 +10,7 @@ source "$ROOT_DIR/core/utils.sh"
 
 main_menu() {
     local script_version="1.0.0"
-    if [ -f "$ROOT_DIR/VERSION" ]; then
+    if [[ -f "$ROOT_DIR/VERSION" ]]; then
         script_version=$(cat "$ROOT_DIR/VERSION")
     fi
 

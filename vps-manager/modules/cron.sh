@@ -28,7 +28,7 @@ cron_menu() {
 list_crons() {
     echo -e "${GREEN}--- Danh sách Cronjob ---${NC}"
     crontab -l
-    if [ $? -ne 0 ]; then
+    if [[ $? -ne 0 ]]; then
         echo -e "${YELLOW}Chưa có cronjob nào được thiết lập.${NC}"
     fi
     pause
@@ -39,7 +39,7 @@ add_cron() {
     echo -e "Ví dụ: */5 * * * * /usr/bin/php /var/www/domain.com/cron.php"
     read -p "Nhập lệnh cron: " cron_cmd
     
-    if [ -z "$cron_cmd" ]; then return; fi
+    if [[ -z "$cron_cmd" ]]; then return; fi
     
     (crontab -l 2>/dev/null; echo "$cron_cmd") | crontab -
     log_info "Đã thêm cronjob thành công."

@@ -41,7 +41,7 @@ fix_redis_connection() {
     local domain=$SELECTED_DOMAIN
     local wp_config="/var/www/$domain/public_html/wp-config.php"
     
-    if [ ! -f "$wp_config" ]; then
+    if [[ ! -f "$wp_config" ]]; then
         echo -e "${RED}Không tìm thấy wp-config.php cho $domain${NC}"
         pause; return
     fi
@@ -101,22 +101,22 @@ fix_redis_connection() {
     local use_socket=false
     local socket_path="/var/run/redis/redis-server.sock"
     
-    if [ ! -f "$redis_conf" ]; then
+    if [[ ! -f "$redis_conf" ]]; then
         echo -e "${RED}Không tìm thấy file config $redis_conf. Giả định mặc định (TCP).${NC}"
     elif grep -q "^unixsocket $socket_path" "$redis_conf" || grep -q "^unixsocket .*redis.*sock" "$redis_conf"; then
         use_socket=true
         # Try finding exact path
         local found_path=$(grep "^unixsocket " "$redis_conf" | head -n1 | awk '{print $2}')
-        if [ -n "$found_path" ]; then socket_path="$found_path"; fi
+        if [[ -n "$found_path" ]]; then socket_path="$found_path"; fi
     fi
     
     # Verify socket existence if config says so
-    if [ "$use_socket" = "true" ] && [ ! -S "$socket_path" ]; then
+    if [[ "$use_socket" = "true" ]] && [[ ! -S "$socket_path" ]]; then
         echo -e "${YELLOW}Cấu hình dùng Socket nhưng file $socket_path không tồn tại.${NC}"
         echo -e "Đang restart Redis để tạo socket..."
         systemctl restart redis-server
         sleep 2
-        if [ ! -S "$socket_path" ]; then
+        if [[ ! -S "$socket_path" ]]; then
             echo -e "${RED}Vẫn không thấy socket. Chuyển về TCP.${NC}"
             use_socket=false
         fi
@@ -132,7 +132,7 @@ fix_redis_connection() {
     sed -i "/WP_REDIS_PORT/d" "$wp_config"
     sed -i "/WP_REDIS_DATABASE/d" "$wp_config" # Clean DB ID config too
     
-    if [ "$use_socket" = "true" ]; then
+    if [[ "$use_socket" = "true" ]]; then
         echo -e "-> Chế độ: ${GREEN}Unix Socket ($socket_path)${NC}"
         sed -i "/table_prefix/i define( 'WP_REDIS_SCHEME', 'unix' );" "$wp_config"
         sed -i "/table_prefix/i define( 'WP_REDIS_PATH', '$socket_path' );" "$wp_config"
@@ -165,7 +165,7 @@ setup_object_cache_pro() {
     fi
     
     # 2. Redis Tuning
-    if [ -f /etc/redis/redis.conf ]; then
+    if [[ -f /etc/redis/redis.conf ]]; then
         # Backup config
         cp /etc/redis/redis.conf /etc/redis/redis.conf.bak
         
@@ -223,7 +223,7 @@ clear_all_cache() {
     
     log_info "Đang Flush Object Cache & Transients bằng WP-CLI..."
     for wp_config in /var/www/*/public_html/wp-config.php; do
-        if [ -f "$wp_config" ]; then
+        if [[ -f "$wp_config" ]]; then
             site_path=$(dirname "$wp_config")
             wp cache flush --path="$site_path" --allow-root 2>/dev/null
         fi
@@ -261,7 +261,7 @@ toggle_extension() {
     
     # Ensure package for specific version exists
     if [[ "$ver" != "all" ]]; then
-       if ! dpkg -s php$ver-$ext &> /dev/null && ! [ -f "/etc/php/$ver/mods-available/$ext.ini" ]; then
+       if ! dpkg -s php$ver-$ext &> /dev/null && ! [[ -f "/etc/php/$ver/mods-available/$ext.ini" ]]; then
            echo -e "${YELLOW}Cài đặt thêm php$ver-$ext...${NC}"
            apt-get install -y php$ver-$ext
        fi
@@ -333,7 +333,7 @@ EOF
     apply_rocket() {
         local domain=$1
         local conf="/etc/nginx/sites-available/$domain"
-        if [ -f "$conf" ]; then
+        if [[ -f "$conf" ]]; then
             if ! grep -q "wp-rocket.conf" "$conf"; then
                 sed -i "/server_name/a \    include $snippet;" "$conf"
                 log_info "Đã thêm include wp-rocket.conf cho $domain"
@@ -413,7 +413,7 @@ EOF
     apply_w3tc() {
         local domain=$1
         local conf="/etc/nginx/sites-available/$domain"
-        if [ -f "$conf" ]; then
+        if [[ -f "$conf" ]]; then
             if ! grep -q "w3tc.conf" "$conf"; then
                 sed -i "/server_name/a \    include $snippet;" "$conf"
                 log_info "Đã áp dụng W3TC cho $domain"

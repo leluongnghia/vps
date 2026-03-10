@@ -6,7 +6,7 @@
 # output: exports MYSQL_CMD_PREFIX (e.g., "mysql -u root -pPASS")
 ensure_mysql_access() {
     # If we already have a working command, return
-    if [ -n "$MYSQL_CMD_PREFIX" ]; then
+    if [[ -n "$MYSQL_CMD_PREFIX" ]]; then
         return 0
     fi
 
@@ -19,13 +19,13 @@ ensure_mysql_access() {
     fi
     
     # 2. Try .my.cnf
-    if [ -f ~/.my.cnf ]; then
+    if [[ -f ~/.my.cnf ]]; then
         export MYSQL_CMD_PREFIX="$cmd"
         return 0
     fi
 
     # 3. Check env var
-    if [ -n "$MYSQL_ROOT_PASS" ]; then
+    if [[ -n "$MYSQL_ROOT_PASS" ]]; then
          export MYSQL_PWD="$MYSQL_ROOT_PASS"
          if $cmd -e "SELECT 1" &>/dev/null; then
              export MYSQL_CMD_PREFIX="$cmd"
@@ -36,7 +36,7 @@ ensure_mysql_access() {
 
     # 4. Prompt user (INTERACTIVE ONLY)
     # Only prompt if we are in an interactive shell
-    if [ -t 0 ]; then
+    if [[ -t 0 ]]; then
         log_warn "MySQL root password required for database operations."
         read -sp "Enter MySQL root password: " input_pass
         echo ""
@@ -74,7 +74,7 @@ db_exists() {
     ensure_mysql_access || return 1
     
     local exists=$($MYSQL_CMD_PREFIX -Nse "SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name = '$db_name';" 2>/dev/null)
-    if [ "$exists" == "1" ]; then
+    if [[ "$exists" == "1" ]]; then
         return 0
     else
         return 1

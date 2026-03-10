@@ -51,7 +51,7 @@ check_and_run_ncdu() {
 
 check_disk_usage() {
     usage=$(df / | grep / | awk '{ print $5 }' | sed 's/%//g')
-    if [ "$usage" -gt 90 ]; then
+    if [[ "$usage" -gt 90 ]]; then
         echo -e "${RED}CẢNH BÁO: Ổ đĩa đã đầy $usage%!${NC}"
     else
         echo -e "${GREEN}Dung lượng ổ đĩa ổn định ($usage%).${NC}"

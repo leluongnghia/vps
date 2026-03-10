@@ -23,15 +23,15 @@ swap_menu() {
 }
 
 create_swap() {
-    if [ -n "$1" ]; then
+    if [[ -n "$1" ]]; then
         size=$1
     else
         read -p "Nhập dung lượng Swap (MB) (ví dụ 1024, 2048): " size
     fi
     
-    if [ -f /swapfile ]; then
+    if [[ -f /swapfile ]]; then
         echo -e "${RED}Swapfile đã tồn tại! Vui lòng xóa trước.${NC}"
-        if [ -z "$1" ]; then pause; fi
+        if [[ -z "$1" ]]; then pause; fi
         return
     fi
     
@@ -47,7 +47,7 @@ create_swap() {
     fi
     
     log_info "Tạo Swap thành công."
-    if [ -z "$1" ]; then pause; fi
+    if [[ -z "$1" ]]; then pause; fi
 }
 
 remove_swap() {

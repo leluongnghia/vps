@@ -5,7 +5,7 @@
 # Backup Nginx config before modification
 backup_nginx_config() {
     local conf=$1
-    if [ -f "$conf" ]; then
+    if [[ -f "$conf" ]]; then
         local backup="${conf}.bak_$(date +%s)"
         cp "$conf" "$backup"
         echo "$backup"  # Return backup path
@@ -16,7 +16,7 @@ backup_nginx_config() {
 restore_nginx_config() {
     local backup=$1
     local original="${backup%.bak_*}"
-    if [ -f "$backup" ]; then
+    if [[ -f "$backup" ]]; then
         mv "$backup" "$original"
         log_info "Restored Nginx config from backup"
     fi
@@ -53,7 +53,7 @@ apply_nginx_snippet() {
     local snippet_name=$(basename "$snippet_path")
     local conf="/etc/nginx/sites-available/$domain"
     
-    if [ ! -f "$conf" ]; then
+    if [[ ! -f "$conf" ]]; then
         log_error "Nginx config not found for $domain"
         return 1
     fi

@@ -65,7 +65,7 @@ add_new_site() {
     fi
 
     # Check if site exists
-    if [ -d "/var/www/$domain" ]; then
+    if [[ -d "/var/www/$domain" ]]; then
         echo -e "${RED}Website $domain đã tồn tại!${NC}"
         pause; return
     fi
@@ -73,7 +73,7 @@ add_new_site() {
     echo -e "${YELLOW}Đang tạo cấu hình cho $domain...${NC}"
     
     # 1. Setup Global Cache if missing
-    if [ ! -f /etc/nginx/conf.d/fastcgi_cache.conf ]; then
+    if [[ ! -f /etc/nginx/conf.d/fastcgi_cache.conf ]]; then
         log_info "Đang khởi tạo cấu hình FastCGI Cache Global..."
         mkdir -p /var/run/nginx-cache
         chown -R www-data:www-data /var/run/nginx-cache
@@ -119,7 +119,7 @@ EOF
     # 5. SSL Auto Setup
     echo -e "${YELLOW}Đang cấu hình SSL Let's Encrypt...${NC}"
     # Default to YES/Auto
-    if [ -f "$(dirname "${BASH_SOURCE[0]}")/ssl.sh" ]; then
+    if [[ -f "$(dirname "${BASH_SOURCE[0]}")/ssl.sh" ]]; then
          source "$(dirname "${BASH_SOURCE[0]}")/ssl.sh"
          # Call install_ssl_auto without prompt if possible, or just call normal install_ssl
          # We'll invoke install_ssl but usually it might ask for email.
@@ -141,7 +141,7 @@ create_nginx_config() {
     # Dynamic PHP socket detection using shared helper
     local php_sock
     php_sock=$(detect_php_socket 2>/dev/null)
-    if [ $? -ne 0 ] || [ -z "$php_sock" ]; then
+    if [[ $? -ne 0 ]] || [[ -z "$php_sock" ]]; then
         log_error "Không tìm thấy PHP-FPM socket. Hãy cài PHP-FPM trước."
         return 1
     fi
@@ -230,7 +230,7 @@ setup_database() {
         mkdir -p "$(dirname "$data_file")"
         
         # Remove old entry if exists
-        if [ -f "$data_file" ]; then
+        if [[ -f "$data_file" ]]; then
             sed -i "/^$domain|/d" "$data_file"
         fi
         
@@ -302,7 +302,7 @@ list_sites() {
         fi
     done
 
-    if [ "$i" -eq 1 ]; then
+    if [[ "$i" -eq 1 ]]; then
         echo -e "${RED}Không tìm thấy website nào!${NC}"
     fi
     echo -e "${BLUE}----------------------------------------------------------------${NC}"
@@ -324,13 +324,13 @@ select_site() {
         fi
     done
     
-    if [ ${#sites[@]} -eq 0 ]; then
+    if [[ ${#sites[@]} -eq 0 ]]; then
         echo -e "${RED}Không tìm thấy website nào!${NC}"
         return 1
     fi
     
     read -p "Chọn website [1-${#sites[@]}]: " choice
-    if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt "${#sites[@]}" ]; then
+    if ! [[ "$choice" =~ ^[0-9]+$ ]] || [[ "$choice" -lt 1 ]] || [[ "$choice" -gt "${#sites[@]}" ]]; then
         echo -e "${RED}Lựa chọn không hợp lệ.${NC}"
         return 1
     fi
@@ -385,7 +385,7 @@ clone_site() {
     
     read -p "Nhập domain ĐÍCH (Mới): " dest_domain
     
-    if [ -d "/var/www/$dest_domain" ]; then
+    if [[ -d "/var/www/$dest_domain" ]]; then
         echo -e "${RED}Domain đích đã tồn tại! Vui lòng xóa trước.${NC}"
         pause; return
     fi
@@ -415,11 +415,11 @@ clone_site() {
     src_db_name=$(php -r "include '/var/www/$src_domain/public_html/wp-config.php'; echo DB_NAME;" 2>/dev/null)
     
     # Fallback to grep if PHP fails
-    if [ -z "$src_db_name" ]; then
+    if [[ -z "$src_db_name" ]]; then
         src_db_name=$(grep "DB_NAME" "/var/www/$src_domain/public_html/wp-config.php" 2>/dev/null | cut -d "'" -f 4)
     fi
     
-    if [ -n "$src_db_name" ]; then
+    if [[ -n "$src_db_name" ]]; then
         log_info "Đang clone database ($src_db_name -> $new_db_name)..."
         mysqldump "$src_db_name" | mysql "$new_db_name"
         
@@ -461,8 +461,8 @@ rename_site() {
     
     read -p "Nhập domain MỚI: " new_domain
     
-    if [ -d "/var/www/$new_domain" ]; then echo -e "${RED}Domain mới đã tồn tại.${NC}"; pause; return; fi
-    if [ -f "/etc/nginx/sites-available/$new_domain" ]; then echo -e "${RED}Config Nginx mới đã tồn tại.${NC}"; pause; return; fi
+    if [[ -d "/var/www/$new_domain" ]]; then echo -e "${RED}Domain mới đã tồn tại.${NC}"; pause; return; fi
+    if [[ -f "/etc/nginx/sites-available/$new_domain" ]]; then echo -e "${RED}Config Nginx mới đã tồn tại.${NC}"; pause; return; fi
     
     log_info "Đổi tên thư mục..."
     mv "/var/www/$old_domain" "/var/www/$new_domain"
@@ -472,7 +472,7 @@ rename_site() {
     old_conf="/etc/nginx/sites-available/$old_domain"
     new_conf="/etc/nginx/sites-available/$new_domain"
     
-    if [ -f "$old_conf" ]; then
+    if [[ -f "$old_conf" ]]; then
         mv "$old_conf" "$new_conf"
         # Update server_name old.com www.old.com -> new.com www.new.com
         # Update root /var/www/old -> /var/www/new
@@ -491,7 +491,7 @@ rename_site() {
     fi
     
     log_info "Cập nhật URL trong Database (nếu là WP)..."
-    if [ -f "/var/www/$new_domain/public_html/wp-config.php" ]; then
+    if [[ -f "/var/www/$new_domain/public_html/wp-config.php" ]]; then
         cd "/var/www/$new_domain/public_html"
         if ! command -v wp &> /dev/null; then
              curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar; chmod +x wp-cli.phar; mv wp-cli.phar /usr/local/bin/wp
@@ -537,13 +537,13 @@ change_site_php() {
     domain="$SELECTED_DOMAIN"
     conf="/etc/nginx/sites-available/$domain"
     
-    if [ ! -f "$conf" ]; then echo -e "${RED}Config Nginx không tồn tại.${NC}"; pause; return; fi
+    if [[ ! -f "$conf" ]]; then echo -e "${RED}Config Nginx không tồn tại.${NC}"; pause; return; fi
     
     # Tìm kiếm version PHP hiện hành trong file config
     local current_php
     current_php=$(grep -oP 'unix:/run/php/php\K[0-9.]+(?=-fpm.sock)' "$conf" | head -n 1)
     
-    if [ -n "$current_php" ]; then
+    if [[ -n "$current_php" ]]; then
         echo -e "${CYAN}Phiên bản PHP hiện tại của web: PHP $current_php${NC}"
     else
         echo -e "${YELLOW}Không thể xác định phiên bản PHP hiện tại trong config.${NC}"
@@ -577,7 +577,7 @@ update_site_db_info() {
     domain="$SELECTED_DOMAIN"
     wp_conf="/var/www/$domain/public_html/wp-config.php"
     
-    if [ ! -f "$wp_conf" ]; then echo -e "${RED}Không tìm thấy wp-config.php${NC}"; pause; return; fi
+    if [[ ! -f "$wp_conf" ]]; then echo -e "${RED}Không tìm thấy wp-config.php${NC}"; pause; return; fi
     
     read -p "Database Name mới: " db_name
     read -p "Database User mới: " db_user
@@ -697,7 +697,7 @@ check_wp_core() {
     
     # Download
     wget -q https://wordpress.org/latest.tar.gz
-    if [ ! -f latest.tar.gz ]; then
+    if [[ ! -f latest.tar.gz ]]; then
         log_error "Tải thất bại. Kiểm tra kết nối mạng."
         return
     fi
@@ -738,7 +738,7 @@ toggle_site_cache() {
     if [[ "$mode_c" == "2" ]]; then
         log_info "Đang BẬT cache cho TOÀN BỘ hệ thống..."
         for conf in /etc/nginx/sites-available/*; do
-            if [ -f "$conf" ] && grep -q "\$skip_cache" "$conf"; then
+            if [[ -f "$conf" ]] && grep -q "\$skip_cache" "$conf"; then
                 sed -i 's/set \$skip_cache 1; # DEV_MODE_ACTIVE/set \$skip_cache 0;/' "$conf"
             fi
         done
@@ -750,7 +750,7 @@ toggle_site_cache() {
     if [[ "$mode_c" == "3" ]]; then
         log_info "Đang TẮT cache cho TOÀN BỘ hệ thống..."
         for conf in /etc/nginx/sites-available/*; do
-            if [ -f "$conf" ] && grep -q "\$skip_cache" "$conf"; then
+            if [[ -f "$conf" ]] && grep -q "\$skip_cache" "$conf"; then
                 sed -i 's/set \$skip_cache 0;/set \$skip_cache 1; # DEV_MODE_ACTIVE/' "$conf"
             fi
         done
@@ -765,7 +765,7 @@ toggle_site_cache() {
         local domain="$SELECTED_DOMAIN"
         local conf="/etc/nginx/sites-available/$domain"
         
-        if [ ! -f "$conf" ]; then 
+        if [[ ! -f "$conf" ]]; then 
             echo -e "${RED}Config Nginx không tồn tại: $conf${NC}"
             pause; return 
         fi

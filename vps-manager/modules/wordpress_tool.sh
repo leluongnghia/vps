@@ -43,13 +43,13 @@ select_wp_site() {
         fi
     done
     
-    if [ ${#sites[@]} -eq 0 ]; then
+    if [[ ${#sites[@]} -eq 0 ]]; then
         echo -e "${RED}Không tìm thấy website WordPress nào!${NC}"
         return 1
     fi
     
     read -p "Chọn website [1-${#sites[@]}]: " w_choice
-    if ! [[ "$w_choice" =~ ^[0-9]+$ ]] || [ "$w_choice" -lt 1 ] || [ "$w_choice" -gt "${#sites[@]}" ]; then
+    if ! [[ "$w_choice" =~ ^[0-9]+$ ]] || [[ "$w_choice" -lt 1 ]] || [[ "$w_choice" -gt "${#sites[@]}" ]]; then
         echo -e "${RED}Lựa chọn sai.${NC}"
         return 1
     fi
@@ -59,9 +59,9 @@ select_wp_site() {
     
     WP_PHP_BIN="php"
     SITE_CONF="/etc/nginx/sites-available/$SELECTED_DOMAIN"
-    if [ -f "$SITE_CONF" ]; then
+    if [[ -f "$SITE_CONF" ]]; then
         SITE_PHP_VER=$(grep -shoP 'unix:/run/php/php\K[0-9.]+(?=-fpm.sock)' "$SITE_CONF" | head -n 1)
-        if [ -n "$SITE_PHP_VER" ] && command -v "php$SITE_PHP_VER" >/dev/null 2>&1; then
+        if [[ -n "$SITE_PHP_VER" ]] && command -v "php$SITE_PHP_VER" >/dev/null 2>&1; then
             WP_PHP_BIN="php$SITE_PHP_VER"
         fi
     fi
@@ -84,7 +84,7 @@ select_wp_site() {
 
 ensure_wp_cli() {
     # 1. Install WP-CLI if missing
-    if ! command -v wp &> /dev/null && [ ! -f /usr/local/bin/wp ]; then
+    if ! command -v wp &> /dev/null && [[ ! -f /usr/local/bin/wp ]]; then
         echo -e "${YELLOW}Installing WP-CLI...${NC}"
         curl -sO https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
         chmod +x wp-cli.phar
@@ -150,7 +150,7 @@ wp_user_menu() {
                 read -p "Email: " e
                 read -sp "Password (Enter để tự sinh): " wp
                 echo ""
-                if [ -z "$wp" ]; then wp=$(openssl rand -base64 12 | tr -dc 'a-zA-Z0-9' | head -c 14); fi
+                if [[ -z "$wp" ]]; then wp=$(openssl rand -base64 12 | tr -dc 'a-zA-Z0-9' | head -c 14); fi
                 $WP_CMD user create "$u" "$e" --role=administrator --user_pass="$wp"
                 echo -e "${GREEN}Admin tạo thành công!— User: $u | Pass: $wp${NC}"
                 pause
@@ -180,7 +180,7 @@ wp_security_menu() {
         case $c in
             1) # Disable XMLRPC
                 snippet="/etc/nginx/snippets/block-xmlrpc.conf"
-                if [ ! -f "$snippet" ]; then
+                if [[ ! -f "$snippet" ]]; then
                     mkdir -p /etc/nginx/snippets
                     echo 'location = /xmlrpc.php { deny all; access_log off; log_not_found off; }' > "$snippet"
                 fi
@@ -216,7 +216,7 @@ wp_security_menu() {
                 current_config="$WEB_ROOT/wp-config.php"
                 parent_config="$(dirname "$WEB_ROOT")/wp-config.php"
                 
-                if [ -f "$current_config" ]; then
+                if [[ -f "$current_config" ]]; then
                     mv "$current_config" "$parent_config"
                     # Fix permissions just in case
                     chmod 600 "$parent_config"
@@ -225,7 +225,7 @@ wp_security_menu() {
                     log_info "Đã di chuyển wp-config.php ra khỏi public_html."
                     echo -e "${GREEN}Vị trí mới: $parent_config${NC}"
                     echo -e "Đây là biện pháp bảo mật khuyến nghị. WordPress sẽ tự động tìm thấy file này."
-                elif [ -f "$parent_config" ]; then
+                elif [[ -f "$parent_config" ]]; then
                     log_warn "wp-config.php ĐANG nằm ngoài public_html!"
                     read -p "Bạn có muốn di chuyển nó TRỞ LẠI public_html không? (y/n): " move_back
                     if [[ "$move_back" == "y" ]]; then
@@ -257,7 +257,7 @@ wp_nginx_config_menu() {
     # Use sites-available config
     conf="/etc/nginx/sites-available/$SELECTED_DOMAIN"
     
-    if [ ! -f "$conf" ]; then
+    if [[ ! -f "$conf" ]]; then
         echo -e "${RED}Không tìm thấy file cấu hình Nginx cho $SELECTED_DOMAIN${NC}"
         pause; return
     fi
@@ -418,7 +418,7 @@ wp_config_tool_menu() {
             $WP_CMD config set DISABLE_WP_CRON true --raw
             # Setup Real Cron with PHP CLI (1 minute)
             phpbin=$(command -v $WP_PHP_BIN)
-            if [ -z "$phpbin" ]; then phpbin="/usr/bin/php"; fi
+            if [[ -z "$phpbin" ]]; then phpbin="/usr/bin/php"; fi
             croncmd="$phpbin $WEB_ROOT/wp-cron.php >/dev/null 2>&1"
             cronjob="* * * * * $croncmd"
             (crontab -l 2>/dev/null | grep -v "$SELECTED_DOMAIN/wp-cron.php"; echo "$cronjob") | crontab -
@@ -439,7 +439,7 @@ wp_config_tool_menu() {
             
             # Fix PHP-FPM for all installed PHP versions
             for php_ini in /etc/php/*/fpm/php.ini; do
-                if [ -f "$php_ini" ]; then
+                if [[ -f "$php_ini" ]]; then
                     sed -i -E "s/^[; ]*upload_max_filesize.*/upload_max_filesize = 128M/" "$php_ini"
                     sed -i -E "s/^[; ]*post_max_size.*/post_max_size = 128M/" "$php_ini"
                     sed -i -E "s/^[; ]*memory_limit.*/memory_limit = 256M/" "$php_ini"
@@ -449,7 +449,7 @@ wp_config_tool_menu() {
             done
             
             # Fix Nginx Global configuration (Client max body)
-            if [ -f /etc/nginx/nginx.conf ]; then
+            if [[ -f /etc/nginx/nginx.conf ]]; then
                 if ! grep -q "client_max_body_size" /etc/nginx/nginx.conf; then
                     sed -i '/http {/a \        client_max_body_size 128M;' /etc/nginx/nginx.conf
                 else

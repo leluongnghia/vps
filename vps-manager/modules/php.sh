@@ -68,7 +68,7 @@ change_site_php() {
     select_site || return
     domain=$SELECTED_DOMAIN
 
-    if [ ! -f "/etc/nginx/sites-available/$domain" ]; then
+    if [[ ! -f "/etc/nginx/sites-available/$domain" ]]; then
         echo -e "${RED}Website $domain không tồn tại config Nginx!${NC}"
         pause
         return

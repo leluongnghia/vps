@@ -78,21 +78,21 @@ change_db_pass() {
     echo ""
 
     read -p "Nhập tên DB User (Ví dụ: root): " db_user
-    if [ -z "$db_user" ]; then
+    if [[ -z "$db_user" ]]; then
         echo -e "${RED}Tên User không được để trống!${NC}"
         pause; return
     fi
 
     read -p "Nhập mật khẩu mới (Để trống để tự tạo ngẫu nhiên): " new_pass
     
-    if [ -z "$new_pass" ]; then
+    if [[ -z "$new_pass" ]]; then
         new_pass=$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9' | head -c 24)
         echo -e "Mật khẩu tự tạo: ${GREEN}$new_pass${NC}"
     fi
     
     # Cố gắng đổi pass cho localhost, nếu lỗi sẽ thông báo
     mysql -e "ALTER USER '${db_user}'@'localhost' IDENTIFIED BY '${new_pass}';" 2>/dev/null
-    if [ $? -ne 0 ]; then
+    if [[ $? -ne 0 ]]; then
         echo -e "${RED}Lỗi: Có thể User '${db_user}@localhost' không tồn tại. Xem đúng host ở danh sách trên!${NC}"
         pause; return
     fi
@@ -101,7 +101,7 @@ change_db_pass() {
     log_info "Đã đổi mật khẩu cho user $db_user."
 
     # Nếu đổi mật khẩu root, lưu cấu hình vào .my.cnf để phpMyAdmin và Script nhận dạng
-    if [ "$db_user" == "root" ]; then
+    if [[ "$db_user" == "root" ]]; then
         echo -e "[client]\nuser=root\npassword=\"${new_pass}\"" > /root/.my.cnf
         chmod 600 /root/.my.cnf
         log_info "Đã cập nhật file /root/.my.cnf cho truy cập MySQL Root."
@@ -114,7 +114,7 @@ import_database() {
     read -p "Nhập tên Database đích: " db_name
     read -p "Đường dẫn file .sql: " sql_file
     
-    if [ ! -f "$sql_file" ]; then
+    if [[ ! -f "$sql_file" ]]; then
         echo -e "${RED}File không tồn tại!${NC}"
         pause; return
     fi
@@ -148,7 +148,7 @@ view_db_by_website() {
     
     # Loop through all websites in /var/www
     for site_dir in /var/www/*; do
-        if [ -d "$site_dir" ]; then
+        if [[ -d "$site_dir" ]]; then
             local domain=$(basename "$site_dir")
             local wp_config="$site_dir/public_html/wp-config.php"
             
@@ -157,7 +157,7 @@ view_db_by_website() {
             
             # 1. Try reading from Local Config Store (Most Reliable)
             local db_info=""
-            if [ -f "$data_file" ]; then
+            if [[ -f "$data_file" ]]; then
                 db_info=$(grep "^$domain|" "$data_file")
             fi
             
@@ -166,22 +166,22 @@ view_db_by_website() {
             local db_pass=""
             local source="System Store"
             
-            if [ -n "$db_info" ]; then
+            if [[ -n "$db_info" ]]; then
                 db_name=$(echo "$db_info" | cut -d'|' -f2)
                 db_user=$(echo "$db_info" | cut -d'|' -f3)
                 db_pass=$(echo "$db_info" | cut -d'|' -f4)
             # 2. Fallback to reading wp-config.php (Robust Grep)
-            elif [ -f "$wp_config" ]; then
+            elif [[ -f "$wp_config" ]]; then
                 source="wp-config.php"
                 # Use robust grep, do NOT use php execution which can print HTML errors
                 db_name=$(grep "DB_NAME" "$wp_config" | cut -d "'" -f 4)
-                if [ -z "$db_name" ]; then db_name=$(grep "DB_NAME" "$wp_config" | cut -d '"' -f 4); fi
+                if [[ -z "$db_name" ]]; then db_name=$(grep "DB_NAME" "$wp_config" | cut -d '"' -f 4); fi
                 
                 db_user=$(grep "DB_USER" "$wp_config" | cut -d "'" -f 4)
-                if [ -z "$db_user" ]; then db_user=$(grep "DB_USER" "$wp_config" | cut -d '"' -f 4); fi
+                if [[ -z "$db_user" ]]; then db_user=$(grep "DB_USER" "$wp_config" | cut -d '"' -f 4); fi
                 
                 db_pass=$(grep "DB_PASSWORD" "$wp_config" | cut -d "'" -f 4)
-                if [ -z "$db_pass" ]; then db_pass=$(grep "DB_PASSWORD" "$wp_config" | cut -d '"' -f 4); fi
+                if [[ -z "$db_pass" ]]; then db_pass=$(grep "DB_PASSWORD" "$wp_config" | cut -d '"' -f 4); fi
             else
                 continue
             fi
@@ -195,7 +195,7 @@ view_db_by_website() {
                 
             # Get database size
             local db_size=$(mysql -e "SELECT ROUND(SUM(data_length + index_length) / 1024 / 1024, 2) FROM information_schema.tables WHERE table_schema = '$db_name';" 2>/dev/null | tail -1)
-            if [ -n "$db_size" ] && [ "$db_size" != "NULL" ]; then
+            if [[ -n "$db_size" ]] && [[ "$db_size" != "NULL" ]]; then
                 echo -e "${YELLOW}💾 Size:${NC} ${db_size} MB"
             fi
             
@@ -204,7 +204,7 @@ view_db_by_website() {
         fi
     done
     
-    if [ $found -eq 0 ]; then
+    if [[ $found -eq 0 ]]; then
         echo -e "${YELLOW}Không tìm thấy WordPress site nào.${NC}"
         echo ""
     fi

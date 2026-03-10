@@ -8,13 +8,13 @@ get_installed_php_version() {
     local running
     running=$(systemctl list-units --type=service --state=running 2>/dev/null \
         | grep 'php.*-fpm' | grep -oP '\d+\.\d+' | sort -rV | head -1)
-    if [ -n "$running" ] && [ -d "/etc/php/$running" ]; then
+    if [[ -n "$running" ]] && [[ -d "/etc/php/$running" ]]; then
         echo "$running"; return 0
     fi
 
     # Method 2: Find version with FPM pool config present
     for ver in 8.4 8.3 8.2 8.1 8.0 7.4; do
-        if [ -f "/etc/php/${ver}/fpm/pool.d/www.conf" ]; then
+        if [[ -f "/etc/php/${ver}/fpm/pool.d/www.conf" ]]; then
             echo "$ver"; return 0
         fi
     done
@@ -22,7 +22,7 @@ get_installed_php_version() {
     # Method 3: php-fpm binary in PATH
     local fpm_bin
     fpm_bin=$(command -v php-fpm8.3 php-fpm8.2 php-fpm8.1 php-fpm 2>/dev/null | head -1)
-    if [ -n "$fpm_bin" ]; then
+    if [[ -n "$fpm_bin" ]]; then
         local v
         v=$("$fpm_bin" -v 2>/dev/null | grep -oP '\d+\.\d+' | head -1)
         [ -n "$v" ] && echo "$v" && return 0
@@ -31,7 +31,7 @@ get_installed_php_version() {
     # Method 4: PHP CLI (last resort - may be different from FPM)
     local cli_ver
     cli_ver=$(php -r "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;" 2>/dev/null)
-    if [ -n "$cli_ver" ] && [ -d "/etc/php/$cli_ver" ]; then
+    if [[ -n "$cli_ver" ]] && [[ -d "/etc/php/$cli_ver" ]]; then
         echo "$cli_ver"; return 0
     fi
 
@@ -155,7 +155,7 @@ tune_php_fpm() {
     # Detect active PHP-FPM version
     local php_ver
     php_ver=$(get_installed_php_version)
-    if [ -z "$php_ver" ]; then
+    if [[ -z "$php_ver" ]]; then
         log_error "Không tìm thấy PHP-FPM cài đặt!"
         echo -e "${YELLOW}PHP đị: $(php -v 2>/dev/null | head -1)${NC}"
         echo -e "${YELLOW}Thư mục /etc/php/: $(ls /etc/php/ 2>/dev/null || echo 'trống')${NC}"
@@ -164,7 +164,7 @@ tune_php_fpm() {
     log_info "PHP-FPM version: $php_ver"
 
     local fpm_conf="/etc/php/${php_ver}/fpm/pool.d/www.conf"
-    if [ ! -f "$fpm_conf" ]; then
+    if [[ ! -f "$fpm_conf" ]]; then
         log_error "PHP-FPM config not found: $fpm_conf"
         return 1
     fi
@@ -199,7 +199,7 @@ tune_php_fpm() {
     log_info "PHP-FPM optimized for ${total_ram}MB RAM"
     echo -e "${GREEN}Settings: max_children=$max_children, start=$start_servers${NC}"
     
-    if [ -z "$auto_mode" ]; then pause; fi
+    if [[ -z "$auto_mode" ]]; then pause; fi
 }
 
 # 3. OPcache Optimization
@@ -209,14 +209,14 @@ optimize_opcache() {
 
     local php_ver
     php_ver=$(get_installed_php_version)
-    if [ -z "$php_ver" ]; then
+    if [[ -z "$php_ver" ]]; then
         log_error "Không tìm thấy PHP-FPM để cấu hình OPcache!"
         return 1
     fi
     log_info "OPcache target: PHP $php_ver"
 
     local conf_dir="/etc/php/${php_ver}/fpm/conf.d"
-    if [ ! -d "$conf_dir" ]; then
+    if [[ ! -d "$conf_dir" ]]; then
         mkdir -p "$conf_dir"
     fi
     local opcache_ini="$conf_dir/10-opcache.ini"
@@ -247,7 +247,7 @@ EOF
     log_info "OPcache optimized with JIT compilation"
     echo -e "${YELLOW}Note: Set opcache.validate_timestamps=1 in development${NC}"
     
-    if [ -z "$auto_mode" ]; then pause; fi
+    if [[ -z "$auto_mode" ]]; then pause; fi
 }
 
 # 4. MySQL/MariaDB Tuning
@@ -256,7 +256,7 @@ tune_mysql() {
     log_info "Tuning MySQL/MariaDB for WordPress..."
     
     local mysql_conf="/etc/mysql/mariadb.conf.d/50-server.cnf"
-    if [ ! -f "$mysql_conf" ]; then
+    if [[ ! -f "$mysql_conf" ]]; then
         mysql_conf="/etc/mysql/my.cnf"
     fi
     
@@ -292,7 +292,7 @@ EOF
     
     log_info "MySQL optimized with ${innodb_buffer}MB InnoDB buffer"
     
-    if [ -z "$auto_mode" ]; then pause; fi
+    if [[ -z "$auto_mode" ]]; then pause; fi
 }
 
 # 5. Nginx FastCGI Micro-Caching
@@ -305,7 +305,7 @@ setup_fastcgi_microcache() {
     chown -R www-data:www-data /var/run/nginx-cache
     
     # Global cache config (if not exists)
-    if [ ! -f /etc/nginx/conf.d/fastcgi_cache.conf ]; then
+    if [[ ! -f /etc/nginx/conf.d/fastcgi_cache.conf ]]; then
         cat > /etc/nginx/conf.d/fastcgi_cache.conf <<EOF
 # FastCGI Cache Configuration
 fastcgi_cache_path /var/run/nginx-cache levels=1:2 keys_zone=WORDPRESS:100m inactive=60m max_size=1g;
@@ -320,7 +320,7 @@ EOF
     log_info "FastCGI cache configured (100MB zone, 1GB max)"
     echo -e "${YELLOW}Cache is already applied to sites via create_nginx_config${NC}"
     
-    if [ -z "$auto_mode" ]; then pause; fi
+    if [[ -z "$auto_mode" ]]; then pause; fi
 }
 
 # 8. Database Cleanup
@@ -374,9 +374,9 @@ _do_db_cleanup() {
     
     local WP_PHP_BIN="php"
     local SITE_CONF="/etc/nginx/sites-available/$domain"
-    if [ -f "$SITE_CONF" ]; then
+    if [[ -f "$SITE_CONF" ]]; then
         local SITE_PHP_VER=$(grep -shoP 'unix:/run/php/php\K[0-9.]+(?=-fpm.sock)' "$SITE_CONF" | head -n 1)
-        if [ -n "$SITE_PHP_VER" ] && command -v "php$SITE_PHP_VER" >/dev/null 2>&1; then
+        if [[ -n "$SITE_PHP_VER" ]] && command -v "php$SITE_PHP_VER" >/dev/null 2>&1; then
             WP_PHP_BIN="php$SITE_PHP_VER"
         fi
     fi
@@ -391,7 +391,7 @@ _do_db_cleanup() {
     fi
     local WP_CMD="$WP_PHP_BIN -d display_errors=0 /usr/local/bin/wp --path=$WEB_ROOT --allow-root"
 
-    if [ ! -f "$WEB_ROOT/wp-config.php" ]; then
+    if [[ ! -f "$WEB_ROOT/wp-config.php" ]]; then
         echo -e "${RED}$domain không phải WordPress site.${NC}"
         return
     fi
@@ -515,9 +515,9 @@ _do_disable_bloat() {
     
     local WP_PHP_BIN="php"
     local SITE_CONF="/etc/nginx/sites-available/$domain"
-    if [ -f "$SITE_CONF" ]; then
+    if [[ -f "$SITE_CONF" ]]; then
         local SITE_PHP_VER=$(grep -shoP 'unix:/run/php/php\K[0-9.]+(?=-fpm.sock)' "$SITE_CONF" | head -n 1)
-        if [ -n "$SITE_PHP_VER" ] && command -v "php$SITE_PHP_VER" >/dev/null 2>&1; then
+        if [[ -n "$SITE_PHP_VER" ]] && command -v "php$SITE_PHP_VER" >/dev/null 2>&1; then
             WP_PHP_BIN="php$SITE_PHP_VER"
         fi
     fi
@@ -532,7 +532,7 @@ _do_disable_bloat() {
     fi
     local WP_CMD="$WP_PHP_BIN -d display_errors=0 /usr/local/bin/wp --path=$WEB_ROOT --allow-root"
 
-    if [ ! -f "$WEB_ROOT/wp-config.php" ]; then
+    if [[ ! -f "$WEB_ROOT/wp-config.php" ]]; then
         echo -e "${RED}$domain không phải WordPress site.${NC}"
         return
     fi
@@ -619,9 +619,9 @@ _do_image_optimization() {
     
     local WP_PHP_BIN="php"
     local SITE_CONF="/etc/nginx/sites-available/$domain"
-    if [ -f "$SITE_CONF" ]; then
+    if [[ -f "$SITE_CONF" ]]; then
         local SITE_PHP_VER=$(grep -shoP 'unix:/run/php/php\K[0-9.]+(?=-fpm.sock)' "$SITE_CONF" | head -n 1)
-        if [ -n "$SITE_PHP_VER" ] && command -v "php$SITE_PHP_VER" >/dev/null 2>&1; then
+        if [[ -n "$SITE_PHP_VER" ]] && command -v "php$SITE_PHP_VER" >/dev/null 2>&1; then
             WP_PHP_BIN="php$SITE_PHP_VER"
         fi
     fi
@@ -636,7 +636,7 @@ _do_image_optimization() {
     fi
     local WP_CMD="$WP_PHP_BIN -d /usr/local/bin/wp --path=$WEB_ROOT --allow-root"
 
-    if [ ! -f "$WEB_ROOT/wp-config.php" ]; then
+    if [[ ! -f "$WEB_ROOT/wp-config.php" ]]; then
         echo -e "${RED}$domain không phải WordPress site.${NC}"
         return
     fi
@@ -691,7 +691,7 @@ enable_http2_brotli() {
         log_warn "Brotli module chưa có trong Nginx build hiện tại."
     fi
 
-    if [ "$brotli_ok" -eq 0 ]; then
+    if [[ "$brotli_ok" -eq 0 ]]; then
         echo ""
         echo -e "Muốn thử cài module Brotli không?"
         echo -e "  1. Cài libnginx-mod-http-brotli (apt)"
@@ -713,7 +713,7 @@ enable_http2_brotli() {
     fi
 
     # ── Xóa brotli.conf cũ nếu Brotli KHÔNG có (tránh nginx fail) ──
-    if [ "$brotli_ok" -eq 0 ] && [ -f /etc/nginx/conf.d/brotli.conf ]; then
+    if [[ "$brotli_ok" -eq 0 ]] && [[ -f /etc/nginx/conf.d/brotli.conf ]]; then
         log_warn "Xóa /etc/nginx/conf.d/brotli.conf cũ (module không tồn tại)"
         rm -f /etc/nginx/conf.d/brotli.conf
     fi
@@ -741,7 +741,7 @@ GEOF
     fi
 
     # ── Brotli config (chỉ khi module có mặt) ─────────────
-    if [ "$brotli_ok" -eq 1 ]; then
+    if [[ "$brotli_ok" -eq 1 ]]; then
         cat > /etc/nginx/conf.d/brotli.conf << 'BEOF'
 # Brotli Compression
 brotli on;
@@ -756,7 +756,7 @@ BEOF
     fi
 
     # ── Browser Caching Snippet ───────────────────────────
-    if [ ! -f /etc/nginx/snippets/browser_caching.conf ]; then
+    if [[ ! -f /etc/nginx/snippets/browser_caching.conf ]]; then
         mkdir -p /etc/nginx/snippets
         cat > /etc/nginx/snippets/browser_caching.conf << 'CEOF'
 location ~* \.(jpg|jpeg|gif|png|ico|svg|css|js|woff|woff2|ttf|eot)$ {
