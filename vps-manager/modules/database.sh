@@ -76,7 +76,7 @@ change_db_pass() {
     read -p "Nhập mật khẩu mới (Để trống để tự tạo ngẫu nhiên): " new_pass
     
     if [ -z "$new_pass" ]; then
-        new_pass=$(openssl rand -base64 12 | tr -dc 'a-zA-Z0-9' | head -c 12)
+        new_pass=$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9' | head -c 24)
         echo -e "Mật khẩu tự tạo: ${GREEN}$new_pass${NC}"
     fi
     

@@ -82,7 +82,7 @@ install_mariadb() {
         
         # Tự động tạo mật khẩu root an toàn và cấu hình
         local root_pass
-        root_pass=$(openssl rand -base64 12 | tr -dc 'a-zA-Z0-9' | head -c 12)
+        root_pass=$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9' | head -c 24)
         
         mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '${root_pass}';"
         mysql -e "DELETE FROM mysql.user WHERE User='';"
