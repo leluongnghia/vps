@@ -72,7 +72,17 @@ delete_database() {
 }
 
 change_db_pass() {
+    echo -e "${YELLOW}--- Đổi Mật Khẩu Database User ---${NC}"
+    echo -e "${CYAN}Danh sách MySQL Users hiện có (User@Host):${NC}"
+    mysql -e "SELECT CONCAT(User, '@', Host) FROM mysql.user;" 2>/dev/null | tail -n +2 | sed 's/^/  • /'
+    echo ""
+
     read -p "Nhập tên DB User (Ví dụ: root): " db_user
+    if [ -z "$db_user" ]; then
+        echo -e "${RED}Tên User không được để trống!${NC}"
+        pause; return
+    fi
+
     read -p "Nhập mật khẩu mới (Để trống để tự tạo ngẫu nhiên): " new_pass
     
     if [ -z "$new_pass" ]; then
@@ -80,7 +90,13 @@ change_db_pass() {
         echo -e "Mật khẩu tự tạo: ${GREEN}$new_pass${NC}"
     fi
     
-    mysql -e "ALTER USER '${db_user}'@'localhost' IDENTIFIED BY '${new_pass}';"
+    # Cố gắng đổi pass cho localhost, nếu lỗi sẽ thông báo
+    mysql -e "ALTER USER '${db_user}'@'localhost' IDENTIFIED BY '${new_pass}';" 2>/dev/null
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Lỗi: Có thể User '${db_user}@localhost' không tồn tại. Xem đúng host ở danh sách trên!${NC}"
+        pause; return
+    fi
+
     mysql -e "FLUSH PRIVILEGES;"
     log_info "Đã đổi mật khẩu cho user $db_user."
 
