@@ -11,9 +11,10 @@ install_lemp_menu() {
     echo -e "2. Install Nginx Only"
     echo -e "3. Install MariaDB Only"
     echo -e "4. Install PHP Only"
+    echo -e "5. Fix PHP Extensions (DOM/XML/CLI symlinks)"
     echo -e "0. Back to Main Menu"
     echo -e "${BLUE}=================================================${NC}"
-    read -p "Enter your choice [0-4]: " choice
+    read -p "Enter your choice [0-5]: " choice
 
     case $choice in
         1)
@@ -40,6 +41,10 @@ install_lemp_menu() {
             ;;
         4)
             install_php
+            pause
+            ;;
+        5)
+            fix_php_extensions
             pause
             ;;
         0)
@@ -139,8 +144,10 @@ install_php() {
 _install_single_php() {
     local ver=$1
     log_info "Installing PHP $ver..."
-    apt-get install -y php$ver php$ver-fpm php$ver-mysql php$ver-common php$ver-cli php$ver-curl php$ver-xml php$ver-mbstring php$ver-zip php$ver-bcmath php$ver-intl php$ver-gd php$ver-imagick
-    
+    apt-get install -y php$ver php$ver-fpm php$ver-mysql php$ver-common php$ver-cli \
+        php$ver-curl php$ver-xml php$ver-mbstring php$ver-zip php$ver-bcmath \
+        php$ver-intl php$ver-gd php$ver-imagick
+
     # Configure PHP Upload Limits
     local php_ini="/etc/php/$ver/fpm/php.ini"
     if [[ -f "$php_ini" ]]; then
@@ -150,8 +157,113 @@ _install_single_php() {
         sed -i -E "s/^[; ]*max_execution_time.*/max_execution_time = 300/" "$php_ini"
         sed -i -E "s/^[; ]*max_input_vars.*/max_input_vars = 3000/" "$php_ini"
     fi
-    
+
     systemctl enable php$ver-fpm >/dev/null 2>&1
     systemctl start php$ver-fpm >/dev/null 2>&1
+
+    # Verify & auto-fix DOM/XML symlinks cho cả FPM và CLI
+    _fix_php_ext_symlinks "$ver"
+
     log_info "PHP $ver installed successfully."
+}
+
+# Fix symlinks cho các PHP extension quan trọng (dom, xml, mbstring, ...)
+# Đảm bảo cả CLI và FPM đều load đúng extension
+_fix_php_ext_symlinks() {
+    local ver=$1
+    local mods_dir="/etc/php/$ver/mods-available"
+    local fixed=0
+
+    if [[ ! -d "$mods_dir" ]]; then
+        log_warn "PHP $ver mods-available không tồn tại, bỏ qua."
+        return
+    fi
+
+    # Danh sách extension quan trọng cần đảm bảo có trong cả CLI & FPM
+    local critical_exts=("dom" "xml" "simplexml" "xmlreader" "xmlwriter" "mbstring" "curl")
+
+    for ext in "${critical_exts[@]}"; do
+        local ini_file="$mods_dir/${ext}.ini"
+        [[ ! -f "$ini_file" ]] && continue  # Extension chưa được cài, bỏ qua
+
+        for sapi in cli fpm; do
+            local conf_dir="/etc/php/$ver/$sapi/conf.d"
+            [[ ! -d "$conf_dir" ]] && continue
+
+            # Tìm symlink hiện có (ví dụ: 20-dom.ini)
+            local symlink
+            symlink=$(find "$conf_dir" -name "*-${ext}.ini" 2>/dev/null | head -1)
+
+            if [[ -z "$symlink" ]]; then
+                # Symlink bị thiếu → tạo mới với priority 20
+                ln -s "$ini_file" "$conf_dir/20-${ext}.ini" 2>/dev/null
+                log_info "  [PHP $ver $sapi] Đã tạo symlink: 20-${ext}.ini"
+                fixed=$((fixed + 1))
+            fi
+        done
+    done
+
+    if [[ $fixed -gt 0 ]]; then
+        # Restart FPM để apply thay đổi
+        systemctl restart php$ver-fpm >/dev/null 2>&1 && \
+            log_info "PHP $ver FPM restarted để apply extension mới."
+    fi
+}
+
+# Fix tất cả PHP versions đã cài trên server
+fix_php_extensions() {
+    echo -e "${BLUE}=================================================${NC}"
+    echo -e "${GREEN}   Fix PHP Extensions (DOM/XML/CLI symlinks)${NC}"
+    echo -e "${BLUE}=================================================${NC}"
+    echo -e "Đang kiểm tra tất cả PHP versions..."
+    echo ""
+
+    if [[ ! -d /etc/php ]]; then
+        log_warn "Không tìm thấy /etc/php. PHP chưa được cài?"
+        return
+    fi
+
+    local versions=()
+    for ver_dir in /etc/php/*/; do
+        local ver
+        ver=$(basename "$ver_dir")
+        versions+=("$ver")
+    done
+
+    if [[ ${#versions[@]} -eq 0 ]]; then
+        log_warn "Không tìm thấy PHP version nào."
+        return
+    fi
+
+    echo -e "Tìm thấy ${#versions[@]} PHP version(s): ${versions[*]}"
+    echo ""
+
+    for ver in "${versions[@]}"; do
+        echo -e "${YELLOW}--- PHP $ver ---${NC}"
+
+        # Kiểm tra php-xml đã cài chưa, nếu chưa thì cài
+        if [[ ! -f "/etc/php/$ver/mods-available/dom.ini" ]]; then
+            log_info "PHP $ver: php${ver}-xml chưa được cài. Đang cài..."
+            apt-get install -y php${ver}-xml >/dev/null 2>&1 && \
+                log_info "PHP $ver: Đã cài php${ver}-xml thành công." || \
+                log_warn "PHP $ver: Không thể cài php${ver}-xml (version không hỗ trợ?)"
+        else
+            echo -e "  ${GREEN}✓${NC} php${ver}-xml đã được cài."
+        fi
+
+        # Fix symlinks
+        _fix_php_ext_symlinks "$ver"
+
+        # Verify kết quả
+        local cli_dom
+        cli_dom=$(php$ver -m 2>/dev/null | grep -c "^dom$" || true)
+        if [[ "$cli_dom" -ge 1 ]]; then
+            echo -e "  ${GREEN}✓${NC} PHP $ver CLI: dom extension OK"
+        else
+            echo -e "  ${RED}✗${NC} PHP $ver CLI: dom extension vẫn thiếu!"
+        fi
+    done
+
+    echo ""
+    echo -e "${GREEN}Hoàn tất kiểm tra và fix PHP extensions!${NC}"
 }
