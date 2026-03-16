@@ -380,7 +380,7 @@ wp_config_tool_menu() {
     echo "1. Enable WP_DEBUG"
     echo "2. Disable WP_DEBUG"
     echo "3. Thiết lập Real Cron 1 phút (Wget - Khuyên dùng)"
-    echo "4. Thiết lập Real Cron 1 phút (PHP CLI - Nặng)"
+    echo "4. Thiết lập Real Cron 1 phút (WP-CLI --due-now - Tốt nhất)"
     echo "5. Phục hồi WP-Cron mặc định"
     echo "6. Enable Maintenance Mode"
     echo "7. Disable Maintenance Mode"
@@ -416,13 +416,13 @@ wp_config_tool_menu() {
             ;;
         4)
             $WP_CMD config set DISABLE_WP_CRON true --raw
-            # Setup Real Cron with PHP CLI (1 minute)
-            phpbin=$(command -v $WP_PHP_BIN)
-            if [[ -z "$phpbin" ]]; then phpbin="/usr/bin/php"; fi
-            croncmd="$phpbin $WEB_ROOT/wp-cron.php >/dev/null 2>&1"
+            # Setup Real Cron with WP-CLI --due-now (best: no HTTP timeout, auto picks up new events)
+            wp_cli_bin=$(command -v wp || echo /usr/local/bin/wp)
+            croncmd="$WP_PHP_BIN -d display_errors=0 $wp_cli_bin cron event run --due-now --path=$WEB_ROOT --allow-root --quiet >/dev/null 2>&1"
             cronjob="* * * * * $croncmd"
-            (crontab -l 2>/dev/null | grep -v "$SELECTED_DOMAIN/wp-cron.php"; echo "$cronjob") | crontab -
-            log_info "Đã tắt WP-Cron mặc định và cài Real Cron (PHP CLI - 1 phút/lần)."
+            (crontab -l 2>/dev/null | grep -v "$SELECTED_DOMAIN.*cron\|$SELECTED_DOMAIN/wp-cron"; echo "$cronjob") | crontab -
+            log_info "Đã tắt WP-Cron mặc định và cài Real Cron (WP-CLI --due-now - 1 phút/lần)."
+            echo -e "${GREEN}✔ Tự động chạy TẤT CẢ events đến hạn — không timeout, không cần sửa khi thêm event mới.${NC}"
             pause
             ;;
         5)
