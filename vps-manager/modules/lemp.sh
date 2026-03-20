@@ -11,7 +11,7 @@ install_lemp_menu() {
     echo -e "2. Install Nginx Only"
     echo -e "3. Install MariaDB Only"
     echo -e "4. Install PHP Only"
-    echo -e "5. Fix PHP Extensions (DOM/XML/CLI symlinks)"
+    echo -e "5. Fix PHP Extensions (DOM/XML/MBSTRING/CLI symlinks)"
     echo -e "0. Back to Main Menu"
     echo -e "${BLUE}=================================================${NC}"
     read -p "Enter your choice [0-5]: " choice
@@ -213,7 +213,7 @@ _fix_php_ext_symlinks() {
 # Fix tất cả PHP versions đã cài trên server
 fix_php_extensions() {
     echo -e "${BLUE}=================================================${NC}"
-    echo -e "${GREEN}   Fix PHP Extensions (DOM/XML/CLI symlinks)${NC}"
+    echo -e "${GREEN}   Fix PHP Extensions (DOM/XML/MBSTRING/CLI symlinks)${NC}"
     echo -e "${BLUE}=================================================${NC}"
     echo -e "Đang kiểm tra tất cả PHP versions..."
     echo ""
@@ -251,6 +251,16 @@ fix_php_extensions() {
             echo -e "  ${GREEN}✓${NC} php${ver}-xml đã được cài."
         fi
 
+        # Kiểm tra php-mbstring đã cài chưa, nếu chưa thì cài
+        if [[ ! -f "/etc/php/$ver/mods-available/mbstring.ini" ]]; then
+            log_info "PHP $ver: php${ver}-mbstring chưa được cài. Đang cài..."
+            apt-get install -y php${ver}-mbstring >/dev/null 2>&1 && \
+                log_info "PHP $ver: Đã cài php${ver}-mbstring thành công." || \
+                log_warn "PHP $ver: Không thể cài php${ver}-mbstring (version không hỗ trợ?)"
+        else
+            echo -e "  ${GREEN}✓${NC} php${ver}-mbstring đã được cài."
+        fi
+
         # Fix symlinks
         _fix_php_ext_symlinks "$ver"
 
@@ -261,6 +271,14 @@ fix_php_extensions() {
             echo -e "  ${GREEN}✓${NC} PHP $ver CLI: dom extension OK"
         else
             echo -e "  ${RED}✗${NC} PHP $ver CLI: dom extension vẫn thiếu!"
+        fi
+
+        local cli_mbstring
+        cli_mbstring=$(php$ver -m 2>/dev/null | grep -c "^mbstring$" || true)
+        if [[ "$cli_mbstring" -ge 1 ]]; then
+            echo -e "  ${GREEN}✓${NC} PHP $ver CLI: mbstring extension OK"
+        else
+            echo -e "  ${RED}✗${NC} PHP $ver CLI: mbstring extension vẫn thiếu!"
         fi
     done
 
