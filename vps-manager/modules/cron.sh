@@ -25,7 +25,7 @@ cron_menu() {
         echo -e "  8. Xóa WP-Cron của một website"
         echo -e ""
         echo -e "  ${CYAN}--- APRG SEO Article Cron (PHP-CLI) ---${NC}"
-        echo -e "  9. ${GREEN}Setup APRG Cron${NC} (chạy bền, không chiếm PHP-FPM)"
+        echo -e "  9. ${GREEN}Setup APRG Cron${NC} (cron-runner.php — ALL-IN-ONE)"
         echo -e "  10. Xem Log APRG Cron"
         echo -e "  11. Xóa APRG Cron của một website"
         echo -e "  12. Test APRG Cron thủ công (chạy ngay 1 lần)"
@@ -33,10 +33,11 @@ cron_menu() {
         echo -e "  ${CYAN}--- Logs & Diagnostics ---${NC}"
         echo -e "  13. Xem Log Cron hệ thống (/var/log/syslog)"
         echo -e "  14. Test thủ công một lệnh cron"
+        echo -e "  ${RED}15. 🔍 Chẩn đoán & Dọn dẹp Cron trùng lặp${NC}"
         echo -e "${BLUE}=================================================${NC}"
         echo -e "  0. Quay lại Menu chính"
         echo -e "${BLUE}=================================================${NC}"
-        read -p "Nhập lựa chọn [0-14]: " choice
+        read -p "Nhập lựa chọn [0-15]: " choice
 
         case $choice in
             1)  list_crons ;;
@@ -53,6 +54,7 @@ cron_menu() {
             12) test_aprg_cron ;;
             13) view_system_cron_log ;;
             14) test_cron_manually ;;
+            15) diagnose_cron_duplicates ;;
             0)  return ;;
             *)  echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause ;;
         esac
@@ -443,11 +445,17 @@ setup_aprg_cron() {
     clear
     echo -e "${GREEN}=== Setup APRG SEO Article Cron ===${NC}"
     echo ""
-    echo -e "${CYAN}APRG Cron chạy PHP-CLI (không qua PHP-FPM) nên:${NC}"
-    echo -e "  ${GREEN}✔ Không chiếm PHP-FPM worker${NC}"
-    echo -e "  ${GREEN}✔ Website không bị chậm khi generate AI article${NC}"
-    echo -e "  ${GREEN}✔ Có thể chạy AI task 90-120s mà không ảnh hưởng web${NC}"
-    echo -e "  ${GREEN}✔ Log được ghi tự động vào /var/log/aprg-cron.log${NC}"
+    echo -e "${BLUE}┌─────────────────────────────────────────────────────┐${NC}"
+    echo -e "${BLUE}│${NC} ${CYAN}cron-runner.php${NC} là ${GREEN}ALL-IN-ONE runner${NC} — bao gồm:      ${BLUE}│${NC}"
+    echo -e "${BLUE}│${NC}  ${GREEN}✔${NC} WP cron events (thay thế wget/WP-CLI cron)        ${BLUE}│${NC}"
+    echo -e "${BLUE}│${NC}  ${GREEN}✔${NC} APRG SEO Article batch (AI generate + publish)    ${BLUE}│${NC}"
+    echo -e "${BLUE}│${NC}  ${GREEN}✔${NC} Chạy qua PHP-CLI — không chiếm PHP-FPM worker     ${BLUE}│${NC}"
+    echo -e "${BLUE}│${NC}  ${GREEN}✔${NC} Log ghi tự động vào /var/log/aprg-cron-*.log      ${BLUE}│${NC}"
+    echo -e "${BLUE}│${NC}                                                     ${BLUE}│${NC}"
+    echo -e "${BLUE}│${NC}  ${RED}⚠  CHỈ CẦN 1 DÒNG CRONTAB cho domain này!${NC}         ${BLUE}│${NC}"
+    echo -e "${BLUE}│${NC}  ${YELLOW}Nếu đang có WP-CLI cron hoặc Wget cron riêng${NC}       ${BLUE}│${NC}"
+    echo -e "${BLUE}│${NC}  ${YELLOW}→ Script sẽ hỏi bạn có muốn xóa chúng không.${NC}      ${BLUE}│${NC}"
+    echo -e "${BLUE}└─────────────────────────────────────────────────────┘${NC}"
     echo ""
 
     # Select WP site
@@ -482,18 +490,61 @@ setup_aprg_cron() {
         local plugin_dir="$web_root/wp-content/plugins/$aprg_plugin_slug"
         local runner_path="$plugin_dir/$aprg_runner_file"
 
-        # Check if plugin exists
+        echo ""
+        echo -e "${CYAN}━━━ Đang xử lý: $domain ━━━${NC}"
+
+        # ── Kiểm tra cron trùng lặp ──────────────────────────────
+        local has_wpcli_cron=false
+        local has_wget_cron=false
+        if crontab -l 2>/dev/null | grep -q "# WP-CRON: $domain"; then
+            if crontab -l 2>/dev/null | grep -A1 "# WP-CRON: $domain" | grep -q "cron event run"; then
+                has_wpcli_cron=true
+            fi
+            if crontab -l 2>/dev/null | grep -A1 "# WP-CRON: $domain" | grep -q "wp-cron.php"; then
+                has_wget_cron=true
+            fi
+        fi
+
+        # Cũng check các dòng không có marker (cron cũ từ tay)
+        if crontab -l 2>/dev/null | grep -v "^#" | grep -q "cron event run.*$domain"; then
+            has_wpcli_cron=true
+        fi
+        if crontab -l 2>/dev/null | grep -v "^#" | grep -q "$domain/wp-cron.php"; then
+            has_wget_cron=true
+        fi
+
+        if $has_wpcli_cron || $has_wget_cron; then
+            echo -e "${YELLOW}⚠ Phát hiện cron WP trùng lặp với APRG cho $domain:${NC}"
+            $has_wpcli_cron && echo -e "   ${RED}✗ WP-CLI cron (--due-now)${NC} — APRG đã thay thế chức năng này"
+            $has_wget_cron  && echo -e "   ${RED}✗ Wget cron (wp-cron.php)${NC} — APRG đã thay thế chức năng này"
+            echo ""
+            echo -e "${CYAN}cron-runner.php đã bao gồm wp_cron() bên trong → giữ chúng sẽ bị trùng.${NC}"
+            read -p "Tự động XÓA các cron WP cũ cho $domain? (y/n, KHUYÊN y): " rm_dup
+            if [[ "$rm_dup" == "y" || "$rm_dup" == "Y" ]]; then
+                # Remove WP-CRON marker block
+                (crontab -l 2>/dev/null \
+                    | grep -v "# WP-CRON: $domain" \
+                    | grep -v "$domain/wp-cron.php" \
+                    | grep -v "cron event run.*$domain" \
+                ) | crontab -
+                echo -e "${GREEN}✔ Đã xóa các cron WP trùng lặp.${NC}"
+            else
+                echo -e "${YELLOW}⚠ Giữ nguyên — lưu ý có thể bị gọi check_and_process() nhiều lần/phút.${NC}"
+                echo -e "   ${CYAN}Dùng option 15 (Chẩn đoán) để xem và dọn sau.${NC}"
+            fi
+        fi
+
+        # ── Check plugin tồn tại ─────────────────────────────────
         if [[ ! -d "$plugin_dir" ]]; then
             echo -e "${YELLOW}⚠ Plugin APRG chưa được cài tại: $plugin_dir${NC}"
-            echo -e "   Bạn vẫn muốn thêm cron? Cron sẽ tự skip nếu file không tồn tại."
-            read -p "   Tiếp tục? (y/n): " force_add
+            read -p "   Vẫn thêm cron? (y/n): " force_add
             if [[ "$force_add" != "y" && "$force_add" != "Y" ]]; then
                 echo -e "${YELLOW}Bỏ qua $domain.${NC}"
                 continue
             fi
         fi
 
-        # Auto-detect PHP version for this site
+        # ── Auto-detect PHP version ───────────────────────────────
         local php_bin="php"
         local site_conf="/etc/nginx/sites-available/$domain"
         if [[ -f "$site_conf" ]]; then
@@ -504,20 +555,19 @@ setup_aprg_cron() {
             fi
         fi
 
-        # Build cron command with safety wrapper
-        # Uses -d variables to prevent memory issues and ensure clean env
+        # ── Build & install cron ──────────────────────────────────
         local log_file="/var/log/aprg-cron-$(echo "$domain" | tr '.' '-').log"
         local croncmd="$php_bin -d memory_limit=512M -d max_execution_time=300 -d display_errors=0 $runner_path >> $log_file 2>&1"
         local cronjob="$cron_schedule $croncmd"
         local marker="# APRG-CRON: $domain"
 
-        # Remove old APRG cron for this domain
+        # Remove old APRG cron entries first
         (crontab -l 2>/dev/null | grep -v "# APRG-CRON: $domain" | grep -v "$runner_path") | crontab -
 
         # Add new with marker
         (crontab -l 2>/dev/null; echo "$marker"; echo "$cronjob") | crontab -
 
-        # Create log file if not exists, set permissions
+        # Create log file
         touch "$log_file" 2>/dev/null
         chmod 664 "$log_file" 2>/dev/null
 
@@ -526,13 +576,14 @@ setup_aprg_cron() {
         echo -e "   ${CYAN}PHP:${NC}       $php_bin"
         echo -e "   ${CYAN}Runner:${NC}    $runner_path"
         echo -e "   ${CYAN}Log:${NC}       $log_file"
-        echo ""
     done
 
+    echo ""
     echo -e "${GREEN}=====================================================${NC}"
-    echo -e "${YELLOW}💡 Bạn nên giữ WP-Cron (Wget/WP-CLI) song song với APRG Cron:${NC}"
-    echo -e "   • WP-Cron   → xử lý update, email, và WP events thông thường"
-    echo -e "   • APRG Cron → generate AI articles qua PHP-CLI (không chiếm FPM)"
+    echo -e "${GREEN}✔ APRG cron-runner.php đã xử lý TẤT CẢ:${NC}"
+    echo -e "   • wp_cron() — toàn bộ WP scheduled events"
+    echo -e "   • APRG_SEO_Article_Processor::check_and_process()"
+    echo -e "   → Không cần WP-CLI hay Wget cron riêng cho domain này!"
     echo -e "${GREEN}=====================================================${NC}"
     pause
 }
@@ -710,5 +761,189 @@ test_cron_manually() {
     eval "$test_cmd" 2>&1
     echo -e "${BLUE}------ End ------${NC}"
     echo -e "${GREEN}Exit code: $?${NC}"
+    pause
+}
+
+# ============================================================
+# 15. DIAGNOSE & FIX CRON DUPLICATES
+# ============================================================
+diagnose_cron_duplicates() {
+    clear
+    echo -e "${GREEN}=== 🔍 Chẩn đoán & Dọn dẹp Cron trùng lặp ===${NC}"
+    echo ""
+    echo -e "Script sẽ phân tích crontab theo từng domain và tìm"
+    echo -e "các trường hợp bị cấu hình nhiều cron trùng nhau."
+    echo ""
+
+    local current_crontab
+    current_crontab=$(crontab -l 2>/dev/null)
+
+    if [[ -z "$current_crontab" ]]; then
+        echo -e "${YELLOW}Crontab trống — không có gì để chẩn đoán.${NC}"
+        pause; return
+    fi
+
+    # ── Thu thập danh sách domain WP ────────────────────────────────
+    local domains=()
+    for d in /var/www/*; do
+        if [[ -d "$d" && -f "$d/public_html/wp-config.php" ]]; then
+            domains+=("$(basename "$d")")
+        fi
+    done
+
+    if [[ ${#domains[@]} -eq 0 ]]; then
+        echo -e "${YELLOW}Không tìm thấy website WordPress nào trên server.${NC}"
+        pause; return
+    fi
+
+    local found_issues=false
+    local domains_with_issues=()
+
+    echo -e "${BLUE}══════════════════════════════════════════════════════════${NC}"
+    printf "  %-28s %-8s %-8s %-8s %s\n" "Domain" "APRG" "WP-CLI" "Wget" "Trạng thái"
+    echo -e "${BLUE}══════════════════════════════════════════════════════════${NC}"
+
+    for domain in "${domains[@]}"; do
+        local has_aprg=false
+        local has_wpcli=false
+        local has_wget=false
+
+        # Check APRG cron (marker hoặc cron-runner.php path)
+        if echo "$current_crontab" | grep -q "# APRG-CRON: $domain"; then
+            has_aprg=true
+        fi
+        if echo "$current_crontab" | grep -v "^#" | grep -q "$domain.*cron-runner\.php"; then
+            has_aprg=true
+        fi
+
+        # Check WP-CLI cron (marker hoặc pattern)
+        if echo "$current_crontab" | grep -A1 "# WP-CRON: $domain" | grep -q "cron event run"; then
+            has_wpcli=true
+        fi
+        if echo "$current_crontab" | grep -v "^#" | grep -q "cron event run.*$domain"; then
+            has_wpcli=true
+        fi
+
+        # Check Wget cron (marker hoặc pattern)
+        if echo "$current_crontab" | grep -A1 "# WP-CRON: $domain" | grep -q "wp-cron.php"; then
+            has_wget=true
+        fi
+        if echo "$current_crontab" | grep -v "^#" | grep -q "$domain/wp-cron.php"; then
+            has_wget=true
+        fi
+
+        # Đếm số loại cron đang chạy
+        local cron_count=0
+        $has_aprg  && ((cron_count++))
+        $has_wpcli && ((cron_count++))
+        $has_wget  && ((cron_count++))
+
+        # Chỉ in domain có ít nhất 1 cron
+        if [[ $cron_count -eq 0 ]]; then
+            continue
+        fi
+
+        local aprg_col="${RED}-${NC}"
+        local wpcli_col="${RED}-${NC}"
+        local wget_col="${RED}-${NC}"
+        $has_aprg  && aprg_col="${GREEN}✔${NC}"
+        $has_wpcli && wpcli_col="${GREEN}✔${NC}"
+        $has_wget  && wget_col="${GREEN}✔${NC}"
+
+        local status_msg
+        if $has_aprg && ($has_wpcli || $has_wget); then
+            # APRG bao gồm wp_cron() → WP-CLI/Wget là trùng
+            found_issues=true
+            domains_with_issues+=("$domain")
+            status_msg="${RED}⚠ TRÙNG! APRG đã bao gồm wp_cron()${NC}"
+        elif $has_wpcli && $has_wget; then
+            # Cả hai đều trigger wp-cron → trùng
+            found_issues=true
+            domains_with_issues+=("$domain")
+            status_msg="${YELLOW}⚠ WP-CLI + Wget đều trigger WP-Cron${NC}"
+        else
+            status_msg="${GREEN}✔ OK${NC}"
+        fi
+
+        printf "  %-28s " "$domain"
+        echo -e "$aprg_col       $wpcli_col      $wget_col      $status_msg"
+    done
+
+    echo -e "${BLUE}══════════════════════════════════════════════════════════${NC}"
+
+    if ! $found_issues; then
+        echo ""
+        echo -e "${GREEN}✔ Không phát hiện cron trùng lặp!${NC}"
+        pause; return
+    fi
+
+    echo ""
+    echo -e "${RED}Phát hiện ${#domains_with_issues[@]} domain bị cron trùng lặp.${NC}"
+    echo ""
+    echo -e "${YELLOW}Giải thích:${NC}"
+    echo -e "  • ${GREEN}APRG (cron-runner.php)${NC} = ALL-IN-ONE:"
+    echo -e "    Gọi wp_cron() + APRG batch — ${RED}không cần WP-CLI/Wget cùng lúc${NC}"
+    echo -e "  • ${CYAN}WP-CLI --due-now${NC} hoặc ${CYAN}Wget${NC} = chỉ xử lý WP events"
+    echo -e "    Nên dùng ${RED}1 trong 2${NC}, không dùng cả hai song song"
+    echo ""
+
+    read -p "Tự động dọn dẹp cron trùng? (y/n): " do_fix
+    if [[ "$do_fix" != "y" && "$do_fix" != "Y" ]]; then
+        echo -e "${YELLOW}Đã hủy. Dùng option 3 (Xóa từng cron) để dọn thủ công.${NC}"
+        pause; return
+    fi
+
+    echo ""
+    echo -e "${CYAN}Chọn chiến lược fix cho TẤT CẢ domain bị lỗi:${NC}"
+    echo -e "  1. ${GREEN}Giữ APRG (cron-runner.php)${NC}, xóa WP-CLI + Wget  ${CYAN}← KHUYÊN DÙNG${NC}"
+    echo -e "  2. ${GREEN}Giữ WP-CLI${NC}, xóa APRG + Wget"
+    echo -e "  3. ${GREEN}Giữ Wget${NC}, xóa APRG + WP-CLI"
+    read -p "Chọn [1-3]: " fix_strategy
+
+    echo ""
+    for domain in "${domains_with_issues[@]}"; do
+        local web_root="/var/www/$domain/public_html"
+        local aprg_slug="ai-product-review-generator"
+        local runner="$web_root/wp-content/plugins/$aprg_slug/cron-runner.php"
+
+        case "$fix_strategy" in
+            1)
+                # Keep APRG, remove WP-CLI + Wget
+                (crontab -l 2>/dev/null \
+                    | grep -v "# WP-CRON: $domain" \
+                    | grep -v "$domain/wp-cron.php" \
+                    | grep -v "cron event run.*$domain" \
+                ) | crontab -
+                echo -e "${GREEN}✔ [$domain] Đã xóa WP-CLI + Wget. Giữ APRG.${NC}"
+                ;;
+            2)
+                # Keep WP-CLI, remove APRG + Wget
+                (crontab -l 2>/dev/null \
+                    | grep -v "# APRG-CRON: $domain" \
+                    | grep -v "$runner" \
+                    | grep -v "$domain/wp-cron.php" \
+                ) | crontab -
+                echo -e "${GREEN}✔ [$domain] Đã xóa APRG + Wget. Giữ WP-CLI.${NC}"
+                ;;
+            3)
+                # Keep Wget, remove APRG + WP-CLI
+                (crontab -l 2>/dev/null \
+                    | grep -v "# APRG-CRON: $domain" \
+                    | grep -v "$runner" \
+                    | grep -v "cron event run.*$domain" \
+                ) | crontab -
+                echo -e "${GREEN}✔ [$domain] Đã xóa APRG + WP-CLI. Giữ Wget.${NC}"
+                ;;
+            *)
+                echo -e "${RED}Lựa chọn không hợp lệ — bỏ qua $domain.${NC}"
+                ;;
+        esac
+    done
+
+    echo ""
+    echo -e "${GREEN}✔ Hoàn tất! Crontab sau khi dọn dẹp:${NC}"
+    echo -e "${BLUE}──────────────────────────────────────────────────${NC}"
+    crontab -l 2>/dev/null
+    echo -e "${BLUE}──────────────────────────────────────────────────${NC}"
     pause
 }
