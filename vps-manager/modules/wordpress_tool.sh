@@ -371,99 +371,98 @@ wp_db_tool_menu() {
     esac
 }
 
-# --- 6. Config Tools (Cron/Debug) ---
+# --- 6. Config Tools (Debug/Maintenance) ---
 wp_config_tool_menu() {
     select_wp_site || return
     ensure_wp_cli
-    
-    echo -e "\n${YELLOW}Config Tools - $SELECTED_DOMAIN${NC}"
-    echo "1. Enable WP_DEBUG"
-    echo "2. Disable WP_DEBUG"
-    echo "3. Thiết lập Real Cron 1 phút (Wget - Khuyên dùng)"
-    echo "4. Thiết lập Real Cron 1 phút (WP-CLI --due-now - Tốt nhất)"
-    echo "5. Phục hồi WP-Cron mặc định"
-    echo "6. Enable Maintenance Mode"
-    echo "7. Disable Maintenance Mode"
-    echo "8. Fix Upload Limits (Sửa lỗi tải file 2MB & 413 Error)"
-    echo "0. Back"
-    read -p "Select: " c
-    
-    case $c in
-        1) 
-            $WP_CMD config set WP_DEBUG true --raw
-            $WP_CMD config set WP_DEBUG_LOG true --raw
-            $WP_CMD config set WP_DEBUG_DISPLAY true --raw
-            # Add @ini_set to wp-config.php if not exists
-            if ! $WP_CMD eval "if(strpos(file_get_contents(ABSPATH . 'wp-config.php'), 'display_errors') === false) { file_put_contents(ABSPATH . 'wp-config.php', str_replace(\"define( 'WP_DEBUG', true );\", \"define( 'WP_DEBUG', true );\n@ini_set('display_errors', 1);\", file_get_contents(ABSPATH . 'wp-config.php'))); }"; then
-                echo "Could not inject display_errors via eval."
-            fi
-            pause ;;
-        2) 
-            $WP_CMD config set WP_DEBUG false --raw
-            $WP_CMD config set WP_DEBUG_LOG false --raw
-            $WP_CMD config set WP_DEBUG_DISPLAY false --raw
-            # Remove @ini_set from wp-config.php
-            $WP_CMD eval "file_put_contents(ABSPATH . 'wp-config.php', preg_replace('/@ini_set\\(\\'display_errors\\', [01]\\);\\r?\\n?/', '', file_get_contents(ABSPATH . 'wp-config.php')));"
-            pause ;;
-        3) 
-            $WP_CMD config set DISABLE_WP_CRON true --raw
-            # Setup Real Cron with Wget (1 minute)
-            croncmd="wget -q -O - https://$SELECTED_DOMAIN/wp-cron.php?doing_wp_cron >/dev/null 2>&1"
-            cronjob="* * * * * $croncmd"
-            (crontab -l 2>/dev/null | grep -v "$SELECTED_DOMAIN/wp-cron.php"; echo "$cronjob") | crontab -
-            log_info "Đã tắt WP-Cron mặc định và cài Real Cron (Wget - 1 phút/lần)."
-            pause
-            ;;
-        4)
-            $WP_CMD config set DISABLE_WP_CRON true --raw
-            # Setup Real Cron with WP-CLI --due-now (best: no HTTP timeout, auto picks up new events)
-            wp_cli_bin=$(command -v wp || echo /usr/local/bin/wp)
-            croncmd="$WP_PHP_BIN -d display_errors=0 $wp_cli_bin cron event run --due-now --path=$WEB_ROOT --allow-root --quiet >/dev/null 2>&1"
-            cronjob="* * * * * $croncmd"
-            (crontab -l 2>/dev/null | grep -v "$SELECTED_DOMAIN.*cron\|$SELECTED_DOMAIN/wp-cron"; echo "$cronjob") | crontab -
-            log_info "Đã tắt WP-Cron mặc định và cài Real Cron (WP-CLI --due-now - 1 phút/lần)."
-            echo -e "${GREEN}✔ Tự động chạy TẤT CẢ events đến hạn — không timeout, không cần sửa khi thêm event mới.${NC}"
-            pause
-            ;;
-        5)
-            $WP_CMD config set DISABLE_WP_CRON false --raw
-            # Remove system cron
-            crontab -l 2>/dev/null | grep -v "$SELECTED_DOMAIN/wp-cron.php" | crontab -
-            log_info "Đã phục hồi WP-Cron mặc định (xóa System Cron)."
-            pause
-            ;;
-        6) $WP_CMD maintenance-mode activate; pause ;;
-        7) $WP_CMD maintenance-mode deactivate; pause ;;
-        8)
-            log_info "Đang sửa giới hạn dung lượng tải lên toàn server..."
-            
-            # Fix PHP-FPM for all installed PHP versions
-            for php_ini in /etc/php/*/fpm/php.ini; do
-                if [[ -f "$php_ini" ]]; then
-                    sed -i -E "s/^[; ]*upload_max_filesize.*/upload_max_filesize = 128M/" "$php_ini"
-                    sed -i -E "s/^[; ]*post_max_size.*/post_max_size = 128M/" "$php_ini"
-                    sed -i -E "s/^[; ]*memory_limit.*/memory_limit = 256M/" "$php_ini"
-                    sed -i -E "s/^[; ]*max_execution_time.*/max_execution_time = 300/" "$php_ini"
-                    sed -i -E "s/^[; ]*max_input_vars.*/max_input_vars = 3000/" "$php_ini"
+
+    while true; do
+        clear
+        echo -e "\n${YELLOW}Config Tools - $SELECTED_DOMAIN${NC}"
+        echo -e "${BLUE}=================================================${NC}"
+        echo -e "  ${CYAN}--- Debug ---${NC}"
+        echo -e "  1. Enable WP_DEBUG (Bật chế độ debug)"
+        echo -e "  2. Disable WP_DEBUG (Tắt debug, production)"
+        echo ""
+        echo -e "  ${CYAN}--- Cron ---${NC}"
+        echo -e "  3. ${GREEN}⏰ Mở Cron Manager${NC} (WP-Cron, APRG Cron, Log...)"
+        echo ""
+        echo -e "  ${CYAN}--- Maintenance ---${NC}"
+        echo -e "  4. Enable Maintenance Mode (Bật trang bảo trì)"
+        echo -e "  5. Disable Maintenance Mode (Tắt trang bảo trì)"
+        echo ""
+        echo -e "  ${CYAN}--- Performance ---${NC}"
+        echo -e "  6. Fix Upload Limits (Sửa lỗi tải file 2MB & 413 Error)"
+        echo -e "${BLUE}=================================================${NC}"
+        echo -e "  0. Quay lại"
+        read -p "Select: " c
+
+        case $c in
+            1)
+                $WP_CMD config set WP_DEBUG true --raw
+                $WP_CMD config set WP_DEBUG_LOG true --raw
+                $WP_CMD config set WP_DEBUG_DISPLAY true --raw
+                if ! $WP_CMD eval "if(strpos(file_get_contents(ABSPATH . 'wp-config.php'), 'display_errors') === false) { file_put_contents(ABSPATH . 'wp-config.php', str_replace(\"define( 'WP_DEBUG', true );\", \"define( 'WP_DEBUG', true );\n@ini_set('display_errors', 1);\", file_get_contents(ABSPATH . 'wp-config.php'))); }"; then
+                    echo "Could not inject display_errors via eval."
                 fi
-            done
-            
-            # Fix Nginx Global configuration (Client max body)
-            if [[ -f /etc/nginx/nginx.conf ]]; then
-                if ! grep -q "client_max_body_size" /etc/nginx/nginx.conf; then
-                    sed -i '/http {/a \        client_max_body_size 128M;' /etc/nginx/nginx.conf
-                else
-                    sed -i "s/client_max_body_size.*/client_max_body_size 128M;/" /etc/nginx/nginx.conf
+                log_info "Đã BẬT WP_DEBUG cho $SELECTED_DOMAIN."
+                pause
+                ;;
+            2)
+                $WP_CMD config set WP_DEBUG false --raw
+                $WP_CMD config set WP_DEBUG_LOG false --raw
+                $WP_CMD config set WP_DEBUG_DISPLAY false --raw
+                $WP_CMD eval "file_put_contents(ABSPATH . 'wp-config.php', preg_replace('/@ini_set\(\\'display_errors\\', [01]\);\r?\n?/', '', file_get_contents(ABSPATH . 'wp-config.php')));"
+                log_info "Đã TẮT WP_DEBUG cho $SELECTED_DOMAIN."
+                pause
+                ;;
+            3)
+                # Redirect to full Cron Manager module
+                local module_dir
+                module_dir="$(dirname "${BASH_SOURCE[0]}")"
+                source "$module_dir/cron.sh"
+                cron_menu
+                ;;
+            4)
+                $WP_CMD maintenance-mode activate
+                log_info "Đã bật Maintenance Mode."
+                pause
+                ;;
+            5)
+                $WP_CMD maintenance-mode deactivate
+                log_info "Đã tắt Maintenance Mode."
+                pause
+                ;;
+            6)
+                log_info "Đang sửa giới hạn dung lượng tải lên toàn server..."
+
+                for php_ini in /etc/php/*/fpm/php.ini; do
+                    if [[ -f "$php_ini" ]]; then
+                        sed -i -E "s/^[; ]*upload_max_filesize.*/upload_max_filesize = 128M/" "$php_ini"
+                        sed -i -E "s/^[; ]*post_max_size.*/post_max_size = 128M/" "$php_ini"
+                        sed -i -E "s/^[; ]*memory_limit.*/memory_limit = 256M/" "$php_ini"
+                        sed -i -E "s/^[; ]*max_execution_time.*/max_execution_time = 300/" "$php_ini"
+                        sed -i -E "s/^[; ]*max_input_vars.*/max_input_vars = 3000/" "$php_ini"
+                    fi
+                done
+
+                if [[ -f /etc/nginx/nginx.conf ]]; then
+                    if ! grep -q "client_max_body_size" /etc/nginx/nginx.conf; then
+                        sed -i '/http {/a \        client_max_body_size 128M;' /etc/nginx/nginx.conf
+                    else
+                        sed -i "s/client_max_body_size.*/client_max_body_size 128M;/" /etc/nginx/nginx.conf
+                    fi
                 fi
-            fi
-            
-            # Restart services
-            systemctl reload nginx
-            systemctl restart php*-fpm 2>/dev/null
-            
-            log_info "Đã tăng giới hạn Upload lên 128MB thành công!"
-            echo -e "${GREEN}Hãy tải lại trang và upload plugin/file lại nhé.${NC}"
-            pause
-            ;;
-    esac
+
+                systemctl reload nginx
+                systemctl restart php*-fpm 2>/dev/null
+
+                log_info "Đã tăng giới hạn Upload lên 128MB thành công!"
+                echo -e "${GREEN}Hãy tải lại trang và upload lại nhé.${NC}"
+                pause
+                ;;
+            0) return ;;
+            *) echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause ;;
+        esac
+    done
 }
