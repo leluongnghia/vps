@@ -181,6 +181,9 @@ server {
     location ~ \.php$ {
         include snippets/fastcgi-php.conf;
         fastcgi_pass $php_sock;
+        fastcgi_read_timeout 300;
+        fastcgi_send_timeout 300;
+        fastcgi_connect_timeout 300;
         
         # FastCGI Cache Settings
         fastcgi_cache WORDPRESS;
