@@ -226,12 +226,17 @@ create_nginx_config() {
     
     log_info "Using PHP socket: $php_sock"
     
+    local server_names="$domain"
+    if [[ $(echo "$domain" | tr -cd '.' | wc -c) -eq 1 ]]; then
+        server_names="$domain www.$domain"
+    fi
+    
     # Create Nginx configuration
     cat > "$config_file" <<EOF
 server {
     listen 80;
     listen [::]:80;
-    server_name $domain www.$domain;
+    server_name $server_names;
     root /var/www/$domain/public_html;
     index index.php index.html index.htm;
     client_max_body_size 128M;
