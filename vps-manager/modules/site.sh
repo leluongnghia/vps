@@ -28,9 +28,9 @@ manage_sites_menu() {
     case $choice in
         1) list_sites ;;
         2) 
-            echo -e "1. WordPress\n2. PHP Thuần"
-            read -p "Chọn loại: " t
-            if [[ "$t" == "1" ]]; then add_new_site "wordpress"; else add_new_site "php"; fi
+            echo -e "1. WordPress\n2. PHP Thuần\n3. Node.js Proxy"
+            read -p "Chọn loại [1-3]: " t
+            if [[ "$t" == "1" ]]; then add_new_site "wordpress"; elif [[ "$t" == "2" ]]; then add_new_site "php"; elif [[ "$t" == "3" ]]; then add_new_site "nodejs"; else echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause; manage_sites_menu; fi
             ;;
         3) delete_site ;;
         4) rename_site ;;
@@ -93,7 +93,45 @@ EOF
     chmod -R 755 "/var/www/$domain"
 
     # 3. Create Nginx Config
-    create_nginx_config "$domain"
+    if [[ "$type" == "nodejs" ]]; then
+        # Check and install Node.js / PM2 if missing
+        if ! command -v node &> /dev/null || ! command -v pm2 &> /dev/null; then
+            echo -e "${YELLOW}Hệ thống phát hiện chưa có Node.js hoặc PM2. Đang tiến hành cài đặt tự động...${NC}"
+            if ! command -v node &> /dev/null; then
+                curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+                apt-get install -y nodejs
+            fi
+            if ! command -v pm2 &> /dev/null; then
+                npm install -g pm2
+            fi
+            echo -e "${GREEN}Cài đặt môi trường Node.js hoàn tất!${NC}"
+        fi
+
+        read -p "Nhập Port ứng dụng Node.js (Mặc định 3000): " node_port
+        if [[ -z "$node_port" ]]; then node_port="3000"; fi
+        create_nginx_nodejs_config "$domain" "$node_port"
+        
+        # Tạo Database MySQL cho dự án Node.js theo yêu cầu
+        echo -e "${YELLOW}Tiến hành khởi tạo Database MySQL cho dự án này...${NC}"
+        setup_database "$domain"
+        
+        # Tạo sẵn file .env
+        cat > "/var/www/$domain/public_html/.env" <<EOF
+DB_HOST=127.0.0.1
+DB_NAME=$WP_DB_NAME
+DB_USER=$WP_DB_USER
+DB_PASSWORD=$WP_DB_PASS
+JWT_SECRET=$(openssl rand -base64 32)
+PORT=$node_port
+EOF
+        chown www-data:www-data "/var/www/$domain/public_html/.env"
+        chmod 600 "/var/www/$domain/public_html/.env"
+        echo -e "${GREEN}Đã tạo file .env tự động cho ứng dụng Node.js!${NC}"
+        
+        echo -e "${YELLOW}Gợi ý: Cần dùng PM2 để duy trì ứng dụng chạy ngầm (pm2 start npx --name 'app' -- tsx server.ts).${NC}"
+    else
+        create_nginx_config "$domain"
+    fi
 
     # 4. Database & WP setup
     if [[ "$type" == "wordpress" ]]; then
@@ -132,6 +170,46 @@ EOF
 
     log_info "Hoàn tất thêm website $domain."
     pause
+}
+
+create_nginx_nodejs_config() {
+    local domain=$1
+    local node_port=$2
+    local config_file="/etc/nginx/sites-available/$domain"
+    
+    cat > "$config_file" <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name $domain www.$domain;
+    
+    root /var/www/$domain/public_html;
+    
+    access_log /var/log/nginx/\${domain}.access.log;
+    error_log /var/log/nginx/\${domain}.error.log;
+
+    location / {
+        proxy_pass http://127.0.0.1:$node_port;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_cache_bypass \$http_upgrade;
+    }
+
+    location ~ /\.ht {
+        deny all;
+    }
+}
+EOF
+
+    # Remove the old symlink first so it doesn't cause "File exists" warning
+    rm -f "/etc/nginx/sites-enabled/$domain"
+    ln -s "$config_file" "/etc/nginx/sites-enabled/"
+    nginx -t && systemctl reload nginx
 }
 
 create_nginx_config() {
