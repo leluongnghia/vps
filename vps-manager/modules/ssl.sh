@@ -295,7 +295,12 @@ install_letsencrypt() {
     fi
 
     log_info "Đang yêu cầu chứng chỉ SSL cho $domain..."
-    certbot --nginx -d "$domain" -d "www.$domain" --non-interactive --agree-tos --register-unsafely-without-email --redirect
+    # Subdomain (>1 dấu chấm) thì không thêm www. vì thường không có DNS cho www.subdomain
+    local certbot_domains="-d \"$domain\""
+    if [[ $(echo "$domain" | tr -cd '.' | wc -c) -eq 1 ]]; then
+        certbot_domains="-d \"$domain\" -d \"www.$domain\""
+    fi
+    eval certbot --nginx $certbot_domains --non-interactive --agree-tos --register-unsafely-without-email --redirect
 
     if [[ $? -eq 0 ]]; then
         echo -e "${GREEN}Cài đặt SSL Let's Encrypt thành công!${NC}"
@@ -320,7 +325,11 @@ install_zerossl() {
     
     # Issue cert (using webroot mode /var/www/$domain/public_html or nginx mode)
     # Nginx mode is easier if nginx is running
-    ~/.acme.sh/acme.sh --issue --nginx -d "$domain" -d "www.$domain" --server zerossl
+    local acme_domains="-d \"$domain\""
+    if [[ $(echo "$domain" | tr -cd '.' | wc -c) -eq 1 ]]; then
+        acme_domains="-d \"$domain\" -d \"www.$domain\""
+    fi
+    eval ~/.acme.sh/acme.sh --issue --nginx $acme_domains --server zerossl
     
     if [[ $? -ne 0 ]]; then
         echo -e "${RED}Lỗi cấp chứng chỉ ZeroSSL. Kiểm tra DNS!${NC}"
