@@ -185,8 +185,8 @@ server {
     
     root /var/www/$domain/public_html;
     
-    access_log /var/log/nginx/\${domain}.access.log;
-    error_log /var/log/nginx/\${domain}.error.log;
+    access_log /var/log/nginx/${domain}.access.log;
+    error_log /var/log/nginx/${domain}.error.log;
 
     location / {
         proxy_pass http://127.0.0.1:$node_port;
