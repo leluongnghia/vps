@@ -47,26 +47,133 @@ change_admin_port() {
 }
 
 optimize_images() {
-    # Select site from list
+    clear
+    echo -e "${BLUE}=================================================${NC}"
+    echo -e "${GREEN}     🖼️  Tối ưu hóa Ảnh (Image Optimize)${NC}"
+    echo -e "${BLUE}=================================================${NC}"
+
+    # Select site
     source "$(dirname "${BASH_SOURCE[0]}")/site.sh"
     select_site || return
     domain=$SELECTED_DOMAIN
-    target="/var/www/$domain/public_html"
-    
-    if [[ ! -d "$target" ]]; then return; fi
-    
-    log_info "Đang cài đặt tools..."
-    apt-get install -y jpegoptim optipng
-    
-    log_info "Đang tối ưu JPG..."
-    find "$target" -name "*.jpg" -exec jpegoptim --strip-all --all-progressive {} \;
-    find "$target" -name "*.jpeg" -exec jpegoptim --strip-all --all-progressive {} \;
-    
-    log_info "Đang tối ưu PNG..."
-    find "$target" -name "*.png" -exec optipng -o7 {} \;
-    
-    log_info "Hoàn tất."
+    target="/var/www/$domain/public_html/wp-content/uploads"
+
+    # Fallback nếu không phải WordPress
+    if [[ ! -d "$target" ]]; then
+        target="/var/www/$domain/public_html"
+    fi
+
+    echo -e "${CYAN}📁 Thư mục xử lý: $target${NC}"
+    echo ""
+
+    # --- Chọn chế độ nén ---
+    echo -e "Chọn chế độ:"
+    echo -e "  1. Nén JPG/PNG giữ nguyên định dạng (jpegoptim + optipng)"
+    echo -e "  2. Chuyển đổi sang WebP (cwebp) - tiết kiệm 25-35% hơn"
+    echo -e "  3. Cả hai (Nén + Convert WebP)"
+    echo -e "  0. Hủy"
+    read -p "Chọn: " img_mode
+    [[ "$img_mode" == "0" ]] && return
+
+    # --- Chọn quality ---
+    local jpg_quality=82
+    local webp_quality=80
+    if [[ "$img_mode" == "1" || "$img_mode" == "3" ]]; then
+        read -p "JPG quality % (Enter = mặc định 82, khuyến nghị 75-90): " q
+        [[ -n "$q" ]] && jpg_quality=$q
+    fi
+    if [[ "$img_mode" == "2" || "$img_mode" == "3" ]]; then
+        read -p "WebP quality % (Enter = mặc định 80, khuyến nghị 75-85): " q
+        [[ -n "$q" ]] && webp_quality=$q
+    fi
+
+    echo ""
+    log_info "Cài đặt tools cần thiết..."
+    _img_install_tools "$img_mode"
+
+    # --- Tính dung lượng trước ---
+    local size_before
+    size_before=$(du -sh "$target" 2>/dev/null | awk '{print $1}')
+
+    local jpg_count=0 png_count=0 webp_count=0
+
+    # --- Mode 1 hoặc 3: Nén JPG + PNG ---
+    if [[ "$img_mode" == "1" || "$img_mode" == "3" ]]; then
+        if command -v jpegoptim &>/dev/null; then
+            log_info "Đang nén JPG... (quality=${jpg_quality}%)"
+            jpg_count=$(find "$target" \( -name "*.jpg" -o -name "*.jpeg" \) | wc -l)
+            find "$target" \( -name "*.jpg" -o -name "*.jpeg" \) \
+                -exec jpegoptim --strip-all --all-progressive --max="$jpg_quality" {} \; 2>/dev/null
+            echo -e "  ✓ Đã xử lý ${GREEN}${jpg_count}${NC} file JPG/JPEG"
+        else
+            log_warn "jpegoptim không khả dụng, bỏ qua JPG."
+        fi
+
+        if command -v optipng &>/dev/null; then
+            log_info "Đang nén PNG... (lossless)"
+            png_count=$(find "$target" -name "*.png" | wc -l)
+            find "$target" -name "*.png" -exec optipng -o5 -quiet {} \; 2>/dev/null
+            echo -e "  ✓ Đã xử lý ${GREEN}${png_count}${NC} file PNG"
+        else
+            log_warn "optipng không khả dụng, bỏ qua PNG."
+        fi
+    fi
+
+    # --- Mode 2 hoặc 3: Convert sang WebP ---
+    if [[ "$img_mode" == "2" || "$img_mode" == "3" ]]; then
+        if command -v cwebp &>/dev/null; then
+            log_info "Đang convert sang WebP... (quality=${webp_quality}%)"
+            while IFS= read -r -d '' img; do
+                local out="${img%.*}.webp"
+                if [[ ! -f "$out" ]]; then
+                    cwebp -quiet -q "$webp_quality" "$img" -o "$out" 2>/dev/null && webp_count=$((webp_count + 1))
+                fi
+            done < <(find "$target" \( -name "*.jpg" -o -name "*.jpeg" -o -name "*.png" \) -print0 2>/dev/null)
+            echo -e "  ✓ Đã tạo ${GREEN}${webp_count}${NC} file WebP mới"
+            echo -e "  ${YELLOW}💡 File WebP được đặt cạnh ảnh gốc (.jpg → .webp)${NC}"
+            echo -e "  ${YELLOW}   Nginx cần cấu hình thêm để phục vụ WebP tự động.${NC}"
+        else
+            log_warn "cwebp không khả dụng, bỏ qua WebP conversion."
+        fi
+    fi
+
+    # --- Thống kê ---
+    local size_after
+    size_after=$(du -sh "$target" 2>/dev/null | awk '{print $1}')
+    echo ""
+    echo -e "${BLUE}=================================================${NC}"
+    echo -e "${GREEN}  ✅ Hoàn tất!${NC}"
+    echo -e "  Dung lượng trước : ${YELLOW}${size_before}${NC}"
+    echo -e "  Dung lượng sau   : ${GREEN}${size_after}${NC}"
+    echo -e "${BLUE}=================================================${NC}"
     pause
+}
+
+_img_install_tools() {
+    local mode=$1
+    # Detect package manager
+    if command -v apt-get &>/dev/null; then
+        local PM="apt-get install -y"
+        export DEBIAN_FRONTEND=noninteractive
+    elif command -v yum &>/dev/null; then
+        local PM="yum install -y"
+    elif command -v dnf &>/dev/null; then
+        local PM="dnf install -y"
+    else
+        log_warn "Không xác định được package manager."
+        return 1
+    fi
+
+    if [[ "$mode" == "1" || "$mode" == "3" ]]; then
+        command -v jpegoptim &>/dev/null || $PM jpegoptim &>/dev/null
+        command -v optipng   &>/dev/null || $PM optipng   &>/dev/null
+    fi
+
+    if [[ "$mode" == "2" || "$mode" == "3" ]]; then
+        command -v cwebp &>/dev/null || $PM webp &>/dev/null
+        # RHEL fallback
+        command -v cwebp &>/dev/null || $PM libwebp-tools &>/dev/null
+    fi
 }
 
 update_system() {
