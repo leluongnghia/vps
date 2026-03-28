@@ -27,6 +27,31 @@ install_lemp_menu() {
                 log_info "Tự động cài đặt phpMyAdmin..."
                 source "$ROOT_DIR/modules/phpmyadmin.sh"
                 install_phpmyadmin
+            elif [[ -f "modules/phpmyadmin.sh" ]]; then
+                log_info "Tự động cài đặt phpMyAdmin..."
+                source "modules/phpmyadmin.sh"
+                install_phpmyadmin
+            fi
+            
+            # Hỗ trợ lựa chọn Object Cache (Valkey / Redis)
+            echo ""
+            echo -e "${YELLOW}Bạn có muốn cài đặt Memory Cache (Valkey/Redis) cho Server không?${NC}"
+            echo -e "1. Valkey (Khuyên dùng - Nhanh hơn, thay thế Redis 100%)"
+            echo -e "2. Redis (Truyền thống)"
+            echo -e "0. Bỏ qua"
+            read -p "Chọn [0-2]: " cache_choice
+            
+            if [[ "$cache_choice" == "1" || "$cache_choice" == "2" ]]; then
+                if [[ -f "$ROOT_DIR/modules/wordpress_performance.sh" ]]; then
+                    source "$ROOT_DIR/modules/wordpress_performance.sh"
+                else
+                    source "modules/wordpress_performance.sh" 2>/dev/null
+                fi
+                if [[ "$cache_choice" == "1" ]]; then
+                     install_valkey
+                else
+                     install_redis
+                fi
             fi
             
             pause
@@ -62,8 +87,8 @@ install_nginx() {
         log_warn "Nginx is already installed."
     else
         log_info "Installing Nginx..."
-        apt-get update
-        apt-get install -y nginx
+        pkg_update
+        pkg_install nginx
         
         # Increase global upload limit right after install
         if [[ -f /etc/nginx/nginx.conf ]]; then
@@ -81,7 +106,7 @@ install_mariadb() {
         log_warn "MariaDB is already installed."
     else
         log_info "Installing MariaDB..."
-        apt-get install -y mariadb-server
+        pkg_install mariadb-server
         systemctl enable mariadb
         systemctl start mariadb
         
@@ -105,10 +130,17 @@ install_mariadb() {
 }
 
 install_php() {
-    log_info "Adding PHP repository (ondrej/php)..."
-    apt-get install -y software-properties-common >/dev/null 2>&1
-    add-apt-repository -y ppa:ondrej/php >/dev/null 2>&1
-    apt-get update >/dev/null 2>&1
+    if [[ "$OS_FAMILY" == "rhel" ]]; then
+        log_info "Adding PHP repository (Remi/EPEL)..."
+        pkg_install epel-release dnf-utils >/dev/null 2>&1
+        dnf install -y https://rpms.remirepo.net/enterprise/remi-release-9.rpm >/dev/null 2>&1
+        dnf module reset php -y >/dev/null 2>&1
+    else
+        log_info "Adding PHP repository (ondrej/php)..."
+        pkg_install software-properties-common >/dev/null 2>&1
+        add-apt-repository -y ppa:ondrej/php >/dev/null 2>&1
+        pkg_update >/dev/null 2>&1
+    fi
 
     local primary_ver="8.3"
     
@@ -144,25 +176,52 @@ install_php() {
 _install_single_php() {
     local ver=$1
     log_info "Installing PHP $ver..."
-    apt-get install -y php$ver php$ver-fpm php$ver-mysql php$ver-common php$ver-cli \
-        php$ver-curl php$ver-xml php$ver-mbstring php$ver-zip php$ver-bcmath \
-        php$ver-intl php$ver-gd php$ver-imagick
+    if [[ "$OS_FAMILY" == "rhel" ]]; then
+        dnf module enable php:remi-$ver -y >/dev/null 2>&1
+        pkg_install php-fpm php-mysqlnd php-common php-cli \
+            php-curl php-xml php-mbstring php-zip php-bcmath \
+            php-intl php-gd php-pecl-imagick
 
-    # Configure PHP Upload Limits
-    local php_ini="/etc/php/$ver/fpm/php.ini"
-    if [[ -f "$php_ini" ]]; then
-        sed -i -E "s/^[; ]*upload_max_filesize.*/upload_max_filesize = 128M/" "$php_ini"
-        sed -i -E "s/^[; ]*post_max_size.*/post_max_size = 128M/" "$php_ini"
-        sed -i -E "s/^[; ]*memory_limit.*/memory_limit = 256M/" "$php_ini"
-        sed -i -E "s/^[; ]*max_execution_time.*/max_execution_time = 300/" "$php_ini"
-        sed -i -E "s/^[; ]*max_input_vars.*/max_input_vars = 3000/" "$php_ini"
+        local php_ini="/etc/php.ini"
+        if [[ -f "$php_ini" ]]; then
+            sed -i -E "s/^[; ]*upload_max_filesize.*/upload_max_filesize = 128M/" "$php_ini"
+            sed -i -E "s/^[; ]*post_max_size.*/post_max_size = 128M/" "$php_ini"
+            sed -i -E "s/^[; ]*memory_limit.*/memory_limit = 256M/" "$php_ini"
+            sed -i -E "s/^[; ]*max_execution_time.*/max_execution_time = 300/" "$php_ini"
+            sed -i -E "s/^[; ]*max_input_vars.*/max_input_vars = 3000/" "$php_ini"
+        fi
+
+        local pool_conf="/etc/php-fpm.d/www.conf"
+        if [[ -f "$pool_conf" ]]; then
+            sed -i 's/^user = apache/user = nginx/' "$pool_conf"
+            sed -i 's/^group = apache/group = nginx/' "$pool_conf"
+            sed -i 's/^listen.owner = nobody/listen.owner = nginx/' "$pool_conf"
+            sed -i 's/^listen.group = nobody/listen.group = nginx/' "$pool_conf"
+        fi
+
+        systemctl enable php-fpm >/dev/null 2>&1
+        systemctl start php-fpm >/dev/null 2>&1
+    else
+        pkg_install php$ver php$ver-fpm php$ver-mysql php$ver-common php$ver-cli \
+            php$ver-curl php$ver-xml php$ver-mbstring php$ver-zip php$ver-bcmath \
+            php$ver-intl php$ver-gd php$ver-imagick
+
+        # Configure PHP Upload Limits
+        local php_ini="/etc/php/$ver/fpm/php.ini"
+        if [[ -f "$php_ini" ]]; then
+            sed -i -E "s/^[; ]*upload_max_filesize.*/upload_max_filesize = 128M/" "$php_ini"
+            sed -i -E "s/^[; ]*post_max_size.*/post_max_size = 128M/" "$php_ini"
+            sed -i -E "s/^[; ]*memory_limit.*/memory_limit = 256M/" "$php_ini"
+            sed -i -E "s/^[; ]*max_execution_time.*/max_execution_time = 300/" "$php_ini"
+            sed -i -E "s/^[; ]*max_input_vars.*/max_input_vars = 3000/" "$php_ini"
+        fi
+
+        systemctl enable php$ver-fpm >/dev/null 2>&1
+        systemctl start php$ver-fpm >/dev/null 2>&1
+
+        # Verify & auto-fix DOM/XML symlinks cho cả FPM và CLI
+        _fix_php_ext_symlinks "$ver"
     fi
-
-    systemctl enable php$ver-fpm >/dev/null 2>&1
-    systemctl start php$ver-fpm >/dev/null 2>&1
-
-    # Verify & auto-fix DOM/XML symlinks cho cả FPM và CLI
-    _fix_php_ext_symlinks "$ver"
 
     log_info "PHP $ver installed successfully."
 }
@@ -244,7 +303,7 @@ fix_php_extensions() {
         # Kiểm tra php-xml đã cài chưa, nếu chưa thì cài
         if [[ ! -f "/etc/php/$ver/mods-available/dom.ini" ]]; then
             log_info "PHP $ver: php${ver}-xml chưa được cài. Đang cài..."
-            apt-get install -y php${ver}-xml >/dev/null 2>&1 && \
+            pkg_install php${ver}-xml >/dev/null 2>&1 && \
                 log_info "PHP $ver: Đã cài php${ver}-xml thành công." || \
                 log_warn "PHP $ver: Không thể cài php${ver}-xml (version không hỗ trợ?)"
         else
@@ -254,7 +313,7 @@ fix_php_extensions() {
         # Kiểm tra php-mbstring đã cài chưa, nếu chưa thì cài
         if [[ ! -f "/etc/php/$ver/mods-available/mbstring.ini" ]]; then
             log_info "PHP $ver: php${ver}-mbstring chưa được cài. Đang cài..."
-            apt-get install -y php${ver}-mbstring >/dev/null 2>&1 && \
+            pkg_install php${ver}-mbstring >/dev/null 2>&1 && \
                 log_info "PHP $ver: Đã cài php${ver}-mbstring thành công." || \
                 log_warn "PHP $ver: Không thể cài php${ver}-mbstring (version không hỗ trợ?)"
         else

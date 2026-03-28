@@ -35,8 +35,8 @@ check_os() {
         exit 1
     fi
 
-    if [[ "$ID" != "ubuntu" ]] && [[ "$ID" != "debian" ]]; then
-        echo -e "${YELLOW}Warning: This script is optimized for Ubuntu/Debian.${NC}"
+    if [[ "$ID" != "ubuntu" ]] && [[ "$ID" != "debian" ]] && [[ "$ID" != "almalinux" ]] && [[ "$ID" != "rocky" ]] && [[ "$ID" != "rhel" ]] && [[ "$ID" != "centos" ]]; then
+        echo -e "${YELLOW}Warning: This script is optimized for Ubuntu/Debian and AlmaLinux/RHEL.${NC}"
         echo -e "${YELLOW}Detected: $OS $VER${NC}"
         read -p "Press Enter to continue anyway or Ctrl+C to cancel..."
     fi
@@ -47,8 +47,12 @@ install_dependencies() {
     echo -e "${GREEN}Checking dependencies...${NC}"
     if ! command -v git &> /dev/null || ! command -v curl &> /dev/null; then
         echo -e "${YELLOW}Installing git, curl, wget...${NC}"
-        apt-get update -qq
-        apt-get install -y curl wget git unzip tar socat cron lsb-release
+        if [[ -f /etc/redhat-release ]]; then
+            dnf install -y curl wget git unzip tar socat cronie
+        else
+            apt-get update -qq
+            apt-get install -y curl wget git unzip tar socat cron lsb-release
+        fi
     fi
 }
 
@@ -140,44 +144,56 @@ update_self() {
 auto_install_stack() {
     clear
     echo -e "${YELLOW}=================================================${NC}"
-    echo -e "${GREEN}   AUTO INSTALL: Nginx + MariaDB + PHP 8.1 + Swap${NC}"
+    echo -e "${GREEN}   AUTO INSTALL: Nginx + MariaDB + PHP + Swap + Cache${NC}"
     echo -e "${YELLOW}=================================================${NC}"
-    echo -e "This will install the full LEMP stack, security basics, and swap."
-    read -p "Continue? [y/N]: " confirm
-    if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
-        return
-    fi
+    echo -e "Hệ thống sẽ cài đặt toàn bộ Stack 2026 tự động:"
+    echo -e "- RAM ảo: Swap 2GB"
+    echo -e "- Database: MariaDB"
+    echo -e "- Web Server: Nginx"
+    echo -e "- Core: PHP 8.4"
+    echo -e "- Caching: Valkey (Thay thế Redis)"
+    echo -e "- Tường lửa: Firewalld/UFW + Fail2ban"
+    echo -e "- Quản trị cơ sở dữ liệu: phpMyAdmin"
+    echo -e ""
+    read -p "Chạy Cài đặt Tự động ngay? [Y/n]: " opt_lemp
+    if [[ "$opt_lemp" == "y" || "$opt_lemp" == "Y" || -z "$opt_lemp" ]]; then
+        echo -e "${BLUE}[1/6] Đang thiết lập Swap...${NC}"
+        if [[ ! -f /swapfile ]]; then
+            source modules/swap.sh
+            create_swap 2048 "auto"
+        else
+            echo -e "${YELLOW}Swap đã tồn tại. Bỏ qua.${NC}"
+        fi
 
-    # 1. Swap
-    echo -e "${BLUE}[1/4] Setting up Swap...${NC}"
-    if [[ ! -f /swapfile ]]; then
-        source modules/swap.sh
-        create_swap 2048 "auto"
+        echo -e "${BLUE}[2/6] Đang cài đặt Nginx & MariaDB...${NC}"
+        source modules/lemp.sh
+        install_nginx
+        install_mariadb
+        
+        echo -e "${BLUE}[3/6] Đang cài đặt PHP 8.4...${NC}"
+        install_php "8.4"
+
+        if [[ -f "modules/phpmyadmin.sh" ]]; then
+             echo -e "${BLUE}[4/6] Đang cài đặt phpMyAdmin...${NC}"
+             source modules/phpmyadmin.sh
+             install_phpmyadmin
+        fi
+
+        echo -e "${BLUE}[5/6] Đang cài đặt Valkey (Memory Cache)...${NC}"
+        source modules/wordpress_performance.sh 2>/dev/null
+        install_valkey
+
+        echo -e "${BLUE}[6/6] Đang cấu hình Firewall...${NC}"
+        source modules/security.sh
+        setup_firewall "auto"
+        
+        echo -e "${GREEN}=================================================${NC}"
+        echo -e "${GREEN}Quá trình khởi tạo Server đã hoàn tất xuất sắc!${NC}"
     else
-        echo -e "${YELLOW}Swap already exists. Skipping.${NC}"
+        echo -e "${YELLOW}Đã huỷ Auto-Install.${NC}"
     fi
-
-    # 2. LEMP
-    echo -e "${BLUE}[2/4] Installing LEMP Stack...${NC}"
-    source modules/lemp.sh
-    install_nginx
-    install_mariadb
-    install_php "8.1"
-
-    # Auto Install phpMyAdmin
-    if [[ -f "modules/phpmyadmin.sh" ]]; then
-         echo -e "${BLUE}[2.5/4] Installing phpMyAdmin...${NC}"
-         source modules/phpmyadmin.sh
-         install_phpmyadmin
-    fi
-
-    # 3. Security
-    echo -e "${BLUE}[3/4] Configuring Security...${NC}"
-    source modules/security.sh
-    setup_firewall "auto"
     
-    echo -e "${GREEN}Installation Complete! You can now add websites.${NC}"
-    read -p "Press Enter to go to Main Menu..."
+    read -p "Nhấn Enter để về Menu chính..."
 }
 
 # Main startup logic
@@ -214,10 +230,11 @@ main() {
         # Check if installed to skip auto-install prompt
         if ! command -v nginx &> /dev/null || ! command -v php &> /dev/null; then
             echo -e "${BLUE}=================================================${NC}"
-            echo -e "Would you like to auto-install the recommended stack?"
-            echo -e "(Nginx, MariaDB, PHP 8.1, Swap 2GB, Firewall)"
-            read -p "Run Auto-Install? [y/N]: " auto
-            if [[ "$auto" == "y" || "$auto" == "Y" ]]; then
+            echo -e "Đây là lần đầu tiên chạy VPS Manager."
+            echo -e "Bạn có muốn chạy Auto-Install toàn bộ hệ thống LEMP không?"
+            echo -e "(Bao gồm: Nginx, MariaDB, PHP 8.1/8.2/8.3 tự động nhận diện, Valkey Cache, Swap 2GB, Firewall)"
+            read -p "Chạy Auto-Install ngay? [Y/n]: " auto
+            if [[ "$auto" == "y" || "$auto" == "Y" || -z "$auto" ]]; then
                 auto_install_stack
             fi
         fi

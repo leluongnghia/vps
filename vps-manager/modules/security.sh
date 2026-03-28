@@ -7,7 +7,7 @@ security_menu() {
     echo -e "${BLUE}=================================================${NC}"
     echo -e "${GREEN}          Bảo mật & Tường lửa${NC}"
     echo -e "${BLUE}=================================================${NC}"
-    echo -e "1. Cài đặt Tường lửa (UFW) & Fail2ban"
+    echo -e "1. Cài đặt Tường lửa (UFW / Firewalld) & Fail2ban"
     echo -e "2. Thay đổi Port SSH"
     echo -e "3. Đổi mật khẩu Root"
     echo -e "4. Đổi mật khẩu User (SFTP)"
@@ -54,24 +54,49 @@ secure_php() {
 }
 
 setup_firewall() {
-    log_info "Đang cấu hình UFW & Fail2ban..."
-    apt-get install -y ufw fail2ban
-    
-    # Configure UFW
-    ufw default deny incoming
-    ufw default allow outgoing
-    ufw allow ssh
-    ufw allow 80/tcp
-    ufw allow 443/tcp
-    
-    # Enable UFW
-    echo "y" | ufw enable
-    
-    # Configure Fail2ban
-    cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.local
-    
-    # Enable SSH protection
-    cat >> /etc/fail2ban/jail.local <<EOF
+    log_info "Đang cấu hình Firewall & Fail2ban..."
+    if [[ "$OS_FAMILY" == "rhel" ]]; then
+        pkg_install firewalld fail2ban epel-release
+        
+        systemctl enable firewalld
+        systemctl start firewalld
+        
+        firewall-cmd --permanent --add-service=ssh
+        firewall-cmd --permanent --add-service=http
+        firewall-cmd --permanent --add-service=https
+        firewall-cmd --reload
+        
+        # Configure Fail2ban
+        cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.local
+        
+        # Enable SSH protection
+        cat >> /etc/fail2ban/jail.local <<EOF
+[sshd]
+enabled = true
+port = ssh
+filter = sshd
+logpath = /var/log/secure
+maxretry = 3
+bantime = 3600
+EOF
+    else
+        pkg_install ufw fail2ban
+        
+        # Configure UFW
+        ufw default deny incoming
+        ufw default allow outgoing
+        ufw allow ssh
+        ufw allow 80/tcp
+        ufw allow 443/tcp
+        
+        # Enable UFW
+        echo "y" | ufw enable
+        
+        # Configure Fail2ban
+        cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.local
+        
+        # Enable SSH protection
+        cat >> /etc/fail2ban/jail.local <<EOF
 [sshd]
 enabled = true
 port = ssh
@@ -80,10 +105,11 @@ logpath = /var/log/auth.log
 maxretry = 3
 bantime = 3600
 EOF
+    fi
 
     systemctl restart fail2ban
     systemctl enable fail2ban
-    log_info "UFW & Fail2ban đã được cài đặt."
+    log_info "Tường lửa & Fail2ban đã được cài đặt."
     if [[ -z "$1" ]]; then pause; fi
 }
 
@@ -106,13 +132,24 @@ change_ssh_port() {
         echo "Port $new_port" >> /etc/ssh/sshd_config
     fi
     
-    # UFW: allow new port FIRST, then remove old
-    ufw allow $new_port/tcp
-    if [[ "$current_port" != "$new_port" ]] && [[ "$current_port" != "22" ]]; then
-        ufw delete allow $current_port/tcp 2>/dev/null
-    elif [[ "$current_port" == "22" ]]; then
-        ufw delete allow ssh 2>/dev/null
-        ufw delete allow 22/tcp 2>/dev/null
+    # UFW / Firewalld: allow new port FIRST, then remove old
+    if [[ "$OS_FAMILY" == "rhel" ]]; then
+        firewall-cmd --permanent --add-port=${new_port}/tcp
+        if [[ "$current_port" != "$new_port" ]] && [[ "$current_port" != "22" ]]; then
+            firewall-cmd --permanent --remove-port=${current_port}/tcp 2>/dev/null
+        elif [[ "$current_port" == "22" ]]; then
+            firewall-cmd --permanent --remove-service=ssh 2>/dev/null
+            firewall-cmd --permanent --remove-port=22/tcp 2>/dev/null
+        fi
+        firewall-cmd --reload
+    else
+        ufw allow $new_port/tcp
+        if [[ "$current_port" != "$new_port" ]] && [[ "$current_port" != "22" ]]; then
+            ufw delete allow $current_port/tcp 2>/dev/null
+        elif [[ "$current_port" == "22" ]]; then
+            ufw delete allow ssh 2>/dev/null
+            ufw delete allow 22/tcp 2>/dev/null
+        fi
     fi
     
     systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null

@@ -14,10 +14,17 @@ main_menu() {
         script_version=$(cat "$ROOT_DIR/VERSION")
     fi
 
+    # Lấy IP của VPS
+    local vps_ip=$(curl -s -m 3 ifconfig.me || curl -s -m 3 ipinfo.io/ip || hostname -I | awk '{print $1}')
+    if [[ -z "$vps_ip" ]]; then
+        vps_ip="Unknown"
+    fi
+
     while true; do
         clear
         echo -e "${BLUE}=================================================${NC}"
         echo -e "${GREEN}          VPS MANAGEMENT SCRIPT v${script_version}${NC}"
+        echo -e "${YELLOW}          Server IP: ${vps_ip}${NC}"
         echo -e "${BLUE}=================================================${NC}"
         echo -e "1. Cài đặt LEMP Stack (Nginx, MariaDB, PHP)"
         echo -e "2. Quản lý Domain & Website"

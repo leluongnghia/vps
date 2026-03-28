@@ -111,7 +111,7 @@ ssl_auto_renew_setup() {
     # ── Kiểm tra certbot ────────────────────────────────────────
     if ! command -v certbot &>/dev/null; then
         echo -e "${RED}❌ Certbot chưa được cài đặt!${NC}"
-        echo -e "${YELLOW}Cài certbot: apt-get install -y certbot python3-certbot-nginx${NC}"
+        echo -e "${YELLOW}Cài certbot: pkg_install certbot python3-certbot-nginx${NC}"
         pause; return
     fi
 
@@ -290,8 +290,8 @@ install_letsencrypt() {
     local domain=$1
     log_info "Đang cài đặt Certbot (Let's Encrypt)..."
     if ! command -v certbot &> /dev/null; then
-        apt-get update
-        apt-get install -y certbot python3-certbot-nginx
+        pkg_update
+        pkg_install certbot python3-certbot-nginx
     fi
 
     log_info "Đang yêu cầu chứng chỉ SSL cho $domain..."

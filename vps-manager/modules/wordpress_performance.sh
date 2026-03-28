@@ -411,51 +411,91 @@ _do_db_cleanup() {
     log_info "✅ $domain: Database cleaned"
 }
 
+install_valkey() {
+    log_info "Installing Valkey Server..."
+    pkg_update
+    pkg_install valkey
+    if ! command -v valkey-server &>/dev/null && ! command -v valkey &>/dev/null; then
+        log_warn "Không tìm thấy package valkey. Đang thử cài đặt valkey-server..."
+        pkg_install valkey-server
+    fi
+    systemctl enable valkey 2>/dev/null
+    systemctl start valkey 2>/dev/null
+
+    local php_ver=$(get_installed_php_version)
+    if [[ "$OS_FAMILY" == "rhel" ]]; then
+        pkg_install php-pecl-redis5
+        systemctl restart php-fpm
+    else
+        pkg_install php${php_ver}-redis
+        phpenmod -v ${php_ver} redis 2>/dev/null
+        systemctl restart php${php_ver}-fpm
+    fi
+    log_info "Valkey installed and enabled (sử dụng php-redis module)."
+}
+
+install_redis() {
+    if ! command -v redis-server &>/dev/null; then
+        log_info "Installing Redis..."
+        pkg_update
+        pkg_install redis-server
+        systemctl enable redis-server
+        systemctl start redis-server
+    fi
+    
+    local php_ver=$(get_installed_php_version)
+    if [[ "$OS_FAMILY" == "rhel" ]]; then
+        pkg_install php-pecl-redis5
+        systemctl restart php-fpm
+    else
+        pkg_install php${php_ver}-redis
+        phpenmod -v ${php_ver} redis 2>/dev/null
+        systemctl restart php${php_ver}-fpm
+    fi
+    log_info "Redis installed and enabled."
+}
+
+install_memcached() {
+    if ! command -v memcached &>/dev/null; then
+        log_info "Installing Memcached..."
+        pkg_update
+        pkg_install memcached
+        systemctl enable memcached
+        systemctl start memcached
+    fi
+    
+    local php_ver=$(get_installed_php_version)
+    if [[ "$OS_FAMILY" == "rhel" ]]; then
+        pkg_install php-pecl-memcached
+        systemctl restart php-fpm
+    else
+        pkg_install php${php_ver}-memcached
+        phpenmod -v ${php_ver} memcached 2>/dev/null
+        systemctl restart php${php_ver}-fpm
+    fi
+    log_info "Memcached installed and enabled."
+}
+
 # 7. Object Cache Setup
 setup_object_cache() {
     echo -e "${YELLOW}Select Object Cache Backend:${NC}"
-    echo "1. Redis (Recommended)"
-    echo "2. Memcached"
+    echo "1. Valkey (Khuyên dùng - Nhanh hơn 30%, tương thích 100% Redis)"
+    echo "2. Redis (Bản truyền thống)"
+    echo "3. Memcached"
     echo "0. Cancel"
     read -p "Choice: " cache_choice
     
     case $cache_choice in
         1)
-            # Install Redis
-            if ! command -v redis-server &>/dev/null; then
-                log_info "Installing Redis..."
-                apt-get update -qq
-                apt-get install -y redis-server
-                systemctl enable redis-server
-                systemctl start redis-server
-            fi
-            
-            # Install PHP Redis extension
-            local php_ver=$(get_installed_php_version)
-            apt-get install -y php${php_ver}-redis
-            phpenmod -v ${php_ver} redis
-            systemctl restart php${php_ver}-fpm
-            
-            log_info "Redis installed and enabled"
-            echo -e "${GREEN}Install 'Redis Object Cache' plugin in WordPress${NC}"
+            install_valkey
+            echo -e "${GREEN}Install 'Redis Object Cache' plugin in WordPress (Valkey is 100% compatible)${NC}"
             ;;
         2)
-            # Install Memcached
-            if ! command -v memcached &>/dev/null; then
-                log_info "Installing Memcached..."
-                apt-get update -qq
-                apt-get install -y memcached
-                systemctl enable memcached
-                systemctl start memcached
-            fi
-            
-            # Install PHP Memcached extension
-            local php_ver=$(get_installed_php_version)
-            apt-get install -y php${php_ver}-memcached
-            phpenmod -v ${php_ver} memcached
-            systemctl restart php${php_ver}-fpm
-            
-            log_info "Memcached installed and enabled"
+            install_redis
+            echo -e "${GREEN}Install 'Redis Object Cache' plugin in WordPress${NC}"
+            ;;
+        3)
+            install_memcached
             echo -e "${GREEN}Install 'Memcached Object Cache' plugin in WordPress${NC}"
             ;;
     esac
@@ -602,14 +642,25 @@ setup_image_optimization() {
 
 _install_webp_server() {
     local php_ver=$(get_installed_php_version)
-    if ! command -v cwebp >/dev/null 2>&1 || ! dpkg -l | grep -q "php${php_ver}-gd"; then
-        log_info "Đang cài đặt Server-side WebP support..."
-        export DEBIAN_FRONTEND=noninteractive
-        apt-get install -y php${php_ver}-gd webp >/dev/null 2>&1
-        systemctl restart php${php_ver}-fpm >/dev/null 2>&1
-        log_info "WebP support installed."
+    if [[ "$OS_FAMILY" == "rhel" ]]; then
+        if ! command -v cwebp >/dev/null 2>&1 || ! rpm -q php-gd >/dev/null 2>&1; then
+            log_info "Đang cài đặt Server-side WebP support..."
+            pkg_install libwebp php-gd >/dev/null 2>&1
+            systemctl restart php-fpm >/dev/null 2>&1
+            log_info "WebP support installed."
+        else
+            log_info "Server đã hỗ trợ WebP."
+        fi
     else
-        log_info "Server đã hỗ trợ WebP."
+        if ! command -v cwebp >/dev/null 2>&1 || ! dpkg -l | grep -q "php${php_ver}-gd"; then
+            log_info "Đang cài đặt Server-side WebP support..."
+            export DEBIAN_FRONTEND=noninteractive
+            pkg_install php${php_ver}-gd webp >/dev/null 2>&1
+            systemctl restart php${php_ver}-fpm >/dev/null 2>&1
+            log_info "WebP support installed."
+        else
+            log_info "Server đã hỗ trợ WebP."
+        fi
     fi
 }
 
@@ -699,16 +750,20 @@ enable_http2_brotli() {
         read -p "Chọn [1/2]: " bc
 
         if [[ "$bc" == "1" ]]; then
-            apt-get install -y libnginx-mod-http-brotli 2>/dev/null
-            # Test again
-            echo "brotli on;" > /etc/nginx/conf.d/brotli_test_temp.conf
-            if nginx -t &>/dev/null; then
-                brotli_ok=1
-                log_info "✅ Brotli module đã cài và hoạt động"
+            if [[ "$OS_FAMILY" == "rhel" ]]; then
+                log_warn "Module Brotli trên AlmaLinux cần compile hoặc repo bên thứ 3. Tạm thời bỏ qua tự động."
             else
-                log_warn "Cài xong nhưng vẫn không chạy được. Dùng Gzip."
+                pkg_install libnginx-mod-http-brotli 2>/dev/null
+                # Test again
+                echo "brotli on;" > /etc/nginx/conf.d/brotli_test_temp.conf
+                if nginx -t &>/dev/null; then
+                    brotli_ok=1
+                    log_info "✅ Brotli module đã cài và hoạt động"
+                else
+                    log_warn "Cài xong nhưng vẫn không chạy được. Dùng Gzip."
+                fi
+                rm -f /etc/nginx/conf.d/brotli_test_temp.conf
             fi
-            rm -f /etc/nginx/conf.d/brotli_test_temp.conf
         fi
     fi
 

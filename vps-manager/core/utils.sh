@@ -59,9 +59,53 @@ log_error() {
     log "ERROR" "$1" "$RED"
 }
 
+# OS Detection
+detect_os() {
+    if [[ -f /etc/os-release ]]; then
+        . /etc/os-release
+        export OS_ID=$ID
+        export OS_VER=$VERSION_ID
+    else
+        export OS_ID="unknown"
+    fi
+
+    if [[ "$OS_ID" == "ubuntu" ]] || [[ "$OS_ID" == "debian" ]]; then
+        export OS_FAMILY="debian"
+        export PKG_MGR="apt-get"
+    elif [[ "$OS_ID" == "almalinux" ]] || [[ "$OS_ID" == "rocky" ]] || [[ "$OS_ID" == "rhel" ]] || [[ "$OS_ID" == "centos" ]]; then
+        export OS_FAMILY="rhel"
+        export PKG_MGR="dnf"
+    else
+        export OS_FAMILY="unknown"
+    fi
+}
+# Run OS detection immediately
+detect_os
+
+# Wrapper for package installation
+pkg_install() {
+    if [[ "$OS_FAMILY" == "debian" ]]; then
+        DEBIAN_FRONTEND=noninteractive apt-get install -y "$@"
+    elif [[ "$OS_FAMILY" == "rhel" ]]; then
+        dnf install -y "$@"
+    fi
+}
+
+pkg_update() {
+    if [[ "$OS_FAMILY" == "debian" ]]; then
+        apt-get update -qq
+    elif [[ "$OS_FAMILY" == "rhel" ]]; then
+        dnf makecache
+    fi
+}
+
 # Check if a package is installed
 is_installed() {
-    dpkg -s "$1" &> /dev/null
+    if [[ "$OS_FAMILY" == "debian" ]]; then
+        dpkg -s "$1" &> /dev/null
+    elif [[ "$OS_FAMILY" == "rhel" ]]; then
+        rpm -q "$1" &> /dev/null
+    fi
 }
 
 # Pause function
