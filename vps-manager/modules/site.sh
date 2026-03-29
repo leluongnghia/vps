@@ -162,13 +162,19 @@ EOF
             else
                 echo -e "${CYAN}Nhập URL repo GitHub của ZaloCRM:${NC}"
                 echo -e "  (Mặc định: https://github.com/leluongnghia/ZaloCRM-Custom.git)"
-                read -p "URL: " repo_url
+                echo -e "  ${YELLOW}Lưu ý: Repo phải là Public. Nếu Private, dùng: https://TOKEN@github.com/user/repo.git${NC}"
+                read -p "URL (Enter = dùng mặc định): " repo_url
                 if [[ -z "$repo_url" ]]; then
                     repo_url="https://github.com/leluongnghia/ZaloCRM-Custom.git"
                 fi
                 log_info "Đang clone ZaloCRM vào $app_dir ..."
-                # Clone vào thư mục đã có sẵn (vps-manager đã tạo)
+                # Clone vào thư mục tạm rồi copy sang (vps-manager đã tạo $app_dir sẵn)
                 git clone "$repo_url" "$app_dir/tmp_clone"
+                if [[ $? -ne 0 ]]; then
+                    log_error "Clone thất bại! Kiểm tra URL hoặc quyền truy cập repo."
+                    rm -rf "$app_dir/tmp_clone"
+                    pause; return
+                fi
                 cp -r "$app_dir/tmp_clone/." "$app_dir/"
                 rm -rf "$app_dir/tmp_clone"
             fi
