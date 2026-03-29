@@ -162,7 +162,6 @@ EOF
             else
                 echo -e "${CYAN}Nhập URL repo GitHub của ZaloCRM:${NC}"
                 echo -e "  (Mặc định: https://github.com/leluongnghia/ZaloCRM-Custom.git)"
-                echo -e "  ${YELLOW}Lưu ý: Repo phải là Public. Nếu Private, dùng: https://TOKEN@github.com/user/repo.git${NC}"
                 read -p "URL (Enter = dùng mặc định): " repo_url
                 if [[ -z "$repo_url" ]]; then
                     repo_url="https://github.com/leluongnghia/ZaloCRM-Custom.git"
