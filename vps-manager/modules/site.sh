@@ -142,6 +142,9 @@ EOF
         read -p "Chọn [1-2]: " is_zalocrm
 
         if [[ "$is_zalocrm" == "1" ]]; then
+            # Dùng luôn thư mục vps-manager vừa tạo — nhất quán, không hỏi thêm
+            local app_dir="/var/www/$domain"
+
             # ── Bước A: Cài Docker nếu chưa có ──────────────────
             if ! command -v docker &> /dev/null; then
                 log_info "Docker chưa có. Đang cài đặt tự động..."
@@ -152,13 +155,9 @@ EOF
                 log_info "Docker đã có sẵn: $(docker --version)"
             fi
 
-            # ── Bước B: Clone ZaloCRM ─────────────────────────
-            echo -e "\n${CYAN}Nhập đường dẫn cài đặt ZaloCRM (Mặc định: /opt/zalocrm):${NC}"
-            read -p "Đường dẫn: " app_dir
-            if [[ -z "$app_dir" ]]; then app_dir="/opt/zalocrm"; fi
-
+            # ── Bước B: Clone hoặc cập nhật ZaloCRM ──────────
             if [[ -d "$app_dir/.git" ]]; then
-                log_info "Thư mục đã tồn tại. Đang cập nhật mã nguồn..."
+                log_info "Mã nguồn đã có. Đang cập nhật (git pull)..."
                 git -C "$app_dir" pull
             else
                 echo -e "${CYAN}Nhập URL repo GitHub của ZaloCRM:${NC}"
@@ -167,21 +166,21 @@ EOF
                 if [[ -z "$repo_url" ]]; then
                     repo_url="https://github.com/leluongnghia/ZaloCRM-Custom.git"
                 fi
-                log_info "Đang clone ZaloCRM về $app_dir ..."
-                git clone "$repo_url" "$app_dir"
+                log_info "Đang clone ZaloCRM vào $app_dir ..."
+                # Clone vào thư mục đã có sẵn (vps-manager đã tạo)
+                git clone "$repo_url" "$app_dir/tmp_clone"
+                cp -r "$app_dir/tmp_clone/." "$app_dir/"
+                rm -rf "$app_dir/tmp_clone"
             fi
 
-            # ── Bước C: Tạo file .env ─────────────────────────
+            # ── Bước C: Tạo file .env tự động ────────────────
             if [[ ! -f "$app_dir/.env" ]]; then
                 log_info "Đang tạo file .env ..."
                 cp "$app_dir/.env.example" "$app_dir/.env"
 
-                local db_pass
-                db_pass=$(openssl rand -hex 16)
-                local jwt_secret
-                jwt_secret=$(openssl rand -hex 32)
-                local enc_key
-                enc_key=$(openssl rand -hex 16)
+                local db_pass; db_pass=$(openssl rand -hex 16)
+                local jwt_secret; jwt_secret=$(openssl rand -hex 32)
+                local enc_key; enc_key=$(openssl rand -hex 16)
 
                 sed -i "s|APP_URL=.*|APP_URL=https://$domain|" "$app_dir/.env"
                 sed -i "s|DB_PASSWORD=.*|DB_PASSWORD=$db_pass|" "$app_dir/.env"
@@ -189,25 +188,24 @@ EOF
                 sed -i "s|JWT_SECRET=.*|JWT_SECRET=$jwt_secret|" "$app_dir/.env"
                 sed -i "s|ENCRYPTION_KEY=.*|ENCRYPTION_KEY=$enc_key|" "$app_dir/.env"
 
-                log_info "File .env đã được tạo tự động."
+                log_info "File .env đã được tạo và cấu hình tự động."
             else
-                # Cập nhật APP_URL theo domain mới
                 sed -i "s|APP_URL=.*|APP_URL=https://$domain|" "$app_dir/.env"
                 log_info "Đã cập nhật APP_URL=https://$domain trong .env"
             fi
 
             # ── Bước D: Khởi chạy Docker Compose ─────────────
-            log_info "Đang khởi chạy ZaloCRM (docker compose up)..."
+            log_info "Đang khởi chạy ZaloCRM (docker compose up --build)..."
             docker compose -f "$app_dir/docker-compose.yml" up -d --build
 
-            # Lưu đường dẫn vào sites_data để dùng sau (update/restart)
+            # Lưu vào sites_data để quản lý sau (restart/update)
             local data_file="$HOME/.vps-manager/sites_data.conf"
             mkdir -p "$(dirname "$data_file")"
             sed -i "/^docker:$domain|/d" "$data_file" 2>/dev/null || true
             echo "docker:$domain|$app_dir|$docker_port" >> "$data_file"
 
             echo -e "\n${GREEN}✅ ZaloCRM đang chạy tại cổng $docker_port${NC}"
-            echo -e "${YELLOW}Mã nguồn: $app_dir${NC}"
+            echo -e "${CYAN}   Thư mục: $app_dir${NC}"
         fi
 
         # ── Tạo Nginx Proxy (luôn chạy dù ZaloCRM hay không) ─
