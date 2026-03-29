@@ -28,9 +28,9 @@ manage_sites_menu() {
     case $choice in
         1) list_sites ;;
         2) 
-            echo -e "1. WordPress\n2. PHP Thuần\n3. Node.js Proxy"
-            read -p "Chọn loại [1-3]: " t
-            if [[ "$t" == "1" ]]; then add_new_site "wordpress"; elif [[ "$t" == "2" ]]; then add_new_site "php"; elif [[ "$t" == "3" ]]; then add_new_site "nodejs"; else echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause; manage_sites_menu; fi
+            echo -e "1. WordPress\n2. PHP Thuần\n3. Node.js (Host + PM2)\n4. Docker Proxy"
+            read -p "Chọn loại [1-4]: " t
+            if [[ "$t" == "1" ]]; then add_new_site "wordpress"; elif [[ "$t" == "2" ]]; then add_new_site "php"; elif [[ "$t" == "3" ]]; then add_new_site "nodejs"; elif [[ "$t" == "4" ]]; then add_new_site "docker_proxy"; else echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause; manage_sites_menu; fi
             ;;
         3) delete_site ;;
         4) rename_site ;;
@@ -129,6 +129,14 @@ EOF
         echo -e "${GREEN}Đã tạo file .env tự động cho ứng dụng Node.js!${NC}"
         
         echo -e "${YELLOW}Gợi ý: Cần dùng PM2 để duy trì ứng dụng chạy ngầm (pm2 start npx --name 'app' -- tsx server.ts).${NC}"
+
+    elif [[ "$type" == "docker_proxy" ]]; then
+        # Docker Proxy — chỉ tạo Nginx config trỏ vào port của container, không cài thêm gì
+        read -p "Nhập Port Docker container đang chạy (Mặc định 3080): " docker_port
+        if [[ -z "$docker_port" ]]; then docker_port="3080"; fi
+        create_nginx_docker_proxy_config "$domain" "$docker_port"
+        echo -e "${GREEN}Đã tạo Nginx Reverse Proxy cho Docker container tại cổng ${docker_port}!${NC}"
+        echo -e "${YELLOW}Lưu ý: Đảm bảo Docker container đang chạy và lắng nghe trên cổng ${docker_port}.${NC}"
     else
         create_nginx_config "$domain"
     fi
@@ -177,13 +185,20 @@ create_nginx_nodejs_config() {
     local node_port=$2
     local config_file="/etc/nginx/sites-available/$domain"
     
+    # Subdomain (>1 dấu chấm) thì không thêm www.
+    local server_names="$domain"
+    if [[ $(echo "$domain" | tr -cd '.' | wc -c) -eq 1 ]]; then
+        server_names="$domain www.$domain"
+    fi
+    
     cat > "$config_file" <<EOF
 server {
     listen 80;
     listen [::]:80;
-    server_name $domain www.$domain;
+    server_name $server_names;
     
     root /var/www/$domain/public_html;
+    client_max_body_size 50M;
     
     access_log /var/log/nginx/${domain}.access.log;
     error_log /var/log/nginx/${domain}.error.log;
@@ -191,6 +206,7 @@ server {
     location / {
         proxy_pass http://127.0.0.1:$node_port;
         proxy_http_version 1.1;
+        # WebSocket / Socket.IO support
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection 'upgrade';
         proxy_set_header Host \$host;
@@ -198,6 +214,10 @@ server {
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
         proxy_cache_bypass \$http_upgrade;
+        # Timeout cho kết nối dài (chat real-time, quét QR)
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
+        proxy_connect_timeout 60s;
     }
 
     location ~ /\.ht {
@@ -210,6 +230,70 @@ EOF
     rm -f "/etc/nginx/sites-enabled/$domain"
     ln -s "$config_file" "/etc/nginx/sites-enabled/"
     nginx -t && systemctl reload nginx
+}
+
+# ─────────────────────────────────────────────────────────────
+# Docker Proxy Config — Nginx trỏ thẳng vào port của container
+# Hỗ trợ đầy đủ Socket.IO, WebSocket, Upload file lớn
+# ─────────────────────────────────────────────────────────────
+create_nginx_docker_proxy_config() {
+    local domain=$1
+    local docker_port=$2
+    local config_file="/etc/nginx/sites-available/$domain"
+
+    # Subdomain (>1 dấu chấm) thì không thêm www.
+    local server_names="$domain"
+    if [[ $(echo "$domain" | tr -cd '.' | wc -c) -eq 1 ]]; then
+        server_names="$domain www.$domain"
+    fi
+
+    cat > "$config_file" <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name $server_names;
+
+    # Cho phép upload file lớn (ảnh, file Zalo,...)
+    client_max_body_size 50M;
+
+    access_log /var/log/nginx/${domain}.access.log;
+    error_log  /var/log/nginx/${domain}.error.log;
+
+    location / {
+        proxy_pass http://127.0.0.1:$docker_port;
+        proxy_http_version 1.1;
+
+        # Hỗ trợ WebSocket / Socket.IO (chat real-time)
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection 'upgrade';
+
+        # Headers chuẩn
+        proxy_set_header Host              \$host;
+        proxy_set_header X-Real-IP         \$remote_addr;
+        proxy_set_header X-Forwarded-For   \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_cache_bypass \$http_upgrade;
+
+        # Timeout dài cho kết nối real-time / quét QR Zalo
+        proxy_read_timeout    600s;
+        proxy_send_timeout    600s;
+        proxy_connect_timeout  60s;
+    }
+
+    location ~ /\.ht {
+        deny all;
+    }
+}
+EOF
+
+    rm -f "/etc/nginx/sites-enabled/$domain"
+    ln -s "$config_file" "/etc/nginx/sites-enabled/"
+    if nginx -t; then
+        systemctl reload nginx
+        log_info "Nginx Docker Proxy cho $domain (port $docker_port) đã được tạo thành công!"
+    else
+        log_error "Cấu hình Nginx có lỗi. Kiểm tra lại bằng: nginx -t"
+    fi
 }
 
 create_nginx_config() {
