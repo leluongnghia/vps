@@ -100,19 +100,20 @@ optimize_images() {
     # --- Mode 1 hoặc 3: Nén JPG + PNG ---
     if [[ "$img_mode" == "1" || "$img_mode" == "3" ]]; then
         if command -v jpegoptim &>/dev/null; then
-            log_info "Đang nén JPG... (quality=${jpg_quality}%)"
-            jpg_count=$(find "$target" \( -name "*.jpg" -o -name "*.jpeg" \) | wc -l)
-            find "$target" \( -name "*.jpg" -o -name "*.jpeg" \) \
-                -exec jpegoptim --strip-all --all-progressive --max="$jpg_quality" {} \; 2>/dev/null
+            log_info "Đang nén JPG... (quality=${jpg_quality}%) - Chạy đa luồng, vui lòng chờ..."
+            jpg_count=$(find "$target" \( -iname "*.jpg" -o -iname "*.jpeg" \) | wc -l)
+            find "$target" \( -iname "*.jpg" -o -iname "*.jpeg" \) -print0 | \
+                xargs -0 -n 20 -P $(nproc 2>/dev/null || echo 2) jpegoptim --strip-all --all-progressive --max="$jpg_quality" 2>/dev/null
             echo -e "  ✓ Đã xử lý ${GREEN}${jpg_count}${NC} file JPG/JPEG"
         else
             log_warn "jpegoptim không khả dụng, bỏ qua JPG."
         fi
 
         if command -v optipng &>/dev/null; then
-            log_info "Đang nén PNG... (lossless)"
-            png_count=$(find "$target" -name "*.png" | wc -l)
-            find "$target" -name "*.png" -exec optipng -o5 -quiet {} \; 2>/dev/null
+            log_info "Đang nén PNG... (lossless) - Xin vui lòng chờ, tiến trình xử lý sẽ hiện bên dưới..."
+            png_count=$(find "$target" -iname "*.png" | wc -l)
+            find "$target" -iname "*.png" -print0 | \
+                xargs -0 -n 1 -P $(nproc 2>/dev/null || echo 2) optipng -o2 2>/dev/null
             echo -e "  ✓ Đã xử lý ${GREEN}${png_count}${NC} file PNG"
         else
             log_warn "optipng không khả dụng, bỏ qua PNG."
@@ -128,7 +129,7 @@ optimize_images() {
                 if [[ ! -f "$out" ]]; then
                     cwebp -quiet -q "$webp_quality" "$img" -o "$out" 2>/dev/null && webp_count=$((webp_count + 1))
                 fi
-            done < <(find "$target" \( -name "*.jpg" -o -name "*.jpeg" -o -name "*.png" \) -print0 2>/dev/null)
+            done < <(find "$target" \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" \) -print0 2>/dev/null)
             echo -e "  ✓ Đã tạo ${GREEN}${webp_count}${NC} file WebP mới"
             echo -e "  ${YELLOW}💡 File WebP được đặt cạnh ảnh gốc (.jpg → .webp)${NC}"
             echo -e "  ${YELLOW}   Nginx cần cấu hình thêm để phục vụ WebP tự động.${NC}"
