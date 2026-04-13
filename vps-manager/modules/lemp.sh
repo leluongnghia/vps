@@ -114,12 +114,15 @@ install_mariadb() {
         local root_pass
         root_pass=$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9' | head -c 24)
         
-        mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '${root_pass}';"
-        mysql -e "DELETE FROM mysql.user WHERE User='';"
-        mysql -e "DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');"
-        mysql -e "DROP DATABASE IF EXISTS test;"
-        mysql -e "DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';"
-        mysql -e "FLUSH PRIVILEGES;"
+        # Thực thi gộp 1 lần thông qua heredoc để không bị văng phiên (session) sau lệnh đổi mật khẩu đầu tiên
+        mysql <<EOF
+ALTER USER 'root'@'localhost' IDENTIFIED BY '${root_pass}';
+DELETE FROM mysql.user WHERE User='';
+DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');
+DROP DATABASE IF EXISTS test;
+DELETE FROM mysql.db WHERE Db='test' OR Db='test\_%';
+FLUSH PRIVILEGES;
+EOF
         
         # Lưu vào .my.cnf
         echo -e "[client]\nuser=root\npassword=\"${root_pass}\"" > /root/.my.cnf

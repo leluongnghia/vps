@@ -2,6 +2,9 @@
 
 # modules/backup.sh - Backup & Restore System
 
+VPS_IP=$(curl -s -m 2 http://checkip.amazonaws.com || hostname -I | awk '{print $1}')
+GDRIVE_DIR="vps backup $VPS_IP"
+
 backup_menu() {
     while true; do
         clear
@@ -117,7 +120,7 @@ for site_dir in /var/www/*; do
 
     # Backup code
     if [[ -d "\$site_dir/public_html" ]]; then
-        zip -r "\$backup_dir/code_\${timestamp}.zip" "\$site_dir/public_html" -x "*.log" -x "*.tmp" -q
+        zip -r "\$backup_dir/\${domain}_\${timestamp}.zip" "\$site_dir/public_html" -x "*.log" -x "*.tmp" -q
         echo "[\$timestamp] Code backup: \$domain OK" >> "\$LOG"
     fi
 
@@ -136,19 +139,19 @@ done
 
 # Sync to Google Drive if enabled
 if [[ "$use_gdrive" = "true" ]]; then
-    echo "[\$timestamp] Moving backups to Google Drive (gdrive:vps_backups)..." >> "\$LOG"
+    echo "[\$timestamp] Moving backups to Google Drive (gdrive:$GDRIVE_DIR)..." >> "\$LOG"
     
     # Use 'move' instead of 'sync' or 'copy'. 
     # 'move' will verify upload and THEN delete local file.
     # This satisfies "loại bỏ file khỏi VPS khi upload xong".
     # Result: VPS is empty, Cloud has files.
     
-    rclone move "\$BACKUP_ROOT" "gdrive:vps_backups" --delete-empty-src-dirs >> "\$LOG" 2>&1
+    rclone move "\$BACKUP_ROOT" "gdrive:$GDRIVE_DIR" --delete-empty-src-dirs >> "\$LOG" 2>&1
     
     # Also clean up old files ON CLOUD (retention policy applied to cloud)
     # listing files older than KEEP_DAYS on cloud and deleting them
-    rclone delete "gdrive:vps_backups" --min-age \${KEEP_DAYS}d >> "\$LOG" 2>&1
-    # rclone rmdirs "gdrive:vps_backups" --leave-root >> "\$LOG" 2>&1
+    rclone delete "gdrive:$GDRIVE_DIR" --min-age \${KEEP_DAYS}d >> "\$LOG" 2>&1
+    # rclone rmdirs "gdrive:$GDRIVE_DIR" --leave-root >> "\$LOG" 2>&1
     
     echo "[\$timestamp] Google Drive Move & Cleanup OK" >> "\$LOG"
 else
@@ -156,7 +159,7 @@ else
     for site_dir in /var/www/*; do
         domain=\$(basename "\$site_dir")
         [[ "\$domain" == "html" ]] && continue
-        find "\$BACKUP_ROOT/\$domain" -name "code_*.zip" -mtime +\$KEEP_DAYS -delete
+        find "\$BACKUP_ROOT/\$domain" -name "\${domain}_*.zip" -mtime +\$KEEP_DAYS -delete
         find "\$BACKUP_ROOT/\$domain" -name "db_*.sql.gz" -mtime +\$KEEP_DAYS -delete
     done
 fi
@@ -182,7 +185,7 @@ BACKUPSCRIPT
     log_info "Đã bật Auto Backup: $SCHEDULE_DESC"
     if [[ "$use_gdrive" = "true" ]]; then
          echo -e "  Mode: ${GREEN}Upload & Delete Local (Tiết kiệm dung lượng VPS)${NC}"
-         echo -e "  Dest: ${GREEN}Google Drive (gdrive:vps_backups)${NC}"
+         echo -e "  Dest: ${GREEN}Google Drive (gdrive:$GDRIVE_DIR)${NC}"
     else
          echo -e "  Link: ${YELLOW}Local Only (Chưa cấu hình gdrive)${NC}"
     fi
@@ -218,8 +221,8 @@ backup_all_sites() {
         echo -e "\n${CYAN}📦 Backup: $domain${NC}"
 
         if [[ -d "$site_dir/public_html" ]]; then
-            zip -r "$backup_dir/code_${timestamp}.zip" "$site_dir/public_html" -x "*.log" -q
-            echo -e "  ✅ Code: $(du -sh "$backup_dir/code_${timestamp}.zip" | cut -f1)"
+            zip -r "$backup_dir/${domain}_${timestamp}.zip" "$site_dir/public_html" -x "*.log" -q
+            echo -e "  ✅ Code: $(du -sh "$backup_dir/${domain}_${timestamp}.zip" | cut -f1)"
         fi
 
         db_name=$(echo "$domain" | tr -d '.-' | cut -c1-16)
@@ -474,8 +477,8 @@ restore_site_gdrive() {
     echo -e "Remote được chọn: ${GREEN}$remote${NC}"
 
     # List Files in domain folder
-    echo -e "\n${CYAN}File trên Cloud ($remote:vps_backups/$target_domain/):${NC}"
-    rclone lsl "$remote:vps_backups/$target_domain/" | tail -n 10
+    echo -e "\n${CYAN}File trên Cloud ($remote:$GDRIVE_DIR/$target_domain/):${NC}"
+    rclone lsl "$remote:$GDRIVE_DIR/$target_domain/" | tail -n 10
     
     echo -e "\nCopy-paste tên file cần restore:"
     read -p "File Code (.zip) [Enter để bỏ qua]: " cloud_code
@@ -492,13 +495,13 @@ restore_site_gdrive() {
     
     if [[ -n "$cloud_code" ]]; then
         log_info "Đang tải Code: $cloud_code ..."
-        rclone copy "$remote:vps_backups/$target_domain/$cloud_code" "$tmp_dir/" --progress
+        rclone copy "$remote:$GDRIVE_DIR/$target_domain/$cloud_code" "$tmp_dir/" --progress
         local_code="$tmp_dir/$cloud_code"
     fi
     
     if [[ -n "$cloud_db" ]]; then
         log_info "Đang tải DB: $cloud_db ..."
-        rclone copy "$remote:vps_backups/$target_domain/$cloud_db" "$tmp_dir/" --progress
+        rclone copy "$remote:$GDRIVE_DIR/$target_domain/$cloud_db" "$tmp_dir/" --progress
         local_db="$tmp_dir/$cloud_db"
     fi
     
@@ -560,7 +563,7 @@ backup_site_local() {
     ensure_zip_installed
     
     log_info "Backing up Code..."
-    zip -r "$backup_dir/code_$timestamp.zip" "/var/www/$domain/public_html" -x "*.log" -q
+    zip -r "$backup_dir/${domain}_$timestamp.zip" "/var/www/$domain/public_html" -x "*.log" -q
     
     db_name=$(echo "$domain" | tr -d '.-' | cut -c1-16)
     log_info "Backing up DB..."
@@ -591,7 +594,7 @@ perform_gdrive_backup() {
     echo -e "\n${CYAN}>>> Đang xử lý: $domain${NC}"
     mkdir -p "$backup_dir"
     
-    local zip_file="$backup_dir/code_$timestamp.zip"
+    local zip_file="$backup_dir/${domain}_$timestamp.zip"
     local db_file="$backup_dir/db_$timestamp.sql.gz"
     
     # 1. Backup Code
@@ -615,12 +618,12 @@ perform_gdrive_backup() {
     # Use rclone move to upload and delete source file if successful
     if [[ -f "$zip_file" ]]; then
         log_info "Đang upload Code lên Google Drive (và xóa cục bộ)..."
-        rclone move "$zip_file" "$remote:vps_backups/$domain/"
+        rclone move "$zip_file" "$remote:$GDRIVE_DIR/$domain/"
     fi
     
     if [[ -f "$db_file" ]]; then
         log_info "Đang upload DB lên Google Drive (và xóa cục bộ)..."
-        rclone move "$db_file" "$remote:vps_backups/$domain/"
+        rclone move "$db_file" "$remote:$GDRIVE_DIR/$domain/"
     fi
     
     # Cleanup empty dir if exists
@@ -763,7 +766,7 @@ restore_site_local() {
             echo -e "$k. $fname ($(du -h "$file" | cut -f1))"
             ((k++))
         fi
-    done < <(find "$backup_dir" -maxdepth 1 -name "code_*.zip" -type f | sort -r)
+    done < <(find "$backup_dir" -maxdepth 1 -name "*.zip" -type f | sort -r)
     
     read -p "Chọn file Code [1-${#code_files[@]}] (Enter để bỏ qua): " c_sel
     code_file=""
@@ -903,7 +906,7 @@ restore_site_gdrive() {
     remote=${remote:-gdrive}
     
     log_info "Files on Cloud:"
-    rclone lsl "$remote:vps_backups/$domain/" | tail -n 10
+    rclone lsl "$remote:$GDRIVE_DIR/$domain/" | tail -n 10
     
     read -p "Cloud Code filename: " cloud_code
     read -p "Cloud DB filename: " cloud_db
@@ -912,8 +915,8 @@ restore_site_gdrive() {
     mkdir -p "$tmp_dir"
     
     log_info "Downloading..."
-    rclone copy "$remote:vps_backups/$domain/$cloud_code" "$tmp_dir/"
-    rclone copy "$remote:vps_backups/$domain/$cloud_db" "$tmp_dir/"
+    rclone copy "$remote:$GDRIVE_DIR/$domain/$cloud_code" "$tmp_dir/"
+    rclone copy "$remote:$GDRIVE_DIR/$domain/$cloud_db" "$tmp_dir/"
     
     log_info "Restoring..."
     unzip -o "$tmp_dir/$cloud_code" -d "/var/www/$domain/"
@@ -955,7 +958,7 @@ manage_backups() {
                 fi
                 
                 echo -e "${YELLOW}Danh sách trên Cloud ($remote):${NC}"
-                rclone lsd "$remote:vps_backups/"
+                rclone lsd "$remote:$GDRIVE_DIR/"
                 ;;
             3)
                 echo -e "${YELLOW}--- Xóa Backup Local ---${NC}"
@@ -1000,7 +1003,7 @@ manage_backups() {
                 fi
                 
                 # List Cloud Folders
-                local folders=($(rclone lsd "$remote:vps_backups/" | awk '{print $NF}'))
+                local folders=($(rclone lsd "$remote:$GDRIVE_DIR/" | awk '{print $NF}'))
                 if [[ ${#folders[@]} -eq 0 ]]; then echo "Cloud trống."; continue; fi
                 
                 for i in "${!folders[@]}"; do echo "$((i+1)). ${folders[$i]}"; done
@@ -1014,18 +1017,18 @@ manage_backups() {
                 # Output format: size path
                 # Need to capture into array. 
                 # Simplified: just name
-                local c_files=($(rclone lsf "$remote:vps_backups/$target_folder/" --files-only))
+                local c_files=($(rclone lsf "$remote:$GDRIVE_DIR/$target_folder/" --files-only))
                 
                 for j in "${!c_files[@]}"; do echo "$((j+1)). ${c_files[$j]}"; done
                 echo "$(( ${#c_files[@]} + 1 )). Xóa HẾT thư mục này trên Cloud"
                 read -p "Chọn File để xóa: " cf_sel
                 
                 if [[ "$cf_sel" -eq "$(( ${#c_files[@]} + 1 ))" ]]; then
-                    rclone purge "$remote:vps_backups/$target_folder/"
+                    rclone purge "$remote:$GDRIVE_DIR/$target_folder/"
                     log_info "Đã xóa thư mục $target_folder trên Cloud."
                 elif [[ "$cf_sel" =~ ^[0-9]+$ ]] && [[ "$cf_sel" -le "${#c_files[@]}" ]]; then
                     local file_to_del="${c_files[$((cf_sel-1))]}"
-                    rclone deletefile "$remote:vps_backups/$target_folder/$file_to_del"
+                    rclone deletefile "$remote:$GDRIVE_DIR/$target_folder/$file_to_del"
                     log_info "Đã xóa $file_to_del trên Cloud."
                 fi
                 ;;
