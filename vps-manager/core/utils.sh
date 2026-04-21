@@ -82,6 +82,38 @@ detect_os() {
 # Run OS detection immediately
 detect_os
 
+# Web Server Detection
+# Returns: nginx | openlitespeed | none
+detect_webserver() {
+    if systemctl is-active --quiet nginx 2>/dev/null; then
+        export WEB_SERVER_TYPE="nginx"
+    elif systemctl is-active --quiet lshttpd 2>/dev/null; then
+        export WEB_SERVER_TYPE="openlitespeed"
+    elif command -v nginx &>/dev/null && nginx -v &>/dev/null 2>&1; then
+        export WEB_SERVER_TYPE="nginx"
+    elif [[ -f /usr/local/lsws/bin/lswsctrl ]]; then
+        export WEB_SERVER_TYPE="openlitespeed"
+    else
+        export WEB_SERVER_TYPE="none"
+    fi
+    echo "$WEB_SERVER_TYPE"
+}
+
+# Check if a specific web server is active
+require_webserver() {
+    local required=$1   # "nginx" or "openlitespeed"
+    detect_webserver >/dev/null
+    if [[ "$WEB_SERVER_TYPE" != "$required" ]]; then
+        log_error "Tính năng này yêu cầu $required, nhưng đang dùng: ${WEB_SERVER_TYPE:-none}"
+        pause
+        return 1
+    fi
+    return 0
+}
+
+# Run web server detection immediately
+detect_webserver >/dev/null 2>&1 || true
+
 # Wrapper for package installation
 pkg_install() {
     if [[ "$OS_FAMILY" == "debian" ]]; then

@@ -124,3 +124,70 @@ sanitize_input() {
     # Remove dangerous characters
     echo "$input" | sed 's/[;&|`$(){}]//g'
 }
+
+# Enable EPEL & PowerTools/CRB on AlmaLinux / Rocky / RHEL
+enable_alma_repos() {
+    if [[ "$OS_FAMILY" != "rhel" ]]; then return 0; fi
+
+    log_info "Bật EPEL & CRB repo cho AlmaLinux/Rocky..."
+
+    # EPEL
+    if ! rpm -q epel-release &>/dev/null; then
+        dnf install -y epel-release &>/dev/null
+    fi
+
+    # CRB (CodeReady Builder) — tên khác nhau tuỳ distro
+    if dnf repolist 2>/dev/null | grep -qi "crb"; then
+        dnf config-manager --set-enabled crb &>/dev/null
+    elif dnf repolist 2>/dev/null | grep -qi "powertools"; then
+        dnf config-manager --set-enabled powertools &>/dev/null
+    fi
+
+    dnf makecache &>/dev/null
+    log_info "EPEL & CRB đã được kích hoạt."
+}
+
+# Setup LiteSpeed LSPHP repository
+# Hỗ trợ: Ubuntu, Debian, AlmaLinux, Rocky
+setup_lsphp_repo() {
+    log_info "Đang thêm LiteSpeed LSPHP repository..."
+
+    if [[ "$OS_FAMILY" == "debian" ]]; then
+        # Official LiteSpeed apt repo for Ubuntu/Debian
+        if [[ ! -f /etc/apt/sources.list.d/litespeed.list ]]; then
+            curl -fsSL https://repo.litespeed.sh | bash &>/dev/null || {
+                # Fallback: manual add
+                wget -qO - https://rpms.litespeedtech.com/debian/enable_lst_debian_repo.sh | bash &>/dev/null
+            }
+            apt-get update -qq
+        fi
+    elif [[ "$OS_FAMILY" == "rhel" ]]; then
+        # Official LiteSpeed yum/dnf repo
+        if [[ ! -f /etc/yum.repos.d/litespeed.repo ]]; then
+            rpm -Uvh http://rpms.litespeedtech.com/centos/litespeed-repo-1.1-1.el7.noarch.rpm &>/dev/null || {
+                curl -fsSL https://repo.litespeed.sh | bash &>/dev/null
+            }
+            dnf makecache &>/dev/null
+        fi
+        enable_alma_repos
+    fi
+
+    log_info "LiteSpeed LSPHP repo đã sẵn sàng."
+}
+
+# Setup OpenLiteSpeed repository (tách riêng với LSPHP)
+setup_ols_repo() {
+    log_info "Đang thêm OpenLiteSpeed repository..."
+    if [[ "$OS_FAMILY" == "debian" ]]; then
+        if [[ ! -f /etc/apt/sources.list.d/openlitespeed.list ]]; then
+            curl -fsSL https://repo.litespeed.sh | bash &>/dev/null
+            apt-get update -qq
+        fi
+    elif [[ "$OS_FAMILY" == "rhel" ]]; then
+        if [[ ! -f /etc/yum.repos.d/openlitespeed.repo ]]; then
+            curl -fsSL https://repo.litespeed.sh | bash &>/dev/null
+            dnf makecache &>/dev/null
+        fi
+    fi
+    log_info "OpenLiteSpeed repo đã sẵn sàng."
+}

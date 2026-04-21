@@ -3,35 +3,42 @@
 # modules/security.sh - Security Configurations
 
 security_menu() {
-    clear
-    echo -e "${BLUE}=================================================${NC}"
-    echo -e "${GREEN}          Bảo mật & Tường lửa${NC}"
-    echo -e "${BLUE}=================================================${NC}"
-    echo -e "1. Cài đặt Tường lửa (UFW / Firewalld) & Fail2ban"
-    echo -e "2. Thay đổi Port SSH"
-    echo -e "3. Đổi mật khẩu Root"
-    echo -e "4. Đổi mật khẩu User (SFTP)"
-    echo -e "5. Giới hạn số lần đăng nhập SSH (MaxAuthTries)"
-    echo -e "6. Cấu hình Chống DDoS cơ bản (Nginx Rate Limit)"
-    echo -e "7. Tích hợp 7G Firewall (WAF cho Nginx)"
-    echo -e "8. Bảo mật PHP (Disable Dangerous Functions)"
-    echo -e "0. Quay lại Menu chính"
-    echo -e "${BLUE}=================================================${NC}"
-    read -p "Nhập lựa chọn [0-8]: " choice
+    while true; do
+        clear
+        echo -e "${BLUE}=================================================${NC}"
+        echo -e "${GREEN}          Bảo mật & Tường lửa${NC}"
+        echo -e "${BLUE}=================================================${NC}"
+        echo -e "1.  Cài đặt Tường lửa (UFW / Firewalld) & Fail2ban"
+        echo -e "2.  Thay đổi Port SSH"
+        echo -e "3.  Đổi mật khẩu Root"
+        echo -e "4.  Đổi mật khẩu User (SFTP)"
+        echo -e "5.  Giới hạn số lần đăng nhập SSH (MaxAuthTries)"
+        echo -e "6.  Cấu hình Chống DDoS cơ bản (Nginx Rate Limit)"
+        echo -e "7.  🛡️  7G Firewall (WAF đầy đủ - khuyên dùng)"
+        echo -e "8.  🛡️  8G Firewall (WAF nâng cao - tích hợp 7G)"
+        echo -e "9.  🌍 Chặn IP theo Quốc gia (GeoIP Block)"
+        echo -e "10. 🔒 Bảo mật PHP (Disable Dangerous Functions)"
+        echo -e "0.  Quay lại Menu chính"
+        echo -e "${BLUE}=================================================${NC}"
+        read -p "Nhập lựa chọn [0-10]: " choice
 
-    case $choice in
-        1) setup_firewall ;;
-        2) change_ssh_port ;;
-        3) change_root_pass ;;
-        4) change_user_pass ;;
-        5) set_max_auth_tries ;;
-        6) setup_nginx_dos ;;
-        7) setup_7g_firewall ;;
-        8) secure_php ;;
-        0) return ;;
-        *) echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause ;;
-    esac
+        case $choice in
+            1) setup_firewall ;;
+            2) change_ssh_port ;;
+            3) change_root_pass ;;
+            4) change_user_pass ;;
+            5) set_max_auth_tries ;;
+            6) setup_nginx_dos ;;
+            7) setup_7g_firewall ;;
+            8) setup_8g_firewall ;;
+            9) setup_geoip_block ;;
+            10) secure_php ;;
+            0) return ;;
+            *) echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause ;;
+        esac
+    done
 }
+
 
 secure_php() {
     log_info "Đang cấu hình disable_functions cho PHP..."
@@ -232,7 +239,6 @@ EOF
         log_info "Đã áp dụng Rate Limit cho toàn bộ website."
         
     elif [[ "$c" == "2" ]]; then
-        # Ensure site.sh is sourced for select_site
         source "$(dirname "${BASH_SOURCE[0]}")/site.sh"
         select_site || return
         apply_limit "$SELECTED_DOMAIN"
@@ -243,67 +249,275 @@ EOF
 }
 
 setup_7g_firewall() {
-    log_info "Đang cài đặt Basic WAF (Tường lửa ứng dụng web)..."
-    
+    log_info "Đang cài đặt 7G Firewall (WAF đầy đủ cho Nginx)..."
+
     mkdir -p /etc/nginx/snippets
-    waf_file="/etc/nginx/snippets/basic_waf.conf"
-    
-    # Create Basic WAF Rules (Common Bad Bots & Exploits)
-    cat > "$waf_file" <<EOF
-# Basic WAF Rules
-# Block SQL Injection & XSS
-location ~* "(eval\()" { deny all; }
-location ~* "(127\.0\.0\.1)" { deny all; }
-location ~* "([a-z0-9]{2000})" { deny all; }
-location ~* "(javascript:)(.*)(;)" { deny all; }
-location ~* "(base64_encode)(.*)(\()" { deny all; }
-location ~* "(GLOBALS|REQUEST)(=|\[|%)" { deny all; }
-location ~* "(<|%3C).*script.*(>|%3E)" { deny all; }
-location ~ "(\\|\.\.\.|\.\./|~|`|<|>|\|)" { deny all; }
+    local waf_file="/etc/nginx/snippets/7g.conf"
 
-# Block Sensitive Files
-location ~* "(boot\.ini|etc/passwd|self/environ)" { deny all; }
-location ~* "(thumbs?(_editor|db)?\.db|DS_Store|__MACOSX)" { deny all; }
-location ~* "(\.bak|\.config|\.sql|\.ini|\.log|\.sh|\.inc|\.swp|\.dist)$" { deny all; }
-EOF
+    # Ruleset 7G Firewall - perishablepress.com/7g-firewall/
+    cat > "$waf_file" <<'WAF_EOF'
+# 7G Firewall v1.5 - Adapted for Nginx
+# Source: perishablepress.com/7g-firewall/
 
-    echo -e "${YELLOW}Bạn có muốn áp dụng WAF cho website không?${NC}"
+# 7G:[QUERY STRING]
+set $7g_block 0;
+
+# Block malicious query strings
+if ($query_string ~* "(eval\()|(javascript:)|(base64_encode)|(GLOBALS|REQUEST)(=|\[|%)|(union.*select)|(concat.*()|(benchmark\()|(from.*information_schema)|(sleep\()|(into.*outfile)|(load_file\()|(0x[0-9a-f]{2}){10,}|(\\|\.\.\.|\.\./|~|`|<|>|\|)") {
+    set $7g_block 1;
+}
+if ($query_string ~* "(<|%3C).*script.*(>|%3E)") {
+    set $7g_block 2;
+}
+if ($query_string ~* "(boot\.ini|etc/passwd|self/environ|proc/(self|version))") {
+    set $7g_block 3;
+}
+if ($query_string ~* "([a-z0-9]{2500,})") {
+    set $7g_block 4;
+}
+if ($query_string ~* "(\%00|\%0A|\%0D|\%27|\%3C|\%3E|\%00)") {
+    set $7g_block 5;
+}
+
+# 7G:[REQUEST URI]
+if ($request_uri ~* "(eval\()|(javascript:)|(base64_encode)|(union.*select)|(concat.*()|(sleep\()|(0x[0-9a-f]{2}){10,}") {
+    set $7g_block 6;
+}
+if ($request_uri ~* "(\.php/|/xmlrpc\.php.*methodCall|wp-config\.php|etc/passwd|boot\.ini|self/environ)") {
+    set $7g_block 7;
+}
+
+# 7G:[REQUEST METHOD]
+if ($request_method !~ ^(GET|HEAD|POST|PUT|DELETE|OPTIONS)$) {
+    set $7g_block 8;
+}
+
+# 7G:[USER AGENT]
+if ($http_user_agent ~* "(bot|crawl|archiver|spider|libwww|wget|python|scan|hack|inject|sqlmap|nikto|h4x0r|masscan|ZmEu|dirbuster|nmap|curl/7\.[0-3])") {
+    set $7g_block 9;
+}
+
+# 7G:[REFERRER]
+if ($http_referer ~* "(semalt|buttons-for-website\.com|7secrets|checksem\.com|ilovevitaly)") {
+    set $7g_block 10;
+}
+
+# 7G:[BLOCK SENSITIVE FILES]
+location ~* "(\.(bak|conf|dist|fla|inc|ini|log|psd|sh|sql|swp)|~)$" {
+    deny all;
+}
+location ~* "/(wp-config\.php|php\.ini|\.htaccess|\.git|\.svn|\.env|docker-compose)" {
+    deny all;
+}
+location ~* "/(thumbs?(_editor|db)?\.db|DS_Store|__MACOSX)" {
+    deny all;
+}
+
+# 7G:[RETURN BLOCK]
+if ($7g_block) {
+    return 403;
+}
+WAF_EOF
+
+    echo -e "${YELLOW}Áp dụng 7G WAF cho website:${NC}"
     echo -e "1. Áp dụng cho TẤT CẢ website"
     echo -e "2. Chọn website cụ thể"
-    echo -e "0. Không"
+    echo -e "0. Chỉ tạo file rule (cần include tay)"
     read -p "Chọn: " c
-    
-    if [[ "$c" == "0" ]]; then return; fi
 
-    apply_waf() {
-        local domain=$1
-        local conf="/etc/nginx/sites-available/$domain"
-        if [[ -f "$conf" ]]; then
-            if ! grep -q "basic_waf.conf" "$conf"; then
-                # Insert include
-                sed -i "/server_name/a \    include /etc/nginx/snippets/basic_waf.conf;" "$conf"
-                log_info "Đã kích hoạt WAF cho $domain"
-            else
-                log_warn "$domain đã kích hoạt WAF."
-            fi
-        fi
-    }
+    [[ "$c" == "0" ]] && { log_info "File rule tại: $waf_file"; pause; return; }
 
-    if [[ "$c" == "1" ]]; then
+    _apply_nginx_snippet "7g.conf" "include /etc/nginx/snippets/7g.conf;" "$c"
+    pause
+}
+
+setup_8g_firewall() {
+    log_info "Đang cài đặt 8G Firewall (WAF nâng cao - tích hợp 7G)..."
+
+    # Đảm bảo 7G đã được cài trước
+    if [[ ! -f /etc/nginx/snippets/7g.conf ]]; then
+        log_info "Cài 7G trước..."
+        setup_7g_firewall
+    fi
+
+    mkdir -p /etc/nginx/snippets
+    local waf_file="/etc/nginx/snippets/8g.conf"
+
+    # Bổ sung 8G rules (tăng cường thêm so với 7G)
+    cat > "$waf_file" <<'WAF_EOF'
+# 8G Firewall v1.0 - Extension of 7G
+# Source: perishablepress.com/8g-firewall/
+
+clude /etc/nginx/snippets/7g.conf;
+
+set $8g_block 0;
+
+# 8G: Block additional attack patterns
+if ($query_string ~* "(\bselect\b.*\bfrom\b|\binsert\b.*\binto\b|\bupdate\b.*\bset\b|\bdelete\b.*\bfrom\b|\bdrop\b.*\btable\b)") {
+    set $8g_block 1;
+}
+if ($query_string ~* "(document\.cookie|document\.write|window\.location|parent\.frames)") {
+    set $8g_block 2;
+}
+# Block common Web shells
+if ($query_string ~* "(c99|r57|shell|passthru|phpinfo|base64_decode|str_rot13|gzuncompress)") {
+    set $8g_block 3;
+}
+# 8G: Advanced UA blocking (AI/Scraper bots)
+if ($http_user_agent ~* "(GPTBot|ChatGPT-User|CCBot|PerplexityBot|anthropic-ai|cohere-ai|ByteDance|PetalBot|AhrefsBot|SemrushBot|MJ12bot|DotBot|BLEXBot)") {
+    set $8g_block 4;
+}
+# 8G: Block XML-RPC brute force
+if ($request_uri ~* "\/xmlrpc\.php") {
+    set $8g_block 5;
+}
+
+if ($8g_block) {
+    return 403;
+}
+WAF_EOF
+
+    echo -e "${YELLOW}Áp dụng 8G WAF cho website:${NC}"
+    echo -e "1. Áp dụng cho TẤT CẢ website"
+    echo -e "2. Chọn website cụ thể"
+    echo -e "0. Chỉ tạo file rule"
+    read -p "Chọn: " c
+
+    [[ "$c" == "0" ]] && { log_info "File rule tại: $waf_file"; pause; return; }
+
+    # Bỏ 7G nếu đã có, thay bằng 8G (đã include 7G)
+    _apply_nginx_snippet "8g.conf" "include /etc/nginx/snippets/8g.conf;" "$c" "7g.conf"
+    pause
+}
+
+# Helper: Áp dụng 1 snippet vào 1 Nginx vhost cụ thể
+# $1: domain  $2: snippet_file  $3: include_line  $4: old_snippet (optional)
+_do_apply_snippet() {
+    local domain=$1
+    local snippet_file=$2
+    local include_line=$3
+    local old_snippet="${4:-}"
+    local conf="/etc/nginx/sites-available/$domain"
+    [[ ! -f "$conf" ]] && return
+
+    # Xóa snippet cũ nếu được chỉ định
+    if [[ -n "$old_snippet" ]]; then
+        sed -i "/include.*${old_snippet}/d" "$conf" 2>/dev/null
+    fi
+
+    if ! grep -q "$snippet_file" "$conf"; then
+        sed -i "/server_name/a\\    ${include_line}" "$conf"
+        log_info "Đã kích hoạt $snippet_file cho $domain"
+    else
+        log_warn "$domain đã có $snippet_file."
+    fi
+}
+
+# Helper: Áp dụng snippet vào Nginx vhost(s)
+# $1: snippet filename  $2: include directive  $3: choice (1=all,2=select)  $4: old snippet to remove (optional)
+_apply_nginx_snippet() {
+    local snippet_file="$1"
+    local include_line="$2"
+    local choice="$3"
+    local old_snippet="${4:-}"
+
+    if [[ "$choice" == "1" ]]; then
         for conf in /etc/nginx/sites-available/*; do
+            local d
             d=$(basename "$conf")
-            if [[ "$d" != "default" && "$d" != "html" ]]; then
-                apply_waf "$d"
-            fi
+            [[ "$d" == "default" || "$d" == "html" ]] && continue
+            _do_apply_snippet "$d" "$snippet_file" "$include_line" "$old_snippet"
         done
         nginx -t && systemctl reload nginx
-        log_info "Đã áp dụng WAF cho toàn bộ website."
-    elif [[ "$c" == "2" ]]; then
+        log_info "Đã áp dụng ${snippet_file} cho toàn bộ website."
+    elif [[ "$choice" == "2" ]]; then
         source "$(dirname "${BASH_SOURCE[0]}")/site.sh"
         select_site || return
-        apply_waf "$SELECTED_DOMAIN"
+        _do_apply_snippet "$SELECTED_DOMAIN" "$snippet_file" "$include_line" "$old_snippet"
         nginx -t && systemctl reload nginx
-        log_info "Đã áp dụng WAF cho $SELECTED_DOMAIN."
+        log_info "Đã áp dụng ${snippet_file} cho ${SELECTED_DOMAIN}."
     fi
+}
+
+
+setup_geoip_block() {
+    log_info "Cấu hình GeoIP Block (chặn IP theo quốc gia)..."
+
+    # Kiểm tra ngx_http_geoip2_module
+    if ! nginx -V 2>&1 | grep -q "geoip2\|geoip"; then
+        echo -e "${YELLOW}Nginx chưa có GeoIP module. Đang cài libnginx-mod-http-geoip2...${NC}"
+        if [[ "$OS_FAMILY" == "debian" ]]; then
+            DEBIAN_FRONTEND=noninteractive apt-get install -y libnginx-mod-http-geoip2 geoipupdate 2>/dev/null || {
+                DEBIAN_FRONTEND=noninteractive apt-get install -y libnginx-mod-http-geoip 2>/dev/null
+            }
+        else
+            dnf install -y nginx-mod-http-geoip2 GeoIP GeoIP-devel 2>/dev/null
+        fi
+    fi
+
+    # Cài mmdb-bin / geoipupdate để có database
+    if ! command -v geoiplookup &>/dev/null && ! command -v mmdblookup &>/dev/null; then
+        if [[ "$OS_FAMILY" == "debian" ]]; then
+            DEBIAN_FRONTEND=noninteractive apt-get install -y mmdb-bin geoip-bin 2>/dev/null
+        fi
+    fi
+
+    # Tải GeoLite2-Country database (không cần API key cho GeoLite2 cũ)
+    local geoip_dir="/etc/nginx/geoip"
+    mkdir -p "$geoip_dir"
+    if [[ ! -f "${geoip_dir}/GeoLite2-Country.mmdb" ]]; then
+        log_info "Đang tải GeoLite2 Country database..."
+        # Dùng bản mirror public của GeoLite2
+        local db_url="https://github.com/P3TERX/GeoLite.mmdb/raw/download/GeoLite2-Country.mmdb"
+        curl -fsSL -o "${geoip_dir}/GeoLite2-Country.mmdb" "$db_url" || \
+        wget -qO "${geoip_dir}/GeoLite2-Country.mmdb" "$db_url" || {
+            log_error "Không thể tải GeoLite2 database. Kiểm tra kết nối mạng."
+            pause; return
+        }
+        log_info "GeoLite2 database đã tải về: ${geoip_dir}/GeoLite2-Country.mmdb"
+    fi
+
+    # Hỏi user chọn quốc gia cần block
+    echo -e "${YELLOW}Danh sách code quốc gia cần BLOCK (ISO 3166-1 alpha-2):${NC}"
+    echo -e "  Ví dụ: CN RU KP IR KH (cách nhau bằng dấu cách)"
+    echo -e "  CN=Trung Quốc, RU=Nga, KP=Triều Tiên, IR=Iran, KH=Campuchia"
+    read -p "Nhập danh sách quốc gia block: " country_list
+    [[ -z "$country_list" ]] && { log_warn "Không có quốc gia nào được nhập."; pause; return; }
+
+    # Tạo cấu hình GeoIP
+    local geoip_conf="/etc/nginx/conf.d/geoip_block.conf"
+    {
+        echo "# GeoIP Block - Tạo bởi VPS Manager"
+        echo "geoip2 ${geoip_dir}/GeoLite2-Country.mmdb {"
+        echo "    \$geoip2_country_code country iso_code;"
+        echo "}"
+        echo ""
+        echo "map \$geoip2_country_code \$blocked_country {"
+        echo "    default 0;"
+        for code in $country_list; do
+            code=$(echo "$code" | tr '[:lower:]' '[:upper:]')
+            echo "    $code 1;"
+        done
+        echo "}"
+    } > "$geoip_conf"
+
+    # Tạo snippet để include trong server block
+    cat > /etc/nginx/snippets/geoip_block.conf <<'GEOF'
+# Block countries defined in geoip_block.conf
+if ($blocked_country) {
+    return 403 "Access Denied - Geographic restriction.";
+}
+GEOF
+
+    echo -e "${YELLOW}Áp dụng GeoIP Block cho website:${NC}"
+    echo -e "1. Áp dụng cho TẤT CẢ website"
+    echo -e "2. Chọn website cụ thể"
+    echo -e "0. Chỉ tạo config (apply tay)"
+    read -p "Chọn: " c
+
+    [[ "$c" != "0" ]] && _apply_nginx_snippet "geoip_block.conf" "include /etc/nginx/snippets/geoip_block.conf;" "$c"
+
+    nginx -t && systemctl reload nginx && log_info "\u2705 GeoIP Block \u0111\u00e3 \u0111\u01b0\u1ee3c c\u1ea5u h\u00ecnh!"
+    echo -e "${YELLOW}Qu\u1ed1c gia b\u1ecb block: ${country_list}${NC}"
     pause
 }

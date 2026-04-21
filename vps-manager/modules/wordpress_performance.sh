@@ -47,13 +47,14 @@ wp_performance_menu() {
         echo -e "${GREEN}    🚀 WordPress Performance Optimization${NC}"
         echo -e "${BLUE}=================================================${NC}"
         echo -e "${CYAN}--- ⚙️  Server-level (Toàn bộ server) ---${NC}"
-        echo -e "1. 🚀 Auto-Optimize Server (PHP + MySQL + Nginx + OPcache)"
-        echo -e "2. ⚡ PHP-FPM Tuning (Memory, Workers)"
-        echo -e "3. 💾 OPcache Optimization"
-        echo -e "4. 🗄️  MySQL/MariaDB Tuning"
-        echo -e "5. 🔥 Nginx FastCGI Micro-Caching"
-        echo -e "6. 📦 Enable Object Cache (Redis/Memcached)"
-        echo -e "7. 🌐 HTTP/2 & Brotli Compression"
+        echo -e "1.  🚀 Auto-Optimize Server (PHP + MySQL + Nginx + OPcache)"
+        echo -e "2.  ⚡ PHP-FPM Tuning (Memory, Workers)"
+        echo -e "3.  💾 OPcache Optimization"
+        echo -e "4.  🗄️  MySQL/MariaDB Tuning"
+        echo -e "5.  🔥 Nginx FastCGI Micro-Caching"
+        echo -e "6.  📦 Enable Object Cache (Redis/Memcached)"
+        echo -e "7.  🌐 HTTP/2 & Brotli Compression"
+        echo -e "13. 🎀 PHP Preload (Nạp trước PHP vào RAM)"
         echo -e ""
         echo -e "${CYAN}--- 🌐 Per-Site (Chọn từng website) ---${NC}"
         echo -e "8.  🧹 Database Cleanup & Optimization"
@@ -62,9 +63,9 @@ wp_performance_menu() {
         echo -e "11. 📊 Performance Benchmark Test"
         echo -e "12. 🔧 System Kernel Tuning (TCP BBR, File Limits)"
         echo -e ""
-        echo -e "0. Back to Main Menu"
+        echo -e "0.  Back to Main Menu"
         echo -e "${BLUE}=================================================${NC}"
-        read -p "Select [0-12]: " choice
+        read -p "Select [0-13]: " choice
 
         case $choice in
             1) auto_optimize_server ;;
@@ -79,11 +80,13 @@ wp_performance_menu() {
             10) setup_image_optimization ;;
             11) benchmark_wordpress ;;
             12) optimize_system_kernel ;;
+            13) php_preload_menu ;;
             0) return ;;
             *) echo -e "${RED}Invalid choice!${NC}"; pause ;;
         esac
     done
 }
+
 
 # 12. Optimize System Kernel (Merged from optimize.sh)
 optimize_system_kernel() {
@@ -863,8 +866,224 @@ benchmark_wordpress() {
     
     echo ""
     echo -e "${YELLOW}Recommended tools for detailed testing:${NC}"
-    echo "  • GTmetrix (https://gtmetrix.com)"
-    echo "  • Google PageSpeed Insights"
-    echo "  • WebPageTest.org"
+    echo "  \u2022 GTmetrix (https://gtmetrix.com)"
+    echo "  \u2022 Google PageSpeed Insights"
+    echo "  \u2022 WebPageTest.org"
+    pause
+}
+
+# ==============================================================================
+# 13. PHP PRELOAD
+# Nạp trước file PHP vào OPcache khi PHP-FPM khởi động
+# Yêu cầu PHP >= 7.4
+# ==============================================================================
+
+php_preload_menu() {
+    while true; do
+        clear
+        echo -e "${BLUE}=================================================${NC}"
+        echo -e "${GREEN}    🎀 PHP Preload Manager${NC}"
+        echo -e "${BLUE}=================================================${NC}"
+        echo -e "PHP Preload nạp trước file PHP vào OPcache khi kh\u1edfi đ\u1ed9ng."
+        echo -e "Gi\u1ea3m \u0111\u1ed9 tr\u1ec5 c\u1ee7a request đ\u1ea7u ti\u00ean, t\u0103ng t\u1ed1c đ\u1ed9 x\u1eed l\u00fd PHP."
+        echo -e "${YELLOW}(Y\u00eau c\u1ea7u PHP >= 7.4 v\u00e0 PHP-FPM)${NC}"
+        echo ""
+        echo -e "1. B\u1eadt PHP Preload cho site WordPress"
+        echo -e "2. T\u1eaft PHP Preload cho site"
+        echo -e "3. Xem tr\u1ea1ng th\u00e1i Preload (s\u1ed1 file đ\u00e3 n\u1ea1p)"
+        echo -e "4. Xem danh s\u00e1ch site \u0111ang d\u00f9ng Preload"
+        echo -e "0. Quay l\u1ea1i"
+        echo -e "${BLUE}=================================================${NC}"
+        read -p "Ch\u1ecdn [0-4]: " choice
+
+        case $choice in
+            1) enable_php_preload ;;
+            2) disable_php_preload ;;
+            3) show_preload_status ;;
+            4) list_preload_sites ;;
+            0) return ;;
+            *) echo -e "${RED}L\u1ef1a ch\u1ecdn kh\u00f4ng h\u1ee3p l\u1ec7!${NC}"; pause ;;
+        esac
+    done
+}
+
+enable_php_preload() {
+    # Ch\u1ecdn site
+    source "$(dirname "${BASH_SOURCE[0]}")/wordpress_tool.sh"
+    select_wp_site || return
+    local domain="$SELECTED_DOMAIN"
+    local site_root="/var/www/${domain}/public_html"
+
+    if [[ ! -f "${site_root}/wp-config.php" ]]; then
+        log_error "${domain} kh\u00f4ng ph\u1ea3i WordPress site!"
+        pause; return
+    fi
+
+    # L\u1ea5y PHP version c\u1ee7a site
+    local php_ver
+    php_ver=$(get_installed_php_version)
+    [[ -z "$php_ver" ]] && { log_error "Kh\u00f4ng t\u00ecm th\u1ea5y PHP-FPM!"; pause; return; }
+
+    # Ki\u1ec3m tra PHP version >= 7.4
+    local major minor
+    major=$(echo "$php_ver" | cut -d. -f1)
+    minor=$(echo "$php_ver" | cut -d. -f2)
+    if [[ "$major" -lt 7 ]] || { [[ "$major" -eq 7 ]] && [[ "$minor" -lt 4 ]]; }; then
+        log_error "PHP Preload y\u00eau c\u1ea7u PHP >= 7.4. PHP hi\u1ec7n t\u1ea1i: ${php_ver}"
+        pause; return
+    fi
+
+    # T\u1ea1o script preload
+    local preload_dir="/etc/php-preload"
+    mkdir -p "$preload_dir"
+    local preload_script="${preload_dir}/${domain}.php"
+
+    cat > "$preload_script" <<PRELOAD_EOF
+<?php
+/**
+ * PHP Preload Script cho: ${domain}
+ * T\u1ef1 đ\u1ed9ng n\u1ea1p tr\u01b0\u1edbc c\u00e1c file PHP c\u1ed1t l\u00f5i c\u1ee7a WordPress v\u00e0o OPcache.
+ * T\u1ee9c l\u00e0: Khi PHP-FPM kh\u1eedi đ\u1ed9ng, c\u00e1c file n\u00e0y đ\u00e3 s\u1eb5n s\u00e0ng trong b\u1ed9 nh\u1edb.
+ */
+
+// WP-Includes (c\u00f4t l\u00f5i - quan tr\u1ecd nh\u1ea5t)
+\$wp_includes = '${site_root}/wp-includes';
+if (is_dir(\$wp_includes)) {
+    \$it = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator(\$wp_includes, RecursiveDirectoryIterator::SKIP_DOTS)
+    );
+    foreach (\$it as \$file) {
+        if (\$file->isFile() && \$file->getExtension() === 'php') {
+            opcache_compile_file(\$file->getPathname());
+        }
+    }
+}
+PRELOAD_EOF
+
+    # C\u1ea5u h\u00ecnh php.ini
+    local php_ini="/etc/php/${php_ver}/fpm/php.ini"
+    if [[ ! -f "$php_ini" ]]; then
+        log_error "Kh\u00f4ng t\u00ecm th\u1ea5y: $php_ini"
+        pause; return
+    fi
+
+    # Backup
+    cp "$php_ini" "${php_ini}.preload_bak_$(date +%s)"
+
+    # Set opcache.preload (thay ho\u1eb7c th\u00eam m\u1edbi)
+    if grep -q "^opcache.preload" "$php_ini"; then
+        sed -i "s|^opcache.preload.*|opcache.preload=${preload_script}|" "$php_ini"
+    else
+        echo "opcache.preload=${preload_script}" >> "$php_ini"
+    fi
+
+    # Set opcache.preload_user (www-data ho\u1eb7c nobody)
+    local fpm_user="www-data"
+    if [[ "$OS_FAMILY" == "rhel" ]]; then
+        fpm_user="nginx"
+    fi
+    if grep -q "^opcache.preload_user" "$php_ini"; then
+        sed -i "s|^opcache.preload_user.*|opcache.preload_user=${fpm_user}|" "$php_ini"
+    else
+        echo "opcache.preload_user=${fpm_user}" >> "$php_ini"
+    fi
+
+    # \u0110\u1ea3m b\u1ea3o OPcache \u0111\u01b0\u1ee3c b\u1eadt
+    if grep -q "^opcache.enable" "$php_ini"; then
+        sed -i "s|^opcache.enable.*|opcache.enable=1|" "$php_ini"
+    else
+        echo "opcache.enable=1" >> "$php_ini"
+    fi
+
+    # Restart PHP-FPM
+    if [[ "$OS_FAMILY" == "rhel" ]]; then
+        systemctl restart php-fpm
+    else
+        systemctl restart "php${php_ver}-fpm"
+    fi
+
+    log_info "\u2705 PHP Preload đ\u00e3 b\u1eadt cho ${domain}!"
+    echo -e "${YELLOW}Preload script: ${preload_script}${NC}"
+    echo -e "${YELLOW}PHP version:    ${php_ver}${NC}"
+    echo -e "${YELLOW}Preload user:   ${fpm_user}${NC}"
+    echo -e ""
+    echo -e "${CYAN}L\u01b0u \u00fd: Preload ch\u1ea1y khi PHP-FPM kh\u1eedi đ\u1ed9ng. Ki\u1ec3m tra status sau v\u00e0i gi\u00e2y.${NC}"
+    pause
+}
+
+disable_php_preload() {
+    local php_ver
+    php_ver=$(get_installed_php_version)
+    [[ -z "$php_ver" ]] && { log_error "Kh\u00f4ng t\u00ecm th\u1ea5y PHP!"; pause; return; }
+
+    local php_ini="/etc/php/${php_ver}/fpm/php.ini"
+
+    # X\u00f3a/comment out c\u00e2u l\u1ec7nh preload
+    if grep -q "^opcache.preload" "$php_ini"; then
+        sed -i 's|^opcache.preload|;opcache.preload|' "$php_ini"
+        sed -i 's|^opcache.preload_user|;opcache.preload_user|' "$php_ini"
+
+        if [[ "$OS_FAMILY" == "rhel" ]]; then
+            systemctl restart php-fpm
+        else
+            systemctl restart "php${php_ver}-fpm"
+        fi
+        log_info "\u2705 PHP Preload đ\u00e3 đ\u01b0\u1ee3c t\u1eaft."
+    else
+        log_warn "PHP Preload ch\u01b0a đ\u01b0\u1ee3c c\u1ea5u h\u00ecnh."
+    fi
+    pause
+}
+
+show_preload_status() {
+    local php_ver
+    php_ver=$(get_installed_php_version)
+    [[ -z "$php_ver" ]] && { log_error "Kh\u00f4ng t\u00ecm th\u1ea5y PHP!"; pause; return; }
+
+    echo -e "${BLUE}==== Tr\u1ea1ng th\u00e1i PHP Preload ====${NC}"
+    echo -e "${YELLOW}PHP Version: ${php_ver}${NC}"
+
+    local php_ini="/etc/php/${php_ver}/fpm/php.ini"
+    local preload_script
+    preload_script=$(grep "^opcache.preload" "$php_ini" 2>/dev/null | cut -d= -f2 | tr -d ' ')
+
+    if [[ -n "$preload_script" ]]; then
+        echo -e "${GREEN}\u2713 Preload đ\u01b0\u1ee3c c\u1ea5u h\u00ecnh: ${preload_script}${NC}"
+    else
+        echo -e "${YELLOW}\u26a0 PHP Preload ch\u01b0a đ\u01b0\u1ee3c b\u1eadt.${NC}"
+        pause; return
+    fi
+
+    # Ki\u1ec3m tra status OPcache qua php -r
+    local preload_count
+    preload_count=$(php${php_ver} -r "
+        \$s = opcache_get_status(true);
+        if (\$s && isset(\$s['preload_statistics']['functions'])) {
+            echo count(\$s['preload_statistics']['functions']);
+        } else {
+            echo '0 hoac chua co du lieu';
+        }
+    " 2>/dev/null)
+
+    echo -e "${GREEN}File/function đ\u00e3 preload: ${preload_count}${NC}"
+    echo ""
+    echo -e "${CYAN}L\u01b0u \u00fd: K\u1ebft qu\u1ea3 tr\u00ean l\u00e0 t\u1eeb PHP CLI; FPM c\u00f3 th\u1ec3 c\u00f3 s\u1ed1 kh\u00e1c.${NC}"
+    pause
+}
+
+list_preload_sites() {
+    local preload_dir="/etc/php-preload"
+    echo -e "${YELLOW}C\u00e1c site đang d\u00f9ng PHP Preload:${NC}"
+    if [[ -d "$preload_dir" ]]; then
+        local count=0
+        for f in "$preload_dir"/*.php; do
+            [[ ! -f "$f" ]] && continue
+            echo -e "  \u2022 $(basename "$f" .php)"
+            count=$((count+1))
+        done
+        [[ $count -eq 0 ]] && echo -e "  ${YELLOW}Ch\u01b0a c\u00f3 site n\u00e0o.${NC}"
+    else
+        echo -e "  ${YELLOW}Ch\u01b0a c\u00f3 site n\u00e0o.${NC}"
+    fi
     pause
 }

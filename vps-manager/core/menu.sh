@@ -46,9 +46,10 @@ main_menu() {
         echo -e "18. 🗄️  Quản lý phpMyAdmin"
         echo -e "19. 🔒 Quản lý SSL (Let's Encrypt / Renew)"
         echo -e "20. ⏰ Backup Tự động (Auto Backup Cron)"
+        echo -e "21. ⚡ Quản lý OpenLiteSpeed (OLS + LSCache)"
         echo -e "0. Thoát"
         echo -e "${BLUE}=================================================${NC}"
-        read -p "Nhập lựa chọn của bạn [0-20]: " choice
+        read -p "Nhập lựa chọn của bạn [0-21]: " choice
 
         case $choice in
             1)
@@ -130,6 +131,10 @@ main_menu() {
             20)
                 source "$ROOT_DIR/modules/backup.sh"
                 auto_backup_menu
+                ;;
+            21)
+                source "$ROOT_DIR/modules/ols.sh"
+                ols_menu
                 ;;
             0)
                 echo -e "${GREEN}Exiting... Goodbye!${NC}"
