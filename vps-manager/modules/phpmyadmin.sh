@@ -80,8 +80,21 @@ install_phpmyadmin() {
 
     # ── Step 1: Dependencies ───────────────────────────────────
     _pma_log "Step 1/7: Cài đặt dependencies..."
-    apt-get update -qq 2>/dev/null
-    apt-get install -y php-mbstring php-zip php-gd php-curl php-xml apache2-utils wget unzip 2>/dev/null
+    # Detect OS and install dependencies
+    if [[ -f /etc/os-release ]]; then
+        source /etc/os-release
+    fi
+    if [[ "${ID:-}" == "ubuntu" || "${ID:-}" == "debian" ]]; then
+        apt-get update -qq 2>/dev/null
+        apt-get install -y php-mbstring php-zip php-gd php-curl php-xml apache2-utils wget unzip 2>/dev/null || true
+    elif [[ "${ID:-}" == "almalinux" || "${ID:-}" == "rocky" || "${ID:-}" == "rhel" || "${ID:-}" == "centos" ]]; then
+        dnf install -y php-mbstring php-zip php-gd php-curl php-xml httpd-tools wget unzip 2>/dev/null || true
+    else
+        # Fallback: try pkg_install if available
+        if type pkg_install &>/dev/null; then
+            pkg_install php-mbstring php-zip php-gd php-curl php-xml wget unzip 2>/dev/null || true
+        fi
+    fi
     if [[ $? -ne 0 ]]; then
         _pma_warn "Một số package có thể chưa được cài. Tiếp tục..."
     fi
@@ -100,7 +113,7 @@ install_phpmyadmin() {
     elif command -v curl &>/dev/null; then
         curl -sL -o "$TEMP_DIR/$tarball" "$url"
     else
-        _pma_err "Không có wget hoặc curl. Cài wget: apt-get install -y wget"
+        _pma_err "Không có wget hoặc curl. Cài: apt-get install -y wget  hoặc  dnf install -y wget"
         rm -rf "$TEMP_DIR"; pause; return 1
     fi
 
@@ -175,7 +188,11 @@ install_phpmyadmin() {
 
     # Install htpasswd if missing
     if ! command -v htpasswd &>/dev/null; then
-        apt-get install -y apache2-utils -qq
+        if [[ "${ID:-}" == "ubuntu" || "${ID:-}" == "debian" ]]; then
+            apt-get install -y apache2-utils -qq
+        else
+            dnf install -y httpd-tools -q 2>/dev/null || true
+        fi
     fi
 
     local PMA_AUTH_USER="pma_admin"
@@ -194,8 +211,8 @@ install_phpmyadmin() {
     PHP_SOCK=$(_detect_php_sock)
     if [[ -z "$PHP_SOCK" ]]; then
         _pma_err "Không tìm thấy PHP-FPM socket!"
-        _pma_err "Kiểm tra: ls /run/php/"
-        _pma_warn "Cài số: apt-get install -y php-fpm"
+        _pma_err "Kiểm tra: ls /run/php/ hoặc ls /var/run/php-fpm/"
+        _pma_warn "Cài PHP-FPM: apt-get install -y php-fpm  hoặc  dnf install -y php-fpm"
         pause; return 1
     fi
     _pma_log "PHP Socket: $PHP_SOCK"
@@ -354,7 +371,11 @@ secure_phpmyadmin() {
 reset_phpmyadmin_auth() {
     echo -e "${YELLOW}--- Reset mật khẩu HTTP Auth ---${NC}"
     if ! command -v htpasswd &>/dev/null; then
-        apt-get install -y apache2-utils -qq
+        if [[ -f /etc/redhat-release ]]; then
+            dnf install -y httpd-tools -q 2>/dev/null || true
+        else
+            apt-get install -y apache2-utils -qq 2>/dev/null || true
+        fi
     fi
 
     read -p "Nhập mật khẩu mới (Để trống = sinh ngẫu nhiên): " new_pass

@@ -496,8 +496,26 @@ install_wordpress() {
     local domain=$1
     log_info "Đang tải và cài đặt WordPress..."
     cd "/var/www/$domain/public_html"
-    wget -q https://wordpress.org/latest.tar.gz
-    tar -xzf latest.tar.gz
+
+    # Check disk space: need at least 256MB for WordPress
+    if ! check_disk_space "/var/www/$domain" 256; then
+        log_error "Không đủ dung lượng ổ đĩa để cài đặt WordPress!"
+        return 1
+    fi
+
+    # Download WordPress with error check
+    if ! wget -q --timeout=60 https://wordpress.org/latest.tar.gz; then
+        log_error "Tải WordPress thất bại! Kiểm tra kết nối mạng."
+        return 1
+    fi
+
+    # Extract with error check
+    if ! tar -xzf latest.tar.gz; then
+        log_error "Giải nén WordPress thất bại! File có thể bị hỏng."
+        rm -f latest.tar.gz
+        return 1
+    fi
+
     mv wordpress/* .
     rm -rf wordpress latest.tar.gz
 
