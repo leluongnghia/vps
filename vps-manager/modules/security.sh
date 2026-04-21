@@ -348,7 +348,7 @@ setup_8g_firewall() {
 # 8G Firewall v1.0 - Extension of 7G
 # Source: perishablepress.com/8g-firewall/
 
-clude /etc/nginx/snippets/7g.conf;
+include /etc/nginx/snippets/7g.conf;
 
 set $8g_block 0;
 
