@@ -214,6 +214,15 @@ _configure_ols_base() {
 
     # Cấu hình OLS lắng nghe cổng 80/443
     if [[ -f "$OLS_CONF" ]]; then
+        # Tạo fallback SSL nếu chưa tồn tại, OLS sẽ crash listener 443 nếu thiếu file SSL
+        if [[ ! -f "/usr/local/lsws/conf/example.crt" ]]; then
+            openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+                -keyout /usr/local/lsws/conf/example.key \
+                -out /usr/local/lsws/conf/example.crt \
+                -subj "/C=VN/ST=HCM/L=HCM/O=VPS/CN=example.com" 2>/dev/null
+            chown -R lsadm:lsadm /usr/local/lsws/conf/example.* 2>/dev/null
+        fi
+
         # 1. Tối ưu OLS LSCache nhét vào RAM giống WpTangToc
         if ! grep -q "totalInMemCacheSize" "$OLS_CONF" 2>/dev/null; then
             sed -i '/module cache {/a \  totalInMemCacheSize     64M\n  maxCachedFileSize       10M' "$OLS_CONF" 2>/dev/null
@@ -234,7 +243,6 @@ listener HTTPS {
   secure                  1
   keyFile                 /usr/local/lsws/conf/example.key
   certFile                /usr/local/lsws/conf/example.crt
-  enableSpdy              4
   enableQuic              1
 }
 EOF
