@@ -214,6 +214,12 @@ _configure_ols_base() {
 
     # Cấu hình OLS lắng nghe cổng 80/443
     if [[ -f "$OLS_CONF" ]]; then
+        # 1. Tối ưu OLS LSCache nhét vào RAM giống WpTangToc
+        if ! grep -q "totalInMemCacheSize" "$OLS_CONF" 2>/dev/null; then
+            sed -i '/module cache {/a \  totalInMemCacheSize     64M\n  maxCachedFileSize       10M' "$OLS_CONF" 2>/dev/null
+            log_info "Đã kích hoạt LSCache lưu trữ trực tiếp trên RAM (64M) cho hệ thống."
+        fi
+
         # Đảm bảo listeners có trong config (nội dung cơ bản)
         if ! grep -q "listener HTTP" "$OLS_CONF" 2>/dev/null; then
             cat >> "$OLS_CONF" <<'EOF'
@@ -228,6 +234,8 @@ listener HTTPS {
   secure                  1
   keyFile                 /usr/local/lsws/conf/example.key
   certFile                /usr/local/lsws/conf/example.crt
+  enableSpdy              4
+  enableQuic              1
 }
 EOF
         fi
@@ -239,12 +247,14 @@ _ols_open_ports() {
         if command -v ufw &>/dev/null && ufw status | grep -q "active"; then
             ufw allow 80/tcp
             ufw allow 443/tcp
+            ufw allow 443/udp
             ufw allow "${OLS_WEBADMIN_PORT}/tcp"
         fi
     elif [[ "$OS_FAMILY" == "rhel" ]]; then
         if command -v firewall-cmd &>/dev/null; then
             firewall-cmd --permanent --add-service=http
             firewall-cmd --permanent --add-service=https
+            firewall-cmd --permanent --add-port=443/udp
             firewall-cmd --permanent --add-port="${OLS_WEBADMIN_PORT}/tcp"
             firewall-cmd --reload
         fi
@@ -331,6 +341,13 @@ extprocessor lsphp {
   address                 uds://tmp/lshttpd/${domain}-lsphp.sock
   maxConns                35
   env                     PHP_LSAPI_CHILDREN=35
+  env                     LSAPI_AVOID_FORK=0
+  env                     LSAPI_MAX_IDLE=30
+  env                     LSAPI_MAX_IDLE_CHILDREN=1
+  env                     LSAPI_MAX_PROCESS_TIME=120
+  env                     LSAPI_PGRP_MAX_IDLE=30
+  env                     LSAPI_ACCEPT_NOTIFY=1
+  env                     LSAPI_MAX_CMD_SCRIPT_PATH_LEN=200
   initTimeout             60
   retryTimeout            0
   persistConn             1
@@ -402,6 +419,19 @@ EOF
                 --dbuser="$db_user" \
                 --dbpass="$db_pass" \
                 --allow-root --quiet
+
+            # Auto inject Object Cache Unix Socket if exists
+            if [[ -S "/tmp/valkey.sock" ]] || [[ -S "/tmp/redis.sock" ]]; then
+                local socket_path=""
+                [[ -S "/tmp/redis.sock" ]] && socket_path="/tmp/redis.sock"
+                [[ -S "/tmp/valkey.sock" ]] && socket_path="/tmp/valkey.sock"
+                
+                if [[ -n "$socket_path" ]]; then
+                    sed -i "/table_prefix/i define( 'WP_REDIS_SCHEME', 'unix' );" "$site_root/wp-config.php"
+                    sed -i "/table_prefix/i define( 'WP_REDIS_PATH', '$socket_path' );" "$site_root/wp-config.php"
+                    sed -i "/table_prefix/i define( 'WP_CACHE_KEY_SALT', '$domain:' );" "$site_root/wp-config.php"
+                fi
+            fi
 
             read -p "Nhập title website: " site_title
             local admin_pass

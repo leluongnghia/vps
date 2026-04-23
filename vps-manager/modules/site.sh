@@ -527,6 +527,19 @@ install_wordpress() {
     sed -i "s|username_here|$WP_DB_USER|" wp-config.php
     sed -i "s|password_here|$WP_DB_PASS|" wp-config.php
 
+    # Auto inject Object Cache Unix Socket if exists
+    if [[ -S "/tmp/valkey.sock" ]] || [[ -S "/tmp/redis.sock" ]]; then
+        local socket_path=""
+        [[ -S "/tmp/redis.sock" ]] && socket_path="/tmp/redis.sock"
+        [[ -S "/tmp/valkey.sock" ]] && socket_path="/tmp/valkey.sock"
+        
+        if [[ -n "$socket_path" ]]; then
+            sed -i "/table_prefix/i define( 'WP_REDIS_SCHEME', 'unix' );" wp-config.php
+            sed -i "/table_prefix/i define( 'WP_REDIS_PATH', '$socket_path' );" wp-config.php
+            sed -i "/table_prefix/i define( 'WP_CACHE_KEY_SALT', '$domain:' );" wp-config.php
+        fi
+    fi
+
     # Fix permissions again
     chown -R www-data:www-data "/var/www/$domain/public_html"
 }

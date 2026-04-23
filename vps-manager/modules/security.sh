@@ -327,7 +327,8 @@ WAF_EOF
 
     [[ "$c" == "0" ]] && { log_info "File rule tại: $waf_file"; pause; return; }
 
-    _apply_nginx_snippet "7g.conf" "include /etc/nginx/snippets/7g.conf;" "$c"
+    # Bỏ 8G nếu đã có, thay bằng 7G để tránh load x2 luật regex Nginx
+    _apply_nginx_snippet "7g.conf" "include /etc/nginx/snippets/7g.conf;" "$c" "8g.conf"
     pause
 }
 

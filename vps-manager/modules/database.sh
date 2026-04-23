@@ -16,9 +16,10 @@ database_menu() {
         echo -e "6. Export Database (Dump)"
         echo -e "7. 🔍 Xem DB theo Website (WordPress)"
         echo -e "8. Quản lý phpMyAdmin"
+        echo -e "9. ⚡ Chuyển đổi công nghệ lưu trữ (Convert to InnoDB)"
         echo -e "0. Quay lại Menu chính"
         echo -e "${BLUE}=================================================${NC}"
-        read -p "Nhập lựa chọn [0-8]: " choice
+        read -p "Nhập lựa chọn [0-9]: " choice
 
         case $choice in
             1) list_databases ;;
@@ -32,6 +33,7 @@ database_menu() {
                 source "$ROOT_DIR/modules/phpmyadmin.sh"
                 phpmyadmin_menu 
                 ;;
+            9) convert_engine_to_innodb ;;
             0) return ;;
             *) echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause ;;
         esac
@@ -212,5 +214,42 @@ view_db_by_website() {
     echo -e "${GREEN}==================================================${NC}"
     echo -e "${YELLOW}💡 Tip: Copy credentials này để config wp-config.php${NC}"
     echo ""
+    pause
+}
+
+convert_engine_to_innodb() {
+    clear
+    echo -e "${BLUE}=================================================${NC}"
+    echo -e "${GREEN}    Chuyển Đổi Storage Engine (to InnoDB)${NC}"
+    echo -e "${BLUE}=================================================${NC}"
+    echo -e "Tính năng này sẽ quét các bảng (Tables) đang dùng công nghệ cũ (MyISAM, Aria)"
+    echo -e "và chuyển chuẩn hoá 100% sang InnoDB để chịu tải tốt hơn cho OLS/Nginx."
+    echo ""
+    echo -e "CẢNH BÁO: Quá trình này có thể mất vài phút với database lớn."
+    read -p "Bạn có chắc chắn muốn quét và tối ưu cơ sở dữ liệu? (y/n): " confirm
+    if [[ "$confirm" != "y" ]]; then return; fi
+
+    local db_list=$(mysql -N -e "SHOW DATABASES;" | grep -Ev "information_schema|performance_schema|mysql|sys")
+    
+    for db in $db_list; do
+        echo -e "\n${CYAN}>>> Đang quét Database: $db${NC}"
+        local tables_to_convert=$(mysql -N -e "SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = '$db' AND ENGINE != 'InnoDB';")
+        
+        if [[ -z "$tables_to_convert" ]]; then
+            echo -e "  ✅ Mọi thứ đã chuẩn InnoDB. Không cần can thiệp."
+        else
+            for table in $tables_to_convert; do
+                echo -e "  ⏳ Đang convert table: ${YELLOW}${table}${NC} -> InnoDB..."
+                mysql -e "ALTER TABLE \`$db\`.\`$table\` ENGINE=InnoDB;" 2>/dev/null
+                if [[ $? -eq 0 ]]; then
+                    echo -e "  ✓ Thành công"
+                else
+                    echo -e "  ❌ Lỗi khi convert $table"
+                fi
+            done
+        fi
+    done
+    
+    echo -e "\n${GREEN}🎉 Hoàn tất quá trình đồng bộ Engine sang InnoDB!${NC}"
     pause
 }

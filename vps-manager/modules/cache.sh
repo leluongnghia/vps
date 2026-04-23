@@ -61,9 +61,9 @@ fix_redis_connection() {
             local rconf="/etc/redis/redis.conf"
             cp "$rconf" "$rconf.bak"
             
-            if ! grep -q "unixsocket /var/run/redis/redis-server.sock" "$rconf"; then
+            if ! grep -q "^unixsocket " "$rconf"; then
                 echo "" >> "$rconf"
-                echo "unixsocket /var/run/redis/redis-server.sock" >> "$rconf"
+                echo "unixsocket /tmp/redis.sock" >> "$rconf"
                 echo "unixsocketperm 770" >> "$rconf"
             fi
             
@@ -99,11 +99,11 @@ fix_redis_connection() {
     # 3. Detect Connection Method
     local redis_conf="/etc/redis/redis.conf"
     local use_socket=false
-    local socket_path="/var/run/redis/redis-server.sock"
+    local socket_path="/tmp/redis.sock"
     
     if [[ ! -f "$redis_conf" ]]; then
         echo -e "${RED}Không tìm thấy file config $redis_conf. Giả định mặc định (TCP).${NC}"
-    elif grep -q "^unixsocket $socket_path" "$redis_conf" || grep -q "^unixsocket .*redis.*sock" "$redis_conf"; then
+    elif grep -q "^unixsocket " "$redis_conf"; then
         use_socket=true
         # Try finding exact path
         local found_path=$(grep "^unixsocket " "$redis_conf" | head -n1 | awk '{print $2}')
@@ -136,9 +136,9 @@ fix_redis_connection() {
         echo -e "-> Chế độ: ${GREEN}Unix Socket ($socket_path)${NC}"
         sed -i "/table_prefix/i define( 'WP_REDIS_SCHEME', 'unix' );" "$wp_config"
         sed -i "/table_prefix/i define( 'WP_REDIS_PATH', '$socket_path' );" "$wp_config"
-        # Perm Fix
-        usermod -aG redis www-data
-        chmod 770 "$(dirname "$socket_path")" 2>/dev/null
+        # Perm Fix: add www-data to redis group, ensure socket writable
+        usermod -aG redis www-data 2>/dev/null
+        chmod 777 "$socket_path" 2>/dev/null
     else
         echo -e "-> Chế độ: ${YELLOW}TCP (127.0.0.1:6379)${NC}"
         sed -i "/table_prefix/i define( 'WP_REDIS_HOST', '127.0.0.1' );" "$wp_config"

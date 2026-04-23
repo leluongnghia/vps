@@ -23,6 +23,16 @@ swap_menu() {
 }
 
 create_swap() {
+    # Check for ZRAM conflict
+    if [[ -f /etc/default/zramswap ]] || [[ -f /etc/systemd/zram-generator.conf ]]; then
+        echo -e "${RED}CẢNH BÁO: BẠN ĐANG SỬ DỤNG ZRAM SWAP CAO CẤP!${NC}"
+        echo -e "${YELLOW}Hệ thống đang cấu hình vm.swappiness = 100 để nén dữ liệu vào RAM.${NC}"
+        echo -e "${YELLOW}Việc tạo thêm Swap tĩnh (File Swap) trên ổ cứng lúc này sẽ gây xung đột cấu hình và ghi rác lên ổ SSD, làm máy chủ chậm hơn.${NC}"
+        echo -e "-> Hãy tắt ZRAM (tại Menu 22) nếu bạn thật sự muốn dùng Swap truyền thống!"
+        if [[ -z "$1" ]]; then pause; fi
+        return
+    fi
+
     if [[ -n "$1" ]]; then
         size=$1
     else

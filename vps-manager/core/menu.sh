@@ -8,6 +8,11 @@ ROOT_DIR="$(dirname "$DIR")"
 # Import utils
 source "$ROOT_DIR/core/utils.sh"
 
+# Import Dashboard
+if [[ -f "$ROOT_DIR/core/dashboard.sh" ]]; then
+    source "$ROOT_DIR/core/dashboard.sh"
+fi
+
 main_menu() {
     local script_version="1.0.0"
     if [[ -f "$ROOT_DIR/VERSION" ]]; then
@@ -21,22 +26,27 @@ main_menu() {
     fi
 
     while true; do
+        # Hien thi Real-time Dashboard truoc menu
+        if type run_dashboard &>/dev/null; then
+            run_dashboard
+        fi
+
         clear
         echo -e "${BLUE}=================================================${NC}"
         echo -e "${GREEN}          VPS MANAGEMENT SCRIPT v${script_version}${NC}"
         echo -e "${YELLOW}          Server IP: ${vps_ip}${NC}"
         echo -e "${BLUE}=================================================${NC}"
-        echo -e "1. Cài đặt LEMP Stack (Nginx, MariaDB, PHP)"
-        echo -e "2. Quản lý Domain & Website"
-        echo -e "3. Quản lý WordPress (User, Plugins, Security...)"
-        echo -e "4. Bảo mật & Tối ưu hóa"
-        echo -e "5. Sao lưu & Khôi phục (Backup/Restore)"
-        echo -e "6. Quản lý Phiên bản PHP"
-        echo -e "7. Quản lý Cronjob (Lịch biểu)"
-        echo -e "8. Quản lý Services (Khởi động lại/Stop)"
-        echo -e "9. Quản lý Database (Cơ sở dữ liệu)"
+        echo -e "1.  Cài đặt LEMP Stack (Nginx, MariaDB, PHP)"
+        echo -e "2.  Quản lý Domain & Website"
+        echo -e "3.  Quản lý WordPress (User, Plugins, Security...)"
+        echo -e "4.  Bảo mật & Tối ưu hóa"
+        echo -e "5.  Sao lưu & Khôi phục (Backup/Restore)"
+        echo -e "6.  Quản lý Phiên bản PHP"
+        echo -e "7.  Quản lý Cronjob (Lịch biểu)"
+        echo -e "8.  Quản lý Services (Khởi động lại/Stop)"
+        echo -e "9.  Quản lý Database (Cơ sở dữ liệu)"
         echo -e "10. Quản lý Cache (Redis/FastCGI)"
-        echo -e "11. Quản lý Swap (RAM ảo)"
+        echo -e "11. Quản lý Swap (RAM ảo - File Swap)"
         echo -e "12. Quản lý Ổ đĩa & Dọn dẹp Logs"
         echo -e "13. AppAdmin & Công cụ bổ trợ"
         echo -e "14. Quản lý Nginx (Cấu hình)"
@@ -47,9 +57,12 @@ main_menu() {
         echo -e "19. 🔒 Quản lý SSL (Let's Encrypt / Renew)"
         echo -e "20. ⏰ Backup Tự động (Auto Backup Cron)"
         echo -e "21. ⚡ Quản lý OpenLiteSpeed (OLS + LSCache)"
-        echo -e "0. Thoát"
+        echo -e "22. ⚡ ZRAM Swap (Swap nén trên RAM - Nhanh x1000)"
+        echo -e "23. 🛡️  Watchdog Giám sát Dịch vụ (Monit)"
+        echo -e "24. 🔄 Di chuyển Máy chủ Web (Nginx <=> OLS)"
+        echo -e "0.  Thoát"
         echo -e "${BLUE}=================================================${NC}"
-        read -p "Nhập lựa chọn của bạn [0-21]: " choice
+        read -p "Nhập lựa chọn của bạn [0-24]: " choice
 
         case $choice in
             1)
@@ -135,6 +148,18 @@ main_menu() {
             21)
                 source "$ROOT_DIR/modules/ols.sh"
                 ols_menu
+                ;;
+            22)
+                source "$ROOT_DIR/modules/zram.sh"
+                zram_menu
+                ;;
+            23)
+                source "$ROOT_DIR/modules/monit.sh"
+                monit_menu
+                ;;
+            24)
+                source "$ROOT_DIR/modules/switch.sh"
+                switch_webserver_menu
                 ;;
             0)
                 echo -e "${GREEN}Exiting... Goodbye!${NC}"

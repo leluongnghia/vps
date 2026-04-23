@@ -242,6 +242,7 @@ install_phpmyadmin() {
 
         printf '    # phpMyAdmin location\n'
         printf '    location ^~ /phpmyadmin {\n'
+        printf '        client_max_body_size 500M;\n'
         printf '        root /var/www/html;\n'
         printf '        index index.php index.html index.htm;\n\n'
         printf '        auth_basic "Restricted Access";\n'
@@ -252,6 +253,7 @@ install_phpmyadmin() {
         printf '            fastcgi_pass %s;\n' "$PHP_SOCK"
         printf '            fastcgi_index index.php;\n'
         printf '            fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;\n'
+        printf '            fastcgi_param PHP_VALUE "upload_max_filesize=500M \\n post_max_size=500M \\n max_execution_time=3600 \\n max_input_time=3600";\n'
         printf '            include fastcgi_params;\n'
         printf '        }\n\n'
 

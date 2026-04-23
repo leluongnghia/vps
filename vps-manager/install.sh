@@ -144,48 +144,69 @@ update_self() {
 auto_install_stack() {
     clear
     echo -e "${YELLOW}=================================================${NC}"
-    echo -e "${GREEN}   AUTO INSTALL: Nginx + MariaDB + PHP + Swap + Cache${NC}"
+    echo -e "${GREEN}   AUTO INSTALL: Chọn Cấu Trúc Máy Chủ Web${NC}"
     echo -e "${YELLOW}=================================================${NC}"
-    echo -e "Hệ thống sẽ cài đặt toàn bộ Stack 2026 tự động:"
-    echo -e "- RAM ảo: Swap 2GB"
-    echo -e "- Database: MariaDB"
-    echo -e "- Web Server: Nginx"
-    echo -e "- Core: PHP 8.4"
-    echo -e "- Caching: Valkey (Thay thế Redis)"
-    echo -e "- Tường lửa: Firewalld/UFW + Fail2ban"
-    echo -e "- Quản trị cơ sở dữ liệu: phpMyAdmin"
+    echo -e "Bạn muốn xây dựng máy chủ VPS này theo trường phái nào?"
+    echo -e "1. Nginx thuần & FastCGI (Stack Truyền Thống chịu tải trâu bò)"
+    echo -e "2. OpenLiteSpeed & LSCache & Valkey (Stack Tốc Độ Ánh Sáng cho WP) ${YELLOW}[HOT]${NC}"
     echo -e ""
-    read -p "Chạy Cài đặt Tự động ngay? [Y/n]: " opt_lemp
-    if [[ "$opt_lemp" == "y" || "$opt_lemp" == "Y" || -z "$opt_lemp" ]]; then
-        echo -e "${BLUE}[1/6] Đang thiết lập Swap...${NC}"
-        if [[ ! -f /swapfile ]]; then
-            source modules/swap.sh
-            create_swap 2048 "auto"
-        else
-            echo -e "${YELLOW}Swap đã tồn tại. Bỏ qua.${NC}"
-        fi
+    read -p "Chọn [1-2, mặc định 1]: " stack_choice
 
-        echo -e "${BLUE}[2/6] Đang cài đặt Nginx & MariaDB...${NC}"
+    if [[ "$stack_choice" == "2" ]]; then
+        local web_server="OpenLiteSpeed"
+    else
+        local web_server="Nginx"
+    fi
+
+    clear
+    echo -e "${YELLOW}=================================================${NC}"
+    echo -e "${GREEN}   TIẾN TRÌNH CÀI ĐẶT: ${web_server} + MariaDB + PHP + Valkey${NC}"
+    echo -e "${YELLOW}=================================================${NC}"
+    echo -e "- RAM ảo: ZRAM (Tự động nén thông minh)"
+    echo -e "- Web Server: ${web_server}"
+    echo -e "- Database: MariaDB"
+    echo -e "- Core: PHP 8.4"
+    echo -e "- Caching: Valkey (Thay thế hoàn toàn Redis)"
+    echo -e "- Tường lửa: Firewalld/UFW + Fail2ban"
+    echo -e "- Giám sát: Monit Watchdog"
+    echo -e ""
+    read -p "Bắt đầu cài đặt ngay? [Y/n]: " opt_lemp
+    if [[ "$opt_lemp" == "y" || "$opt_lemp" == "Y" || -z "$opt_lemp" ]]; then
+        echo -e "${BLUE}[1/7] Đang thiết lập ZRAM Swap...${NC}"
+        source modules/zram.sh
+        zram_install "auto"
+
+        echo -e "${BLUE}[2/7] Đang cài đặt ${web_server} & MariaDB...${NC}"
         source modules/lemp.sh
-        install_nginx
         install_mariadb
         
-        echo -e "${BLUE}[3/6] Đang cài đặt PHP 8.4...${NC}"
-        install_php "8.4"
+        if [[ "$web_server" == "OpenLiteSpeed" ]]; then
+            source modules/ols.sh
+            # Cài OLS và tự động nhét lựa chọn 4 (LSPHP 8.4)
+            echo "4" | install_ols_stack
+        else
+            install_nginx
+            echo -e "${BLUE}[3/7] Đang cài đặt PHP 8.4...${NC}"
+            install_php "8.4"
+        fi
 
         if [[ -f "modules/phpmyadmin.sh" ]]; then
-             echo -e "${BLUE}[4/6] Đang cài đặt phpMyAdmin...${NC}"
+             echo -e "${BLUE}[4/7] Đang cài đặt phpMyAdmin...${NC}"
              source modules/phpmyadmin.sh
              install_phpmyadmin
         fi
 
-        echo -e "${BLUE}[5/6] Đang cài đặt Valkey (Memory Cache)...${NC}"
+        echo -e "${BLUE}[5/7] Đang cài đặt Valkey (Memory Cache)...${NC}"
         source modules/wordpress_performance.sh 2>/dev/null
         install_valkey
 
-        echo -e "${BLUE}[6/6] Đang cấu hình Firewall...${NC}"
+        echo -e "${BLUE}[6/7] Đang cấu hình Firewall...${NC}"
         source modules/security.sh
         setup_firewall "auto"
+        
+        echo -e "${BLUE}[7/7] Đang cấu hình Monit Watchdog...${NC}"
+        source modules/monit.sh
+        monit_install "auto"
         
         echo -e "${GREEN}=================================================${NC}"
         echo -e "${GREEN}Quá trình khởi tạo Server đã hoàn tất xuất sắc!${NC}"
@@ -232,7 +253,7 @@ main() {
             echo -e "${BLUE}=================================================${NC}"
             echo -e "Đây là lần đầu tiên chạy VPS Manager."
             echo -e "Bạn có muốn chạy Auto-Install toàn bộ hệ thống LEMP không?"
-            echo -e "(Bao gồm: Nginx, MariaDB, PHP 8.1/8.2/8.3 tự động nhận diện, Valkey Cache, Swap 2GB, Firewall)"
+            echo -e "(Bao gồm: Nginx, MariaDB, PHP tự động, Valkey Cache, ZRAM Swap, Monit, Firewall)"
             read -p "Chạy Auto-Install ngay? [Y/n]: " auto
             if [[ "$auto" == "y" || "$auto" == "Y" || -z "$auto" ]]; then
                 auto_install_stack

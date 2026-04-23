@@ -55,6 +55,7 @@ wp_performance_menu() {
         echo -e "6.  📦 Enable Object Cache (Redis/Memcached)"
         echo -e "7.  🌐 HTTP/2 & Brotli Compression"
         echo -e "13. 🎀 PHP Preload (Nạp trước PHP vào RAM)"
+        echo -e "14. ✨ Tối ưu LSCache chuẩn WpTangToc (OpenLiteSpeed)"
         echo -e ""
         echo -e "${CYAN}--- 🌐 Per-Site (Chọn từng website) ---${NC}"
         echo -e "8.  🧹 Database Cleanup & Optimization"
@@ -81,12 +82,93 @@ wp_performance_menu() {
             11) benchmark_wordpress ;;
             12) optimize_system_kernel ;;
             13) php_preload_menu ;;
+            14) setup_lscache_wptangtoc ;;
             0) return ;;
             *) echo -e "${RED}Invalid choice!${NC}"; pause ;;
         esac
     done
 }
 
+
+setup_lscache_wptangtoc() {
+    source "$(dirname "${BASH_SOURCE[0]}")/wordpress_tool.sh"
+    select_wp_site || return
+    local domain=$SELECTED_DOMAIN
+    local site_root="/var/www/$domain/public_html"
+    
+    if [[ ! -f "$site_root/wp-config.php" ]]; then
+        log_error "Không tìm thấy WordPress tại $site_root"
+        pause; return
+    fi
+    
+    log_info "Bắt đầu tối ưu LSCache chuẩn gốc (WpTangToc) cho $domain..."
+    
+    # 1. Reset .htaccess chuẩn WordPress
+    log_info "1. Khôi phục .htaccess chuẩn gốc WP (Xoá rác cấu hình cũ)..."
+    cat << 'EOF' > "$site_root/.htaccess"
+# BEGIN WordPress
+<IfModule mod_rewrite.c>
+RewriteEngine On
+RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+RewriteBase /
+RewriteRule ^index\.php$ - [L]
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule . /index.php [L]
+</IfModule>
+# END WordPress
+EOF
+    chmod 644 "$site_root/.htaccess"
+    
+    # 2. Xử lý WP-CLI (LiteSpeed Option)
+    if command -v wp &>/dev/null; then
+        ## Kích hoạt hoặc cài đặt LSCache Plugin
+        if ! wp plugin is-installed litespeed-cache --path="$site_root" --allow-root 2>/dev/null; then
+            log_info "2. Tự động cài đặt plugin LiteSpeed Cache..."
+            wp plugin install litespeed-cache --activate --path="$site_root" --allow-root 2>/dev/null
+        else
+            log_info "2. Đang kích hoạt LiteSpeed Cache..."
+            wp plugin activate litespeed-cache --path="$site_root" --allow-root 2>/dev/null
+        fi
+        
+        log_info "3. Cấu hình LSCache WP-CLI chống xung đột Cache Trình duyệt..."
+        # Tắt cache browser cứng trong lscache, nhường cho OLS htaccess lo
+        wp litespeed-option set cache-browser false --path="$site_root" --allow-root >/dev/null 2>&1
+        
+        # Link Redis / Valkey if installed
+        if systemctl is-active --quiet valkey 2>/dev/null || systemctl is-active --quiet redis-server 2>/dev/null; then
+            log_info "4. Kéo Object Cache (Redis/Valkey) nối rãnh với LSCache..."
+            wp litespeed-option set object true --path="$site_root" --allow-root >/dev/null 2>&1
+            if [[ -S "/tmp/valkey.sock" ]]; then
+                wp litespeed-option set object-host "/tmp/valkey.sock" --path="$site_root" --allow-root >/dev/null 2>&1
+                wp litespeed-option set object-port 0 --path="$site_root" --allow-root >/dev/null 2>&1
+            elif [[ -S "/tmp/redis.sock" ]]; then
+                wp litespeed-option set object-host "/tmp/redis.sock" --path="$site_root" --allow-root >/dev/null 2>&1
+                wp litespeed-option set object-port 0 --path="$site_root" --allow-root >/dev/null 2>&1
+            else
+                wp litespeed-option set object-host "127.0.0.1" --path="$site_root" --allow-root >/dev/null 2>&1
+                wp litespeed-option set object-port 6379 --path="$site_root" --allow-root >/dev/null 2>&1
+            fi
+            wp litespeed-option set object-kind 1 --path="$site_root" --allow-root >/dev/null 2>&1
+        fi
+        
+        log_info "5. Làm mới Permalink & Flush Memory..."
+        wp rewrite flush --path="$site_root" --allow-root >/dev/null 2>&1
+        wp litespeed-purge all --path="$site_root" --allow-root >/dev/null 2>&1
+    fi
+    
+    # 3. Reload OLS
+    if systemctl is-active --quiet lshttpd 2>/dev/null; then
+        log_info "6. Khởi động lại vòng quay OpenLiteSpeed"
+        systemctl reload lshttpd
+    fi
+    
+    echo -e "${GREEN}=================================================${NC}"
+    echo -e "${GREEN} Hoàn tất tối ưu LSCache siêu tốc như WpTangToc!${NC}"
+    echo -e "${GREEN} Đã fix xong lỗi 404 URL và làm sạch bộ nhớ nền.${NC}"
+    echo -e "${GREEN}=================================================${NC}"
+    pause
+}
 
 # 12. Optimize System Kernel (Merged from optimize.sh)
 optimize_system_kernel() {
@@ -416,14 +498,40 @@ _do_db_cleanup() {
 
 install_valkey() {
     log_info "Installing Valkey Server..."
+
+    # Xử lý xung đột Engine: Tắt Redis/KeyDB nếu đang chạy
+    for svc in redis-server redis keydb memcached; do
+        if systemctl is-active --quiet "$svc" 2>/dev/null || systemctl is-enabled --quiet "$svc" 2>/dev/null; then
+            log_warn "Phát hiện $svc đang hiện diện. Tự động tắt để nhường chỗ cho Valkey..."
+            systemctl stop "$svc" 2>/dev/null
+            systemctl disable "$svc" 2>/dev/null
+        fi
+    done
+
     pkg_update
     pkg_install valkey
     if ! command -v valkey-server &>/dev/null && ! command -v valkey &>/dev/null; then
         log_warn "Không tìm thấy package valkey. Đang thử cài đặt valkey-server..."
         pkg_install valkey-server
     fi
+    
+    # Configure Unix Socket for Object Cache
+    local vconf="/etc/valkey/valkey.conf"
+    if [[ ! -f "$vconf" ]]; then vconf="/etc/valkey/valkey-server.conf"; fi
+    if [[ -f "$vconf" ]] && ! grep -q "^unixsocket " "$vconf"; then
+        echo "unixsocket /tmp/valkey.sock" >> "$vconf"
+        echo "unixsocketperm 770" >> "$vconf"
+        # Optional: memory optimization
+        if ! grep -q "^maxmemory " "$vconf"; then
+            echo "maxmemory 256mb" >> "$vconf"
+            echo "maxmemory-policy allkeys-lru" >> "$vconf"
+        fi
+    fi
+    # Add www-data to valkey group for socket access
+    usermod -aG valkey www-data 2>/dev/null || usermod -aG redis www-data 2>/dev/null
+
     systemctl enable valkey 2>/dev/null
-    systemctl start valkey 2>/dev/null
+    systemctl restart valkey 2>/dev/null
 
     local php_ver=$(get_installed_php_version)
     if [[ "$OS_FAMILY" == "rhel" ]]; then
@@ -440,10 +548,34 @@ install_valkey() {
 install_redis() {
     if ! command -v redis-server &>/dev/null; then
         log_info "Installing Redis..."
+
+        # Xử lý xung đột Engine: Tắt Valkey/KeyDB nếu đang chạy
+        for svc in valkey-server valkey keydb memcached; do
+            if systemctl is-active --quiet "$svc" 2>/dev/null || systemctl is-enabled --quiet "$svc" 2>/dev/null; then
+                log_warn "Phát hiện $svc đang hiện diện. Tự động tắt để nhường chỗ cho Redis..."
+                systemctl stop "$svc" 2>/dev/null
+                systemctl disable "$svc" 2>/dev/null
+            fi
+        done
+
         pkg_update
         pkg_install redis-server
+        
+        # Configure Unix Socket for Object Cache
+        local rconf="/etc/redis/redis.conf"
+        if [[ -f "$rconf" ]] && ! grep -q "^unixsocket " "$rconf"; then
+            echo "unixsocket /tmp/redis.sock" >> "$rconf"
+            echo "unixsocketperm 770" >> "$rconf"
+            if ! grep -q "^maxmemory " "$rconf"; then
+                echo "maxmemory 256mb" >> "$rconf"
+                echo "maxmemory-policy allkeys-lru" >> "$rconf"
+            fi
+        fi
+        # Add www-data to redis group for socket access
+        usermod -aG redis www-data 2>/dev/null
+        
         systemctl enable redis-server
-        systemctl start redis-server
+        systemctl restart redis-server
     fi
     
     local php_ver=$(get_installed_php_version)
@@ -461,6 +593,16 @@ install_redis() {
 install_memcached() {
     if ! command -v memcached &>/dev/null; then
         log_info "Installing Memcached..."
+
+        # Xử lý xung đột Engine: Tắt Redis/Valkey/KeyDB nếu đang chạy
+        for svc in redis-server redis valkey-server valkey keydb; do
+            if systemctl is-active --quiet "$svc" 2>/dev/null || systemctl is-enabled --quiet "$svc" 2>/dev/null; then
+                log_warn "Phát hiện $svc. Tự động tắt để nhường chỗ cho Memcached..."
+                systemctl stop "$svc" 2>/dev/null
+                systemctl disable "$svc" 2>/dev/null
+            fi
+        done
+
         pkg_update
         pkg_install memcached
         systemctl enable memcached

@@ -159,8 +159,8 @@ else
     for site_dir in /var/www/*; do
         domain=\$(basename "\$site_dir")
         [[ "\$domain" == "html" ]] && continue
-        find "\$BACKUP_ROOT/\$domain" -name "\${domain}_*.zip" -mtime +\$KEEP_DAYS -delete
-        find "\$BACKUP_ROOT/\$domain" -name "db_*.sql.gz" -mtime +\$KEEP_DAYS -delete
+        find "\$BACKUP_ROOT/\$domain" -name "\${domain}_*.tar.zst" -o -name "\${domain}_*.zip" -mtime +\$KEEP_DAYS -delete
+        find "\$BACKUP_ROOT/\$domain" -name "db_*.sql.zst" -o -name "db_*.sql.gz" -mtime +\$KEEP_DAYS -delete
     done
 fi
 
@@ -194,17 +194,17 @@ BACKUPSCRIPT
     pause
 }
 
-# Helper: Ensure zip installed
-ensure_zip_installed() {
-    if ! command -v zip &> /dev/null; then
-        echo "Installing zip..."
-        if command -v apt-get &> /dev/null; then apt-get install -y zip; elif command -v yum &> /dev/null; then yum install -y zip; fi
+# Helper: Ensure backup tools installed
+ensure_backup_tools() {
+    if ! command -v zip &> /dev/null || ! command -v zstd &> /dev/null; then
+        echo "Installing backup tools (zip, zstd)..."
+        if command -v apt-get &> /dev/null; then apt-get install -y zip zstd; elif command -v yum &> /dev/null; then yum install -y zip zstd; fi
     fi
 }
 
 backup_all_sites() {
     log_info "Đang backup TẤT CẢ sites (Local)..."
-    ensure_zip_installed
+    ensure_backup_tools
     
     local backup_root="/root/backups"
     local timestamp=$(date +%F_%H-%M-%S)
@@ -220,16 +220,24 @@ backup_all_sites() {
 
         echo -e "\n${CYAN}📦 Backup: $domain${NC}"
 
+        exec 200>"/tmp/vps_backup_${domain}.lock"
+        flock -x 200
+        
         if [[ -d "$site_dir/public_html" ]]; then
-            zip -r "$backup_dir/${domain}_${timestamp}.zip" "$site_dir/public_html" -x "*.log" -q
-            echo -e "  ✅ Code: $(du -sh "$backup_dir/${domain}_${timestamp}.zip" | cut -f1)"
+            cd "$site_dir/public_html" || continue
+            ionice -c 3 nice -n 19 tar -c --exclude="*.log" . | ionice -c 3 nice -n 19 zstd -3 -o "$backup_dir/${domain}_${timestamp}.tar.zst"
+            cd - > /dev/null
+            echo -e "  ✅ Code: $(du -sh "$backup_dir/${domain}_${timestamp}.tar.zst" | cut -f1)"
         fi
 
         db_name=$(echo "$domain" | tr -d '.-' | cut -c1-16)
         if mysql -e "USE $db_name" 2>/dev/null; then
-            mysqldump "$db_name" | gzip > "$backup_dir/db_${timestamp}.sql.gz"
-            echo -e "  ✅ DB: $(du -sh "$backup_dir/db_${timestamp}.sql.gz" | cut -f1)"
+            ionice -c 3 nice -n 19 mysqldump "$db_name" --single-transaction --max_allowed_packet=1G | ionice -c 3 nice -n 19 zstd > "$backup_dir/db_${timestamp}.sql.zst"
+            echo -e "  ✅ DB: $(du -sh "$backup_dir/db_${timestamp}.sql.zst" | cut -f1)"
         fi
+        
+        flock -u 200
+        exec 200>&-
         count=$((count + 1))
     done
 
@@ -325,6 +333,8 @@ perform_smart_restore() {
             unzip -o -q "$code_zip" -d "$tmp_extract"
         elif [[ "$code_zip" == *.tar.gz ]]; then
             tar -xzf "$code_zip" -C "$tmp_extract"
+        elif [[ "$code_zip" == *.tar.zst ]]; then
+            tar -I zstd -xf "$code_zip" -C "$tmp_extract"
         fi
         
         # Move content
@@ -350,6 +360,8 @@ perform_smart_restore() {
         log_info "Import Database..."
         if [[ "$db_sql" == *.gz ]]; then
             zcat "$db_sql" | mysql "$target_db_name"
+        elif [[ "$db_sql" == *.zst ]]; then
+            zstdcat "$db_sql" | mysql "$target_db_name"
         else
             mysql "$target_db_name" < "$db_sql"
         fi
@@ -560,21 +572,29 @@ backup_site_local() {
     backup_dir="/root/backups/$domain"
     mkdir -p "$backup_dir"
     
-    ensure_zip_installed
+    ensure_backup_tools
     
-    log_info "Backing up Code..."
-    zip -r "$backup_dir/${domain}_$timestamp.zip" "/var/www/$domain/public_html" -x "*.log" -q
+    exec 200>"/tmp/vps_backup_${domain}.lock"
+    if ! flock -n 200; then
+        echo -e "\n${RED}Lỗi Xung Đột Tiến Trình: Website đang được backup bởi tác vụ khác.${NC}"
+        pause; return
+    fi
+    
+    log_info "Backing up Code (ZSTD)..."
+    cd "/var/www/$domain/public_html" || return
+    ionice -c 3 nice -n 19 tar -c --exclude="*.log" . | ionice -c 3 nice -n 19 zstd -3 -o "$backup_dir/${domain}_$timestamp.tar.zst"
+    cd - > /dev/null
     
     db_name=$(echo "$domain" | tr -d '.-' | cut -c1-16)
-    log_info "Backing up DB..."
+    log_info "Backing up DB (ZSTD)..."
     if mysql -e "USE $db_name" 2>/dev/null; then
-        mysqldump "$db_name" > "$backup_dir/db_$timestamp.sql"
-        gzip "$backup_dir/db_$timestamp.sql"
+        ionice -c 3 nice -n 19 mysqldump "$db_name" --single-transaction --max_allowed_packet=1G | ionice -c 3 nice -n 19 zstd > "$backup_dir/db_$timestamp.sql.zst"
     else
         log_warn "Database $db_name không tồn tại."
     fi
     
     log_info "Backup hoàn tất tại $backup_dir"
+    flock -u 200; exec 200>&-
     cleanup_old_backups "$backup_dir" 7
     pause
 }
@@ -585,22 +605,26 @@ perform_gdrive_backup() {
     local timestamp=$(date +%F_%H-%M-%S)
     local backup_dir="/root/backups/$domain"
     
-    # Ensure zip is installed
-    if ! command -v zip &> /dev/null; then
-        echo "Installing zip..."
-        if command -v apt-get &> /dev/null; then apt-get install -y zip; elif command -v yum &> /dev/null; then yum install -y zip; fi
-    fi
+    ensure_backup_tools
     
     echo -e "\n${CYAN}>>> Đang xử lý: $domain${NC}"
     mkdir -p "$backup_dir"
     
-    local zip_file="$backup_dir/${domain}_$timestamp.zip"
-    local db_file="$backup_dir/db_$timestamp.sql.gz"
+    local zip_file="$backup_dir/${domain}_$timestamp.tar.zst"
+    local db_file="$backup_dir/db_$timestamp.sql.zst"
+    
+    exec 200>"/tmp/vps_backup_${domain}.lock"
+    if ! flock -n 200; then
+        echo -e "\n${RED}Bỏ qua $domain vì đang bị lock bởi tiến trình khác.${NC}"
+        return
+    fi
     
     # 1. Backup Code
     if [[ -d "/var/www/$domain/public_html" ]]; then
-        log_info "Đang nén mã nguồn (Code)..."
-        zip -r "$zip_file" "/var/www/$domain/public_html" -x "*.log" -x "*.tmp" -q
+        log_info "Đang nén mã nguồn (Code ZSTD)..."
+        cd "/var/www/$domain/public_html" || return
+        ionice -c 3 nice -n 19 tar -c --exclude="*.log" --exclude="*.tmp" . | ionice -c 3 nice -n 19 zstd -3 -o "$zip_file"
+        cd - > /dev/null
     else
         log_warn "Không tìm thấy thư mục public_html cho $domain"
     fi
@@ -608,11 +632,13 @@ perform_gdrive_backup() {
     # 2. Backup DB
     local db_name=$(echo "$domain" | tr -d '.-' | cut -c1-16)
     if mysql -e "USE $db_name" 2>/dev/null; then
-        log_info "Đang dump Database..."
-        mysqldump "$db_name" | gzip > "$db_file"
+        log_info "Đang dump Database (ZSTD)..."
+        ionice -c 3 nice -n 19 mysqldump "$db_name" --single-transaction --max_allowed_packet=1G | ionice -c 3 nice -n 19 zstd > "$db_file"
     else
         log_warn "Database $db_name không tồn tại."
     fi
+    
+    flock -u 200; exec 200>&-
     
     # 3. Upload & Remove Local
     # Use rclone move to upload and delete source file if successful
@@ -766,7 +792,7 @@ restore_site_local() {
             echo -e "$k. $fname ($(du -h "$file" | cut -f1))"
             ((k++))
         fi
-    done < <(find "$backup_dir" -maxdepth 1 -name "*.zip" -type f | sort -r)
+    done < <(find "$backup_dir" -maxdepth 1 \( -name "*.zip" -o -name "*.tar.zst" \) -type f | sort -r)
     
     read -p "Chọn file Code [1-${#code_files[@]}] (Enter để bỏ qua): " c_sel
     code_file=""

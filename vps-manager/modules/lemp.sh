@@ -83,6 +83,20 @@ install_lemp_menu() {
 }
 
 install_nginx() {
+    # Xử lý xung đột với OpenLiteSpeed
+    if systemctl is-active --quiet lshttpd 2>/dev/null || systemctl is-enabled --quiet lshttpd 2>/dev/null; then
+        echo -e "${YELLOW}CẢNH BÁO: Phát hiện OpenLiteSpeed đang hiển diện trên máy chủ!${NC}"
+        echo -e "Việc cài đặt Nginx sẽ đâm đụng port 80/443. Hệ thống sẽ tự động TẮT và VÔ HIỆU HOÁ OpenLiteSpeed để nhường port cho Nginx."
+        read -p "Tiếp tục cài đặt Nginx? [Y/n]: " c_nginx
+        if [[ "${c_nginx,,}" == "n" ]]; then
+            echo -e "${YELLOW}Đã huỷ cài đặt Nginx.${NC}"
+            return
+        fi
+        systemctl stop lshttpd 2>/dev/null
+        systemctl disable lshttpd 2>/dev/null
+        log_info "Đã tắt OpenLiteSpeed."
+    fi
+
     if is_installed nginx; then
         log_warn "Nginx is already installed."
     else
