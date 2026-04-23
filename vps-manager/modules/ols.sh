@@ -214,6 +214,11 @@ _configure_ols_base() {
 
     # Cấu hình OLS lắng nghe cổng 80/443
     if [[ -f "$OLS_CONF" ]]; then
+        # Đồng bộ User/Group chạy OLS với Nginx (www-data) để tránh lỗi 403 Forbidden
+        sed -i 's/^user.*nobody.*/user                      www-data/' "$OLS_CONF" 2>/dev/null
+        sed -i 's/^group.*nogroup.*/group                     www-data/' "$OLS_CONF" 2>/dev/null
+        sed -i 's/^group.*nobody.*/group                     www-data/' "$OLS_CONF" 2>/dev/null
+
         # Tạo fallback SSL nếu chưa tồn tại, OLS sẽ crash listener 443 nếu thiếu file SSL
         if [[ ! -f "/usr/local/lsws/conf/example.crt" ]]; then
             openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
