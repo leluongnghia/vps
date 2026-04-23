@@ -81,6 +81,7 @@ switch_to_ols() {
         local lsphp_bin="/usr/local/lsws/lsphp84/bin/lsphp"
         [[ ! -x "$lsphp_bin" ]] && lsphp_bin="/usr/local/lsws/lsphp83/bin/lsphp"
         [[ ! -x "$lsphp_bin" ]] && lsphp_bin="/usr/local/lsws/lsphp82/bin/lsphp"
+        [[ ! -x "$lsphp_bin" ]] && lsphp_bin="/usr/local/lsws/lsphp81/bin/lsphp"
         
         mkdir -p "/usr/local/lsws/conf/vhosts/${domain}"
         cat > "/usr/local/lsws/conf/vhosts/${domain}/vhconf.conf" <<EOF
@@ -102,6 +103,8 @@ extprocessor lsphp {
   type                    lsapi
   address                 uds://tmp/lshttpd/${domain}-lsphp.sock
   maxConns                35
+  extUser                 www-data
+  extGroup                www-data
   env                     PHP_LSAPI_CHILDREN=35
   env                     LSAPI_AVOID_FORK=0
   env                     LSAPI_MAX_IDLE=30
