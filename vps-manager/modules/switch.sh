@@ -95,7 +95,7 @@ index  {
 }
 
 scripthandler  {
-  add                     lsapi:\${lsphp_bin} php
+  add                     lsapi:lsphp php
 }
 
 extprocessor lsphp {
