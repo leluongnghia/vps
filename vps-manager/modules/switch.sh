@@ -137,8 +137,8 @@ virtualhost ${domain} {
   restrained              0
 }
 EOF
-        sed -i "/listener HTTP {/a\\  vhosts                  ${domain}" "/usr/local/lsws/conf/httpd_config.conf"
-        sed -i "/listener HTTPS {/a\\  vhosts                  ${domain}" "/usr/local/lsws/conf/httpd_config.conf"
+        sed -i "/listener HTTP {/a\\  map                     ${domain} ${domain}, www.${domain}" "/usr/local/lsws/conf/httpd_config.conf"
+        sed -i "/listener HTTPS {/a\\  map                     ${domain} ${domain}, www.${domain}" "/usr/local/lsws/conf/httpd_config.conf"
         
         chown -R lsadm:lsadm "/usr/local/lsws/conf/vhosts/${domain}"
         

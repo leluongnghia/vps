@@ -388,7 +388,10 @@ EOF
 
         # Thêm mapping listener -> vhost
         if grep -q "listener HTTP" "$OLS_CONF"; then
-            sed -i "/listener HTTP {/a\\  vhosts                  ${domain}" "$OLS_CONF"
+            sed -i "/listener HTTP {/a\\  map                     ${domain} ${domain}, www.${domain}" "$OLS_CONF"
+        fi
+        if grep -q "listener HTTPS" "$OLS_CONF"; then
+            sed -i "/listener HTTPS {/a\\  map                     ${domain} ${domain}, www.${domain}" "$OLS_CONF"
         fi
     fi
 
