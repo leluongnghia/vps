@@ -138,14 +138,21 @@ _cache_svc() {
 _prev_cpu_total=0
 _prev_cpu_idle=0
 _init_cpu() {
-    read -r _cpu a b c idle rest < /proc/stat
-    _prev_cpu_total=$(( a + b + c + idle + rest ))
-    _prev_cpu_idle=$idle
+    read -r -a cpu_vars < /proc/stat
+    _prev_cpu_total=0
+    for val in "${cpu_vars[@]:1}"; do
+        _prev_cpu_total=$(( _prev_cpu_total + val ))
+    done
+    _prev_cpu_idle=${cpu_vars[4]}
 }
 
 _get_cpu_percent() {
-    read -r _cpu a b c idle rest < /proc/stat
-    local total=$(( a + b + c + idle + rest ))
+    read -r -a cpu_vars < /proc/stat
+    local total=0
+    for val in "${cpu_vars[@]:1}"; do
+        total=$(( total + val ))
+    done
+    local idle=${cpu_vars[4]}
     local diff_total=$(( total - _prev_cpu_total ))
     local diff_idle=$(( idle - _prev_cpu_idle ))
     _prev_cpu_total=$total
