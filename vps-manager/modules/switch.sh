@@ -39,9 +39,21 @@ switch_to_ols() {
     
     # Check OLS installation
     if [[ ! -d "/usr/local/lsws" ]]; then
-        log_error "OpenLiteSpeed chưa được cài đặt trên máy chủ!"
-        echo -e "Vui lòng vào Menu 21 để Cài đặt OLS trước, sau đó dùng chức năng này để MAP dữ liệu."
-        pause; return
+        log_warn "OpenLiteSpeed chưa được cài đặt trên máy chủ!"
+        read -p "Bạn có muốn CÀI ĐẶT OpenLiteSpeed ngay bây giờ không? [Y/n]: " auto_install
+        if [[ "$auto_install" == "y" || "$auto_install" == "Y" || -z "$auto_install" ]]; then
+            source "$(dirname "${BASH_SOURCE[0]}")/ols.sh"
+            install_ols_stack
+            
+            if [[ ! -d "/usr/local/lsws" ]]; then
+                log_error "Lỗi cài đặt OLS. Không thể tiếp tục chuyển đổi."
+                pause; return
+            fi
+            # OLS cài xong sẽ dừng Nginx, tiếp tục luồng chuyển đổi bên dưới
+        else
+            echo -e "Vui lòng cài đặt OLS trước khi chuyển đổi."
+            pause; return
+        fi
     fi
     
     # 1. Switch Services
