@@ -1088,6 +1088,7 @@ install_valkey() {
     # Add www-data to valkey group for socket access
     usermod -aG valkey www-data 2>/dev/null || usermod -aG redis www-data 2>/dev/null
 
+    systemctl daemon-reload 2>/dev/null
     systemctl enable valkey 2>/dev/null
     systemctl restart valkey 2>/dev/null
 
@@ -1098,6 +1099,7 @@ install_valkey() {
     else
         pkg_install php${php_ver}-redis
         phpenmod -v ${php_ver} redis 2>/dev/null
+        systemctl daemon-reload 2>/dev/null
         systemctl restart php${php_ver}-fpm
     fi
     log_info "Valkey installed and enabled (sử dụng php-redis module)."
@@ -1179,30 +1181,148 @@ install_memcached() {
     log_info "Memcached installed and enabled."
 }
 
-# 7. Object Cache Setup
+# 6. Object Cache Setup
 setup_object_cache() {
+    clear
+    echo -e "${BLUE}=================================================${NC}"
+    echo -e "${GREEN}    ðŸ“¦ Enable Object Cache (Redis/Valkey/Memcached)${NC}"
+    echo -e "${BLUE}=================================================${NC}"
     echo -e "${YELLOW}Select Object Cache Backend:${NC}"
-    echo "1. Valkey (Khuyên dùng - Nhanh hơn 30%, tương thích 100% Redis)"
-    echo "2. Redis (Bản truyền thống)"
+    echo "1. Valkey (Khuyen dung - Nhanh hon 30%, tuong thich 100% Redis)"
+    echo "2. Redis (Ban truyen thong)"
     echo "3. Memcached"
     echo "0. Cancel"
     read -p "Choice: " cache_choice
-    
+
     case $cache_choice in
         1)
             install_valkey
-            echo -e "${GREEN}Install 'Redis Object Cache' plugin in WordPress (Valkey is 100% compatible)${NC}"
+            _setup_wp_redis_plugin "valkey"
             ;;
         2)
             install_redis
-            echo -e "${GREEN}Install 'Redis Object Cache' plugin in WordPress${NC}"
+            _setup_wp_redis_plugin "redis"
             ;;
         3)
             install_memcached
-            echo -e "${GREEN}Install 'Memcached Object Cache' plugin in WordPress${NC}"
+            _setup_wp_memcached_plugin
             ;;
+        0) return ;;
+        *) echo -e "${RED}Invalid choice!${NC}" ;;
     esac
     pause
+}
+
+# Auto-install va kich hoat Redis Object Cache plugin cho tat ca WP sites
+_setup_wp_redis_plugin() {
+    local backend="${1:-valkey}"
+
+    if ! command -v wp &>/dev/null; then
+        log_warn "WP-CLI chua co -- bo qua cai plugin tu dong."
+        echo -e "${YELLOW}Hay cai thu cong plugin 'Redis Object Cache' trong WP Admin.${NC}"
+        return
+    fi
+
+    # Xac dinh host/socket
+    local redis_host="127.0.0.1"
+    local redis_port="6379"
+    local redis_scheme="tcp"
+    if [[ "$backend" == "valkey" ]] && [[ -S "/tmp/valkey.sock" ]]; then
+        redis_host="/tmp/valkey.sock"; redis_scheme="unix"; redis_port="0"
+    elif [[ "$backend" == "redis" ]] && [[ -S "/tmp/redis.sock" ]]; then
+        redis_host="/tmp/redis.sock"; redis_scheme="unix"; redis_port="0"
+    fi
+
+    local found=0
+    for wpc in /var/www/*/public_html/wp-config.php; do
+        [[ ! -f "$wpc" ]] && continue
+        local site_root; site_root=$(dirname "$wpc")
+        local domain;   domain=$(basename "$(dirname "$site_root")")
+        found=$((found+1))
+
+        log_info "[$domain] Cai dat Redis Object Cache plugin..."
+
+        # 1. Cai + kich hoat plugin redis-cache
+        if ! wp plugin is-installed redis-cache --path="$site_root" --allow-root 2>/dev/null; then
+            wp plugin install redis-cache --activate --path="$site_root" --allow-root 2>/dev/null \
+                && echo "  v Plugin redis-cache: CAI + KICH HOAT" \
+                || { log_warn "[$domain] Cai plugin that bai -- bo qua."; continue; }
+        else
+            wp plugin activate redis-cache --path="$site_root" --allow-root 2>/dev/null
+            echo "  v Plugin redis-cache: KICH HOAT"
+        fi
+
+        # 2. Ghi hang so vao wp-config.php
+        wp config set WP_REDIS_SCHEME "$redis_scheme" --type=constant --path="$site_root" --allow-root 2>/dev/null
+        wp config set WP_REDIS_HOST   "$redis_host"   --type=constant --path="$site_root" --allow-root 2>/dev/null
+        wp config set WP_REDIS_PORT   "$redis_port"   --raw --type=constant --path="$site_root" --allow-root 2>/dev/null
+        wp config set WP_CACHE        "true"          --raw --type=constant --path="$site_root" --allow-root 2>/dev/null
+        echo "  v wp-config.php: WP_REDIS_HOST / WP_CACHE da ghi"
+
+        # 3. Enable drop-in (object-cache.php)
+        wp redis enable --path="$site_root" --allow-root 2>/dev/null \
+            && echo "  v Object Cache drop-in: DA BAT" \
+            || echo "  ! Chay 'wp redis enable' thu cong trong WP Admin"
+
+        echo ""
+    done
+
+    if [[ $found -eq 0 ]]; then
+        log_warn "Khong tim thay WordPress site nao tai /var/www/*/public_html/"
+        echo -e "${YELLOW}Hay cai plugin 'Redis Object Cache' thu cong trong WP Admin.${NC}"
+        return
+    fi
+
+    echo -e "${GREEN}=================================================${NC}"
+    echo -e "${GREEN} v Redis Object Cache da cai xong cho $found site(s)!${NC}"
+    echo -e "${GREEN}=================================================${NC}"
+    if [[ "$redis_scheme" == "unix" ]]; then
+        echo -e "  Backend : ${CYAN}$backend (Unix Socket)${NC}"
+        echo -e "  Socket  : ${CYAN}$redis_host${NC}"
+    else
+        echo -e "  Backend : ${CYAN}$backend (TCP 127.0.0.1:6379)${NC}"
+    fi
+    echo -e "${YELLOW}Luu y: Vao WP Admin -> Settings -> Redis -> kiem tra ket noi.${NC}"
+}
+
+# Cai va kich hoat Memcached Object Cache cho tat ca WP sites
+_setup_wp_memcached_plugin() {
+    if ! command -v wp &>/dev/null; then
+        log_warn "WP-CLI chua co -- bo qua cai plugin tu dong."
+        echo -e "${YELLOW}Hay cai thu cong plugin 'Memcached Object Cache' trong WP Admin.${NC}"
+        return
+    fi
+
+    local found=0
+    for wpc in /var/www/*/public_html/wp-config.php; do
+        [[ ! -f "$wpc" ]] && continue
+        local site_root; site_root=$(dirname "$wpc")
+        local domain;   domain=$(basename "$(dirname "$site_root")")
+        found=$((found+1))
+
+        log_info "[$domain] Cai dat Memcached Object Cache..."
+        local mc_dropin="$site_root/wp-content/object-cache.php"
+        if [[ ! -f "$mc_dropin" ]]; then
+            curl -fsSL "https://raw.githubusercontent.com/Ipstenu/memcached-redux/master/object-cache.php" \
+                -o "$mc_dropin" 2>/dev/null \
+                && echo "  v Memcached object-cache.php: TAI XONG" \
+                || { log_warn "[$domain] Tai drop-in that bai."; continue; }
+        else
+            echo "  v object-cache.php: DA CO"
+        fi
+        wp config set WP_CACHE "true" --raw --type=constant --path="$site_root" --allow-root 2>/dev/null
+        echo "  v WP_CACHE=true: GHI VAO wp-config.php"
+        echo ""
+    done
+
+    if [[ $found -eq 0 ]]; then
+        log_warn "Khong tim thay WordPress site nao."
+        return
+    fi
+
+    echo -e "${GREEN}=================================================${NC}"
+    echo -e "${GREEN} v Memcached Object Cache da cai xong cho $found site(s)!${NC}"
+    echo -e "${GREEN}=================================================${NC}"
 }
 
 # 9. Disable WordPress Bloat
