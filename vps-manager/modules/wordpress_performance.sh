@@ -434,22 +434,27 @@ preload_cache_sitemap() {
 
     # Lay tat ca URL tu sitemap (ho tro sitemap index)
     local all_urls
-    all_urls=$(curl -sk --max-time 30 "$sitemap_url" |         sed 's/<loc>/
-<loc>/g' |         grep '<loc>' |         sed -e 's/.*<loc>//;s/<\/loc>.*//' |         grep -v '\.xml$' |         grep -iP '^https?://' |         sort -u)
+    all_urls=$(curl -sk --max-time 30 "$sitemap_url" | \
+        grep -oP '(?<=<loc>)[^<]+' | \
+        grep -v '\.xml$' | \
+        grep -iP '^https?://' | \
+        sort -u)
 
     # Neu la sitemap index, lay them URL con
     local sub_sitemaps
-    sub_sitemaps=$(curl -sk --max-time 30 "$sitemap_url" |         sed 's/<loc>/
-<loc>/g' |         grep '<loc>' |         sed -e 's/.*<loc>//;s/<\/loc>.*//' |         grep '\.xml$')
+    sub_sitemaps=$(curl -sk --max-time 30 "$sitemap_url" | \
+        grep -oP '(?<=<loc>)[^<]+' | \
+        grep '\.xml$')
 
     if [[ -n "$sub_sitemaps" ]]; then
         log_info "Phat hien sitemap index, dang tai sub-sitemaps..."
         while IFS= read -r sub_url; do
             local sub_urls
-            sub_urls=$(curl -sk --max-time 30 "$sub_url" |                 sed 's/<loc>/
-<loc>/g' |                 grep '<loc>' |                 sed -e 's/.*<loc>//;s/<\/loc>.*//' |                 grep -iP '^https?://' |                 sort -u)
-            all_urls="${all_urls}"$'
-'"${sub_urls}"
+            sub_urls=$(curl -sk --max-time 30 "$sub_url" | \
+                grep -oP '(?<=<loc>)[^<]+' | \
+                grep -iP '^https?://' | \
+                sort -u)
+            all_urls="${all_urls}"$'\n'"${sub_urls}"
         done <<< "$sub_sitemaps"
     fi
 
