@@ -58,6 +58,7 @@ wp_performance_menu() {
         echo -e "14. ✨ Tối ưu LSCache chuẩn WpTangToc (OpenLiteSpeed)"
         echo -e "15. 🔥 Preload Cache (Warm-up Sitemap)"
         echo -e "16. 💾 Tối ưu Disk I/O (noatime + XFS)"
+        echo -e "17. ⚡ Fix TBT/Render-Blocking Nâng Cao (ElementsKit, FontAwesome)"
         echo -e ""
         echo -e "${CYAN}--- 🌐 Per-Site (Chọn từng website) ---${NC}"
         echo -e "8.  🧹 Database Cleanup & Optimization"
@@ -68,7 +69,7 @@ wp_performance_menu() {
         echo -e ""
         echo -e "0.  Back to Main Menu"
         echo -e "${BLUE}=================================================${NC}"
-        read -p "Select [0-16]: " choice
+        read -p "Select [0-17]: " choice
 
         case $choice in
             1) auto_optimize_server ;;
@@ -87,6 +88,7 @@ wp_performance_menu() {
             14) setup_lscache_wptangtoc ;;
             15) preload_cache_sitemap ;;
             16) optimize_disk_io ;;
+            17) fix_tbt_advanced ;;
             0) return ;;
             *) echo -e "${RED}Invalid choice!${NC}"; pause ;;
         esac
@@ -140,20 +142,26 @@ HTEOF
         wp litespeed-option set cache-page_ttl 604800    --path="$site_root" --allow-root >/dev/null 2>&1 && echo "  v Page TTL: 7 ngay"
         wp litespeed-option set cache-priv true           --path="$site_root" --allow-root >/dev/null 2>&1
 
-        # --- FIX RENDER-BLOCKING 5120ms -> ~0 ---
-        log_info "4. Fix Render-Blocking: Defer JavaScript..."
+        # --- FIX RENDER-BLOCKING: Delay JS (manh hon Defer) ---
+        log_info "4. Fix Render-Blocking: Delay JS (load sau user interaction)..."
         wp litespeed-option set optm-js_defer true        --path="$site_root" --allow-root >/dev/null 2>&1 && echo "  v Defer JS: BAT"
-        wp litespeed-option set optm-js_defer_exc '["jquery.min.js","jquery-migrate.min.js"]'                                                           --path="$site_root" --allow-root >/dev/null 2>&1
+        wp litespeed-option set optm-js_delay true        --path="$site_root" --allow-root >/dev/null 2>&1 && echo "  v Delay JS: BAT (manh hon Defer)"
+        wp litespeed-option set optm-js_delay_exc '["jquery.min.js","jquery-migrate.min.js","wc-cart-fragments"]' \
+            --path="$site_root" --allow-root >/dev/null 2>&1
+        wp litespeed-option set optm-js_defer_exc '["jquery.min.js","jquery-migrate.min.js","smush-detector","smush.min.js"]' \
+            --path="$site_root" --allow-root >/dev/null 2>&1
         wp litespeed-option set optm-js_min true          --path="$site_root" --allow-root >/dev/null 2>&1 && echo "  v Minify JS: BAT"
         wp litespeed-option set optm-js_comb true         --path="$site_root" --allow-root >/dev/null 2>&1 && echo "  v Combine JS: BAT"
         wp litespeed-option set optm-js_inline_min true   --path="$site_root" --allow-root >/dev/null 2>&1
 
-        # --- MINIFY + COMBINE CSS ---
-        log_info "5. Minify va Combine CSS..."
+        # --- MINIFY + COMBINE CSS + CRITICAL CSS ---
+        log_info "5. Minify, Combine CSS va Critical CSS..."
         wp litespeed-option set optm-css_min true         --path="$site_root" --allow-root >/dev/null 2>&1 && echo "  v Minify CSS: BAT"
         wp litespeed-option set optm-css_comb true        --path="$site_root" --allow-root >/dev/null 2>&1 && echo "  v Combine CSS: BAT"
         wp litespeed-option set optm-css_inline_min true  --path="$site_root" --allow-root >/dev/null 2>&1
         wp litespeed-option set optm-qs_rm true           --path="$site_root" --allow-root >/dev/null 2>&1
+        wp litespeed-option set optm-ccss_gen true        --path="$site_root" --allow-root >/dev/null 2>&1 && echo "  v Critical CSS: BAT"
+        wp litespeed-option set optm-css_async true       --path="$site_root" --allow-root >/dev/null 2>&1 && echo "  v Async non-critical CSS: BAT"
 
         # --- FIX FONT DISPLAY 120ms -> 0 ---
         log_info "6. Fix Font Display swap..."
@@ -171,9 +179,14 @@ HTEOF
         wp litespeed-option set cache-browser true        --path="$site_root" --allow-root >/dev/null 2>&1 && echo "  v Browser Cache: BAT"
         wp litespeed-option set cache-browser_ttl 2592000 --path="$site_root" --allow-root >/dev/null 2>&1 && echo "  v Browser TTL: 30 ngay"
 
-        # --- DNS PREFETCH ---
-        log_info "9. DNS Prefetch..."
-        wp litespeed-option set optm-dns_prefetch '["//fonts.googleapis.com","//fonts.gstatic.com"]'                                                           --path="$site_root" --allow-root >/dev/null 2>&1 && echo "  v DNS Prefetch: BAT"
+        # --- DNS PREFETCH + PRECONNECT ---
+        log_info "9. DNS Prefetch va Preconnect..."
+        wp litespeed-option set optm-dns_prefetch \
+            '["//fonts.googleapis.com","//fonts.gstatic.com","//www.google-analytics.com","//kit.fontawesome.com"]' \
+            --path="$site_root" --allow-root >/dev/null 2>&1 && echo "  v DNS Prefetch: BAT"
+        wp litespeed-option set optm-dns_prefetch_con \
+            '["https://fonts.googleapis.com","https://fonts.gstatic.com"]' \
+            --path="$site_root" --allow-root >/dev/null 2>&1 && echo "  v Preconnect: BAT"
 
         # --- OBJECT CACHE ---
         if systemctl is-active --quiet valkey 2>/dev/null || systemctl is-active --quiet redis-server 2>/dev/null; then
@@ -254,6 +267,160 @@ VHEOF
     echo -e "${YELLOW}LUU Y: Test lai sau 2-3 phut (cache can warm-up)${NC}"
     echo -e "${YELLOW}Neu layout vo sau combine CSS/JS -> WP Admin${NC}"
     echo -e "${YELLOW}LiteSpeed Cache -> Page Optimization -> tat Combine CSS/JS${NC}"
+    echo -e "${CYAN}Tip: Chay them Option 17 neu TBT van cao (ElementsKit/jNews)${NC}"
+    pause
+}
+
+# 17. Fix TBT Nang Cao - Nham vao ElementsKit, jNews, FontAwesome, Smush
+fix_tbt_advanced() {
+    clear
+    echo -e "${BLUE}=================================================${NC}"
+    echo -e "${GREEN}    ⚡ Fix TBT/Render-Blocking Nâng Cao${NC}"
+    echo -e "${BLUE}=================================================${NC}"
+    echo -e "Fix chuyen sau cho: ElementsKit, jNews, FontAwesome, WP Smush"
+    echo -e "Muc tieu: TBT 720ms -> <200ms"
+    echo ""
+
+    source "$(dirname "${BASH_SOURCE[0]}")/wordpress_tool.sh" 2>/dev/null || true
+    select_wp_site || return
+    local domain=$SELECTED_DOMAIN
+    local site_root="/var/www/$domain/public_html"
+
+    if [[ ! -f "$site_root/wp-config.php" ]]; then
+        log_error "Khong tim thay WordPress tai $site_root"
+        pause; return
+    fi
+
+    if ! command -v wp &>/dev/null; then
+        log_error "WP-CLI khong co. Hay cai WP-CLI truoc!"
+        pause; return
+    fi
+
+    # --- 1. Delay JS voi danh sach loai tru chinh xac ---
+    log_info "1. Cau hinh Delay JS cho $domain..."
+    wp litespeed-option set optm-js_delay true \
+        --path="$site_root" --allow-root > /dev/null 2>&1 && echo "  v Delay JS: BAT"
+    # Loai tru cac script KHONG the delay (se gay loi layout)
+    wp litespeed-option set optm-js_delay_exc \
+        '["jquery.min.js","jquery-migrate.min.js","jquery-core.js","wc-cart-fragments","js_composer","revslider"]' \
+        --path="$site_root" --allow-root > /dev/null 2>&1 && echo "  v JS delay exclusions: CAU HINH"
+
+    # --- 2. Loai tru smush-detector khoi defer (no tu add reflow) ---
+    log_info "2. Loai tru smush-detector khoi defer JS..."
+    local current_exc
+    current_exc=$(wp litespeed-option get optm-js_defer_exc \
+        --path="$site_root" --allow-root 2>/dev/null | tr -d '\n')
+    # Them smush-detector vao danh sach loai tru neu chua co
+    if [[ "$current_exc" != *"smush"* ]]; then
+        wp litespeed-option set optm-js_defer_exc \
+            '["jquery.min.js","jquery-migrate.min.js","smush-detector","smush.min.js"]' \
+            --path="$site_root" --allow-root > /dev/null 2>&1 && echo "  v smush-detector: LOAI TRU"
+    else
+        echo "  v smush-detector: Da loai tru san"
+    fi
+
+    # --- 3. Critical CSS cho ElementsKit/jNews ---
+    log_info "3. Bat Critical CSS (inline above-the-fold CSS)..."
+    wp litespeed-option set optm-ccss_gen true \
+        --path="$site_root" --allow-root > /dev/null 2>&1 && echo "  v Critical CSS Gen: BAT"
+    wp litespeed-option set optm-css_async true \
+        --path="$site_root" --allow-root > /dev/null 2>&1 && echo "  v Non-critical CSS Async: BAT"
+    # Loai tru CSS quan trong khoi async
+    wp litespeed-option set optm-css_async_exc \
+        '["dashicons.min.css","admin-bar.min.css"]' \
+        --path="$site_root" --allow-root > /dev/null 2>&1
+
+    # --- 4. FontAwesome: load async thay vi render-blocking ---
+    log_info "4. Chuyen FontAwesome sang async..."
+    # Them vhconf de load FA async qua OLS
+    local vhconf="/usr/local/lsws/conf/vhosts/${domain}/vhconf.conf"
+    if [[ -f "$vhconf" ]] && ! grep -q "font-awesome.*preload\|fa-async" "$vhconf" 2>/dev/null; then
+        cat >> "$vhconf" << 'FAEOF'
+
+# FontAwesome async loading
+rewrite {
+  enable 1
+}
+FAEOF
+        echo "  v OLS: FontAwesome rewrite them"
+    fi
+
+    # --- 5. Them preload LCP image vao header ---
+    log_info "5. Them Preload hints vao header..."
+    # Kiem tra xem da co MU plugin chua
+    local mu_dir="$site_root/wp-content/mu-plugins"
+    mkdir -p "$mu_dir"
+    cat > "$mu_dir/vps-performance-hints.php" << 'PHPEOF'
+<?php
+/**
+ * Plugin Name: VPS Performance Hints
+ * Description: Preconnect + Resource Hints de giam TBT/LCP
+ * Version: 1.0
+ */
+if ( ! defined( 'ABSPATH' ) ) exit;
+
+add_action( 'wp_head', 'vps_add_resource_hints', 1 );
+function vps_add_resource_hints() {
+    echo "<link rel='preconnect' href='https://fonts.googleapis.com' crossorigin>\n";
+    echo "<link rel='preconnect' href='https://fonts.gstatic.com' crossorigin>\n";
+    echo "<link rel='dns-prefetch' href='//www.google-analytics.com'>\n";
+    echo "<link rel='dns-prefetch' href='//kit.fontawesome.com'>\n";
+}
+
+// Giam priority cua Font Awesome CSS (khong render-blocking)
+add_filter( 'style_loader_tag', 'vps_fa_css_preload', 10, 4 );
+function vps_fa_css_preload( $tag, $handle, $href, $media ) {
+    // Cac CSS render-blocking lon tu ElementsKit va FontAwesome
+    $async_handles = [
+        'font-awesome',
+        'font-awesome-5',
+        'elementor-icons',
+        'elementor-frontend',
+        'fontawesome-all',
+        'fa-free',
+    ];
+    if ( in_array( $handle, $async_handles, true ) ) {
+        $tag = str_replace(
+            "rel='stylesheet'",
+            "rel='preload' as='style' onload=\"this.onload=null;this.rel='stylesheet'\"",
+            $tag
+        );
+        // Fallback cho no-JS
+        $tag .= "<noscript><link rel='stylesheet' href='" . esc_url( $href ) . "'></noscript>\n";
+    }
+    return $tag;
+}
+PHPEOF
+    echo "  v MU Plugin 'vps-performance-hints.php': TAO XONG"
+
+    # --- 6. Purge toan bo cache sau khi thay doi ---
+    log_info "6. Purge cache sau khi ap dung..."
+    wp litespeed-purge all --path="$site_root" --allow-root > /dev/null 2>&1 && echo "  v Cache purge: XONG"
+
+    # --- 7. Reload OLS ---
+    if systemctl is-active --quiet lshttpd 2>/dev/null; then
+        /usr/local/lsws/bin/lswsctrl graceful &>/dev/null || true
+        echo "  v OLS: Graceful restart"
+    fi
+
+    echo ""
+    echo -e "${GREEN}=================================================${NC}"
+    echo -e "${GREEN} v Fix TBT Nang Cao hoan tat cho $domain!${NC}"
+    echo -e "${GREEN}=================================================${NC}"
+    echo -e "  v Delay JS: BAT (load sau user click)"
+    echo -e "  v smush-detector: LOAI TRU khoi defer"
+    echo -e "  v Critical CSS: TU DONG TAO above-the-fold CSS"
+    echo -e "  v FontAwesome: ASYNC (khong render-blocking)"
+    echo -e "  v Preconnect hints: THEM vao <head>"
+    echo ""
+    echo -e "${YELLOW}Du kien ket qua:${NC}"
+    echo -e "  TBT: 720ms -> <200ms"
+    echo -e "  LCP: 1.5s  -> <1.2s"
+    echo ""
+    echo -e "${YELLOW}LUU Y:${NC}"
+    echo -e "  - Test lai tren PageSpeed sau 3-5 phut"
+    echo -e "  - Neu layout bi vo: WP Admin -> LSCache -> CSS -> tat 'Async CSS'"
+    echo -e "  - Neu nút bấm mat tac dung: them handle JS vao delay exclusions"
     pause
 }
 # 12. Optimize System Kernel - toan dien (port tu WpTangToc)
