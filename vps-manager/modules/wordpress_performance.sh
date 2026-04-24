@@ -195,11 +195,11 @@ HTEOF
         if systemctl is-active --quiet valkey 2>/dev/null || systemctl is-active --quiet redis-server 2>/dev/null; then
             log_info "10. Ket noi Object Cache (Redis/Valkey)..."
             wp litespeed-option set object true --path="$site_root" --allow-root >/dev/null 2>&1 && echo "  v Object Cache: BAT"
-            if [[ -S "/tmp/valkey.sock" ]]; then
-                wp litespeed-option set object-host "/tmp/valkey.sock" --path="$site_root" --allow-root >/dev/null 2>&1
+            if [[ -S "/var/run/valkey/valkey.sock" ]]; then
+                wp litespeed-option set object-host "/var/run/valkey/valkey.sock" --path="$site_root" --allow-root >/dev/null 2>&1
                 wp litespeed-option set object-port 0 --path="$site_root" --allow-root >/dev/null 2>&1
-            elif [[ -S "/tmp/redis.sock" ]]; then
-                wp litespeed-option set object-host "/tmp/redis.sock" --path="$site_root" --allow-root >/dev/null 2>&1
+            elif [[ -S "/var/run/redis/redis.sock" ]]; then
+                wp litespeed-option set object-host "/var/run/redis/redis.sock" --path="$site_root" --allow-root >/dev/null 2>&1
                 wp litespeed-option set object-port 0 --path="$site_root" --allow-root >/dev/null 2>&1
             else
                 wp litespeed-option set object-host "127.0.0.1" --path="$site_root" --allow-root >/dev/null 2>&1
@@ -1077,7 +1077,8 @@ install_valkey() {
     local vconf="/etc/valkey/valkey.conf"
     if [[ ! -f "$vconf" ]]; then vconf="/etc/valkey/valkey-server.conf"; fi
     if [[ -f "$vconf" ]] && ! grep -q "^unixsocket " "$vconf"; then
-        echo "unixsocket /tmp/valkey.sock" >> "$vconf"
+        mkdir -p /var/run/valkey && chown valkey:valkey /var/run/valkey 2>/dev/null || true
+        echo "unixsocket /var/run/valkey/valkey.sock" >> "$vconf"
         echo "unixsocketperm 770" >> "$vconf"
         # Optional: memory optimization
         if ! grep -q "^maxmemory " "$vconf"; then
@@ -1124,7 +1125,8 @@ install_redis() {
         # Configure Unix Socket for Object Cache
         local rconf="/etc/redis/redis.conf"
         if [[ -f "$rconf" ]] && ! grep -q "^unixsocket " "$rconf"; then
-            echo "unixsocket /tmp/redis.sock" >> "$rconf"
+            mkdir -p /var/run/redis && chown redis:redis /var/run/redis 2>/dev/null || true
+            echo "unixsocket /var/run/redis/redis.sock" >> "$rconf"
             echo "unixsocketperm 770" >> "$rconf"
             if ! grep -q "^maxmemory " "$rconf"; then
                 echo "maxmemory 256mb" >> "$rconf"
@@ -1227,10 +1229,10 @@ _setup_wp_redis_plugin() {
     local redis_host="127.0.0.1"
     local redis_port="6379"
     local redis_scheme="tcp"
-    if [[ "$backend" == "valkey" ]] && [[ -S "/tmp/valkey.sock" ]]; then
-        redis_host="/tmp/valkey.sock"; redis_scheme="unix"; redis_port="0"
-    elif [[ "$backend" == "redis" ]] && [[ -S "/tmp/redis.sock" ]]; then
-        redis_host="/tmp/redis.sock"; redis_scheme="unix"; redis_port="0"
+    if [[ "$backend" == "valkey" ]] && [[ -S "/var/run/valkey/valkey.sock" ]]; then
+        redis_host="/var/run/valkey/valkey.sock"; redis_scheme="unix"; redis_port="0"
+    elif [[ "$backend" == "redis" ]] && [[ -S "/var/run/redis/redis.sock" ]]; then
+        redis_host="/var/run/redis/redis.sock"; redis_scheme="unix"; redis_port="0"
     fi
 
     local found=0
