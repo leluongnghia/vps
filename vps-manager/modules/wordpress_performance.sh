@@ -137,10 +137,13 @@ HTEOF
         fi
         
         # --- BAT PAGE CACHE (LCP: 16.7s -> <2s) ---
-        log_info "3. Bat Full-Page Cache..."
+        log_info "3. Bat Full-Page Cache & Tat Guest Mode..."
         wp litespeed-option set cache-page true          --path="$site_root" --allow-root >/dev/null 2>&1 && echo "  v Page Cache: BAT"
         wp litespeed-option set cache-page_ttl 604800    --path="$site_root" --allow-root >/dev/null 2>&1 && echo "  v Page TTL: 7 ngay"
-        wp litespeed-option set cache-priv true           --path="$site_root" --allow-root >/dev/null 2>&1
+        wp litespeed-option set cache-priv true          --path="$site_root" --allow-root >/dev/null 2>&1
+        # Tat Guest Mode vi thuong gay loi load ca dummy-css lan file goc lam LCP tang vot
+        wp litespeed-option set guest false              --path="$site_root" --allow-root >/dev/null 2>&1 && echo "  v Guest Mode: TAT (Fix loi LCP)"
+        wp litespeed-option set guest_op false           --path="$site_root" --allow-root >/dev/null 2>&1
 
         # --- FIX RENDER-BLOCKING: Delay JS (manh hon Defer) ---
         log_info "4. Fix Render-Blocking: Delay JS (load sau user interaction)..."
@@ -267,6 +270,7 @@ VHEOF
     echo -e "${YELLOW}LUU Y: Test lai sau 2-3 phut (cache can warm-up)${NC}"
     echo -e "${YELLOW}Neu layout vo sau combine CSS/JS -> WP Admin${NC}"
     echo -e "${YELLOW}LiteSpeed Cache -> Page Optimization -> tat Combine CSS/JS${NC}"
+    echo -e "${YELLOW}LUU Y 2: Vao WP Admin -> Smush -> TẮT Lazy Load (vi da dung LSCache Lazy Load roi)${NC}"
     echo -e "${CYAN}Tip: Chay them Option 17 neu TBT van cao (ElementsKit/jNews)${NC}"
     pause
 }
