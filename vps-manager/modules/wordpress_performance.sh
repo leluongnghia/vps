@@ -1262,6 +1262,9 @@ _setup_wp_redis_plugin() {
         echo "  v wp-config.php: WP_REDIS_HOST / WP_CACHE da ghi"
 
         # 3. Enable drop-in (object-cache.php)
+        # Xoa drop-in cu (tu LSCache, Memcached...) de tranh loi "Drop-in is invalid"
+        rm -f "$site_root/wp-content/object-cache.php" 2>/dev/null
+        
         wp redis enable --path="$site_root" --allow-root 2>/dev/null \
             && echo "  v Object Cache drop-in: DA BAT" \
             || echo "  ! Chay 'wp redis enable' thu cong trong WP Admin"
