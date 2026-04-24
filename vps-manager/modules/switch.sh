@@ -129,6 +129,25 @@ rewrite  {
   rules                   <<<END_rules
 RewriteEngine on
 RewriteBase /
+
+# --- Static file pass-through: uploads & wp-content assets never go through WordPress ---
+RewriteRule ^wp-content/uploads/ - [L]
+RewriteRule ^wp-includes/ - [L]
+RewriteRule ^wp-content/plugins/ - [L]
+RewriteRule ^wp-content/themes/ - [L]
+
+# WebP Fallback: only for image extensions (not generic catch-all)
+# Serve .webp if browser supports it AND a .webp version exists beside the original
+RewriteCond %{HTTP_ACCEPT} image/webp
+RewriteCond %{DOCUMENT_ROOT}%{REQUEST_FILENAME} -f
+RewriteCond %{DOCUMENT_ROOT}%{REQUEST_FILENAME}\.webp !-f
+RewriteRule ^(.*)\.(?:jpe?g|png|gif)$ - [L]
+
+RewriteCond %{HTTP_ACCEPT} image/webp
+RewriteCond %{DOCUMENT_ROOT}%{REQUEST_FILENAME}\.webp -f
+RewriteRule ^(.*)\.(?:jpe?g|png|gif)$ $1.webp [T=image/webp,E=accept:1,L]
+
+# WordPress: only route to index.php if file/dir does not exist
 RewriteRule ^index\.php$ - [L]
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
