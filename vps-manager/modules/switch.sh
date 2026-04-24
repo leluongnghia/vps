@@ -126,8 +126,38 @@ extprocessor lsphp {
 rewrite  {
   enable                  1
   autoLoadHtaccess        1
+  rules                   <<<END_rules
+RewriteEngine on
+RewriteBase /
+RewriteRule ^index\.php$ - [L]
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule . /index.php [L]
+  END_rules
 }
 EOF
+
+        # Tạo/cập nhật .htaccess WordPress cho site (Nginx không cần nhưng OLS cần)
+        local htaccess_file="/var/www/${domain}/public_html/.htaccess"
+        if [[ ! -f "$htaccess_file" ]] || ! grep -q "WordPress" "$htaccess_file" 2>/dev/null; then
+            log_info "Tạo file .htaccess WordPress cho ${domain}..."
+            cat > "$htaccess_file" <<'HTEOF'
+# BEGIN WordPress
+# Các chỉ thị (dòng) giữa "BEGIN WordPress" và "END WordPress" được
+# tự động tạo ra và chỉ nên được chỉnh sửa qua bộ lọc WordPress filters.
+<IfModule mod_rewrite.c>
+RewriteEngine On
+RewriteBase /
+RewriteRule ^index\.php$ - [L]
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule . /index.php [L]
+</IfModule>
+# END WordPress
+HTEOF
+            chown www-data:www-data "$htaccess_file" 2>/dev/null
+            chmod 644 "$htaccess_file"
+        fi
         
         # Add to httpd_config
         cat >> "/usr/local/lsws/conf/httpd_config.conf" <<EOF
