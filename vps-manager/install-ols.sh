@@ -100,7 +100,7 @@ if [[ -f "$INSTALL_DIR/modules/zram.sh" ]]; then
 fi
 
 # =============================================================================
-# ── Tối ưu hóa hệ thống (wptangtoc-grade) ──
+# ── Tối ưu hóa hệ thống (Premium-grade) ──
 # =============================================================================
 echo -e "${CYAN}[3.5/5] Tối ưu Kernel + TCP + THP + File Limits...${NC}"
 if type run_system_optimization &>/dev/null; then

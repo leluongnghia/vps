@@ -53,7 +53,7 @@ install_mariadb() {
     local db_admin_pass
     db_admin_pass=$(openssl rand -base64 32 | tr -dc 'a-zA-Z0-9' | head -c 32)
 
-    # Bảo mật: đổi tên user root -> wpdbadmin (wptangtoc pattern)
+    # Bảo mật: đổi tên user root -> wpdbadmin
     # Hacker brute-force khó đoán tên user hơn
     mariadb <<SQLEOF 2>/dev/null || mysql <<SQLEOF2 2>/dev/null
 use mysql;
@@ -131,7 +131,7 @@ query_cache_size = 50M"
 
     cat >> "$mycnf" <<DBCONF
 
-# vps-manager-db-tuning (wptangtoc-grade, RAM-auto-scaled)
+# vps-manager-db-tuning (Premium-grade, RAM-auto-scaled)
 [mysqld]
 key_buffer_size         = ${key_buffer}M
 table_cache             = 2000
@@ -154,7 +154,7 @@ DBCONF
 # ==============================================================================
 # Cài đặt Object Cache (L2) cho Nginx stack
 # Kiến trúc 2 tầng: L1 Nginx FastCGI Cache + L2 Unix Socket Object Cache
-# Tham khảo: wptangtoc + research best practices 2025
+# Tham khảo: research best practices 2025
 # ==============================================================================
 
 _install_object_cache_nginx() {
@@ -229,7 +229,7 @@ _install_object_cache_nginx() {
 
             cat >> "$conf_file" <<SOCKCONF
 
-# ── vps-manager: Unix Socket config (wptangtoc-grade) ──
+# ── vps-manager: Unix Socket config (Premium-grade) ──
 unixsocket ${socket_path}
 unixsocketperm 770
 maxmemory ${maxmem_mb}mb

@@ -1,4 +1,4 @@
-# 🖥️ VPS Manager — Quản lý VPS Tự động (WPTangToc Grade)
+# 🖥️ VPS Manager — Quản lý VPS Tự động (Premium Grade)
 
 [![Version](https://img.shields.io/badge/Version-1.3.5-brightgreen.svg)](#)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
@@ -33,7 +33,7 @@ bash <(curl -s https://raw.githubusercontent.com/leluongnghia/vps/main/vps-manag
 
 ## 🚀 Hướng dẫn Tối ưu tốc độ VPS & Website (Chuyên sâu)
 
-Để đạt hiệu suất "WPTangToc Grade" (Điểm cao trên PageSpeed, TTFB cực thấp), hãy làm theo quy trình sau:
+Để đạt hiệu suất "Premium Grade" (Điểm cao trên PageSpeed, TTFB cực thấp), hãy làm theo quy trình sau:
 
 ### Bước 1: Tối ưu lõi Hệ thống (Kernel Tuning)
 Script đã tự động thực hiện các bước này khi bạn chạy lệnh cài đặt ở trên:
@@ -130,4 +130,4 @@ A professional Bash script for high-performance VPS management (Ubuntu/Debian/Al
 - **Security:** Root DB rename, Firewall, WAF, and 7G/8G rules included.
 
 ---
-> **Bản quyền**: © 2024-2025 leluongnghia. Tối ưu theo tiêu chuẩn WPTangToc.
+> **Bản quyền**: © 2024-2025 leluongnghia. Tối ưu theo tiêu chuẩn Cao cấp.

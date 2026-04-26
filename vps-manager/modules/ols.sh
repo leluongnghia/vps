@@ -173,7 +173,7 @@ _install_lsphp() {
         }
     fi
 
-    # ── Cấu hình php.ini nâng cao cho LSPHP (chuẩn wptangtoc) ──
+    # ── Cấu hình php.ini nâng cao cho LSPHP (chuẩn Premium) ──
     local lsphp_ini="/usr/local/lsws/lsphp${lsphp_ver}/etc/php/${ver}/litespeed/php.ini"
     if [[ -f "$lsphp_ini" ]]; then
         # Upload / Execution limits
@@ -186,11 +186,11 @@ _install_lsphp() {
         # Security
         sed -i -E "s/expose_php = On/expose_php = off/g" "$lsphp_ini"
 
-        # OPcache (tối ưu theo wptangtoc)
+        # OPcache (tối ưu theo chuẩn Premium)
         sed -i '/opcache/d' "$lsphp_ini" 2>/dev/null
         cat >> "$lsphp_ini" << 'OPCACHE_CONF'
 
-; --- VPS Manager OPcache (wptangtoc-grade) ---
+; --- VPS Manager OPcache (Premium-grade) ---
 opcache.enable = 1
 opcache.enable_cli = 1
 opcache.memory_consumption = 256
@@ -242,7 +242,7 @@ _configure_ols_base() {
         source "$(dirname "${BASH_SOURCE[0]}")/../core/kernel_tuning.sh"
     fi
 
-    # Tính thông số auto-scaling theo RAM (như wptangtoc)
+    # Tính thông số auto-scaling theo RAM
     if type calc_ols_tuning_params &>/dev/null; then
         calc_ols_tuning_params
     else

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# core/kernel_tuning.sh - Tối ưu Kernel TCP/Network theo chuẩn wptangtoc-ols
+# core/kernel_tuning.sh - Tối ưu Kernel TCP/Network
 # Áp dụng cho cả Nginx stack và OLS stack
 
 # ==============================================================================
@@ -9,7 +9,7 @@
 # ==============================================================================
 
 disable_thp() {
-    if grep -q "wptangtoc\|vps-manager-thp" /etc/systemd/system/disable-thp.service 2>/dev/null; then
+    if grep -q "vps-manager-thp" /etc/systemd/system/disable-thp.service 2>/dev/null; then
         log_info "THP đã được tắt từ trước. Bỏ qua."
         return 0
     fi
@@ -66,7 +66,7 @@ set_cpu_performance_governor() {
 
 # ==============================================================================
 # Kernel TCP/Network Tuning chuyên sâu
-# Dựa trên công thức wptangtoc-ols
+# Dựa trên công thức Premium
 # ==============================================================================
 
 tune_kernel_tcp() {
@@ -95,7 +95,7 @@ tune_kernel_tcp() {
 
             cat > "$sysctl_file" << 'EOF'
 # vps-manager — Kernel TCP/Network Optimization
-# Tham khảo: wptangtoc-ols
+# Tham khảo: Premium guidelines
 
 # Process & File
 kernel.pid_max = 65536
@@ -222,7 +222,7 @@ EOF
 }
 
 # ==============================================================================
-# Tính toán thông số OLS theo RAM (Auto-scaling như wptangtoc)
+# Tính toán thông số OLS theo RAM (Auto-scaling)
 # ==============================================================================
 
 calc_ols_tuning_params() {

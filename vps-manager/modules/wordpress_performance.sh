@@ -55,7 +55,7 @@ wp_performance_menu() {
         echo -e "6.  📦 Enable Object Cache (Redis/Memcached)"
         echo -e "7.  🌐 HTTP/2 & Brotli Compression"
         echo -e "13. 🎀 PHP Preload (Nạp trước PHP vào RAM)"
-        echo -e "14. ✨ Tối ưu LSCache chuẩn WpTangToc (OpenLiteSpeed)"
+        echo -e "14. ✨ Tối ưu LSCache chuẩn Premium (OpenLiteSpeed)"
         echo -e "15. 🔥 Preload Cache (Warm-up Sitemap)"
         echo -e "16. 💾 Tối ưu Disk I/O (noatime + XFS)"
         echo -e "17. ⚡ Fix TBT/Render-Blocking Nâng Cao (ElementsKit, FontAwesome)"
@@ -85,7 +85,7 @@ wp_performance_menu() {
             11) benchmark_wordpress ;;
             12) optimize_system_kernel ;;
             13) php_preload_menu ;;
-            14) setup_lscache_wptangtoc ;;
+            14) setup_lscache_premium ;;
             15) preload_cache_sitemap ;;
             16) optimize_disk_io ;;
             17) fix_tbt_advanced ;;
@@ -96,7 +96,7 @@ wp_performance_menu() {
 }
 
 
-setup_lscache_wptangtoc() {
+setup_lscache_premium() {
     source "$(dirname "${BASH_SOURCE[0]}")/wordpress_tool.sh"
     select_wp_site || return
     local domain=$SELECTED_DOMAIN
@@ -427,7 +427,7 @@ PHPEOF
     echo -e "  - Neu nút bấm mat tac dung: them handle JS vao delay exclusions"
     pause
 }
-# 12. Optimize System Kernel - toan dien (port tu WpTangToc)
+# 12. Optimize System Kernel - toan dien
 optimize_system_kernel() {
     log_info "Dang toi uu hoa he thong (Kernel & Network - Toan dien)..."
 
@@ -446,7 +446,7 @@ optimize_system_kernel() {
         log_info "  v File limits: 524288"
     fi
 
-    # --- Kernel params (port tu WpTangToc kernel_tcp_toi_uu) ---
+    # --- Kernel params (kernel_tcp_toi_uu) ---
     if [[ ! -f /proc/user_beancounters ]]; then   # skip container ao hoa 1 phan
         touch "$SYSCTL_FILE"
         # Hashsize cho nf_conntrack
@@ -567,7 +567,7 @@ nameserver 8.8.8.8" | tee /etc/resolv.conf > /dev/null
     pause
 }
 
-# 15. Preload Cache - Warm-up toan bo Sitemap (port tu WpTangToc)
+# 15. Preload Cache - Warm-up toan bo Sitemap
 preload_cache_sitemap() {
     clear
     echo -e "${BLUE}=================================================${NC}"
@@ -686,7 +686,7 @@ preload_cache_sitemap() {
     pause
 }
 
-# 16. Optimize Disk I/O - noatime + XFS logbsize (port tu WpTangToc)
+# 16. Optimize Disk I/O - noatime + XFS logbsize
 optimize_disk_io() {
     log_info "Dang toi uu Disk I/O (noatime + logbsize)..."
 
