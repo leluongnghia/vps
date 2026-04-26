@@ -1,6 +1,6 @@
 # 🖥️ VPS Manager — Quản lý VPS Tự động (Premium Grade)
 
-[![Version](https://img.shields.io/badge/Version-1.3.5-brightgreen.svg)](#)
+[![Version](https://img.shields.io/badge/Version-1.4.3-brightgreen.svg)](#)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Shell: Bash](https://img.shields.io/badge/Shell-Bash-blue.svg)](https://www.gnu.org/software/bash/)
 [![OS](https://img.shields.io/badge/OS-Ubuntu%20%7C%20Debian%20%7C%20AlmaLinux-orange.svg)](#)
@@ -67,7 +67,7 @@ Script tích hợp tính năng **Auto-scaling RAM**:
 
 ## 📋 Menu Chính (24 Tùy chọn)
 
-| # | Tính năng | Điểm nhấn Nâng cấp v1.3.5 |
+| # | Tính năng | Điểm nhấn Nâng cấp v1.4.3 |
 |---|-----------|-------------------------|
 | 1 | 🌐 **Cài đặt LEMP / OLS** | Tách riêng 2 lệnh cài, tối ưu chuyên sâu từng stack |
 | 10 | ⚡ **Quản lý Cache** | Hỗ trợ **Valkey / KeyDB / Redis** qua Unix Socket |
@@ -95,7 +95,7 @@ Script tích hợp tính năng **Auto-scaling RAM**:
 
 ---
 
-## 🗂️ Cấu trúc Project (v1.3.5)
+## 🗂️ Cấu trúc Project (v1.4.3)
 
 ```
 vps-manager/
@@ -122,7 +122,7 @@ A professional Bash script for high-performance VPS management (Ubuntu/Debian/Al
 - **Nginx Stack:** `bash <(curl -s https://raw.githubusercontent.com/leluongnghia/vps/main/vps-manager/install-nginx.sh)`
 - **OpenLiteSpeed Stack:** `bash <(curl -s https://raw.githubusercontent.com/leluongnghia/vps/main/vps-manager/install-ols.sh)`
 
-### Features (v1.3.5)
+### Features (v1.4.3)
 - **Kernel Tuning:** Auto-enables BBR, disables THP, sets CPU to Performance.
 - **Smart Scaling:** Automatically tunes MariaDB & Webserver based on physical RAM.
 - **2-Layer Cache:** Implements Nginx FastCGI L1 + Valkey Unix Socket L2.

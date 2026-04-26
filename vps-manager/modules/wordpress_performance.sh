@@ -38,6 +38,94 @@ get_installed_php_version() {
     echo ""; return 1
 }
 
+_wp_php_has_mysql() {
+    local php_bin="${1:-php}"
+    "$php_bin" -m 2>/dev/null | grep -qEi '^(mysqli|pdo_mysql)$'
+}
+
+_wp_php_version() {
+    local php_bin="${1:-php}"
+    local ver
+    ver=$(echo "$php_bin" | grep -oP 'php\K[0-9.]+$' | head -n 1)
+    if [[ -z "$ver" ]]; then
+        ver=$("$php_bin" -r "echo PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;" 2>/dev/null)
+    fi
+    echo "$ver"
+}
+
+_wp_enable_php_mysql_extension() {
+    local php_bin="${1:-php}"
+    local ver
+    ver=$(_wp_php_version "$php_bin")
+    [[ -z "$ver" ]] && return 1
+
+    log_info "[Auto-Fix] PHP $ver thieu MySQL extension. Dang tu dong tai va cai dat/bat extension..."
+    if command -v apt-get >/dev/null 2>&1; then
+        # Fix LiteSpeed GPG key issue that causes apt-get update to fail on Ubuntu 24.04
+        if [[ -f /etc/apt/sources.list.d/lst_debian_repo.list ]]; then
+            wget -qO /etc/apt/trusted.gpg.d/lst_debian_repo.gpg http://rpms.litespeedtech.com/debian/lst_debian_repo.gpg || true
+            wget -qO - http://rpms.litespeedtech.com/debian/lst_repo.gpg | gpg --dearmor --yes -o /etc/apt/trusted.gpg.d/litespeed.gpg 2>/dev/null || true
+        fi
+        apt-get update >/dev/null 2>&1 || true
+        DEBIAN_FRONTEND=noninteractive apt-get install -y "php${ver}-mysql" >/dev/null 2>&1 || true
+    elif command -v dnf >/dev/null 2>&1; then
+        dnf install -y "php${ver}-mysqlnd" >/dev/null 2>&1 || true
+    fi
+
+    if command -v phpenmod >/dev/null 2>&1; then
+        phpenmod -v "$ver" mysqli pdo_mysql mysqlnd >/dev/null 2>&1 || true
+        phpenmod mysqli pdo_mysql mysqlnd >/dev/null 2>&1 || true
+    fi
+
+    if _wp_php_has_mysql "$php_bin"; then
+        log_info "[Auto-Fix] PHP $ver da bat mysqli/pdo_mysql."
+        return 0
+    fi
+
+    log_warn "[Auto-Fix] PHP $ver van chua load mysqli/pdo_mysql."
+    return 1
+}
+
+_wp_resolve_php_bin_for_site() {
+    local domain="$1"
+    local outvar="$2"
+    local preferred="php"
+    local site_conf="/etc/nginx/sites-available/$domain"
+    local site_php_ver
+
+    if [[ -f "$site_conf" ]]; then
+        site_php_ver=$(grep -shoP 'unix:/run/php/php\K[0-9.]+(?=-fpm.sock)' "$site_conf" | head -n 1)
+        if [[ -n "$site_php_ver" ]] && command -v "php$site_php_ver" >/dev/null 2>&1; then
+            preferred="php$site_php_ver"
+        fi
+    fi
+
+    if _wp_php_has_mysql "$preferred" || _wp_enable_php_mysql_extension "$preferred"; then
+        printf -v "$outvar" '%s' "$preferred"
+        return 0
+    fi
+
+    local v bin
+    for v in 8.4 8.3 8.5 8.2 8.1 8.0 7.4; do
+        bin="php$v"
+        if command -v "$bin" >/dev/null 2>&1 && _wp_php_has_mysql "$bin"; then
+            printf -v "$outvar" '%s' "$bin"
+            return 0
+        fi
+    done
+
+    for v in 84 83 85 82 81 80 74; do
+        bin="/usr/local/lsws/lsphp$v/bin/php"
+        if [[ -x "$bin" ]] && _wp_php_has_mysql "$bin"; then
+            printf -v "$outvar" '%s' "$bin"
+            return 0
+        fi
+    done
+
+    printf -v "$outvar" '%s' "$preferred"
+    return 1
+}
+
 
 
 wp_performance_menu() {
@@ -1032,21 +1120,9 @@ _do_db_cleanup() {
     local WEB_ROOT="/var/www/$domain/public_html"
     
     local WP_PHP_BIN="php"
-    local SITE_CONF="/etc/nginx/sites-available/$domain"
-    if [[ -f "$SITE_CONF" ]]; then
-        local SITE_PHP_VER=$(grep -shoP 'unix:/run/php/php\K[0-9.]+(?=-fpm.sock)' "$SITE_CONF" | head -n 1)
-        if [[ -n "$SITE_PHP_VER" ]] && command -v "php$SITE_PHP_VER" >/dev/null 2>&1; then
-            WP_PHP_BIN="php$SITE_PHP_VER"
-        fi
-    fi
-    
-    if ! "$WP_PHP_BIN" -m 2>/dev/null | grep -qEi "(mysqli|pdo_mysql)"; then
-        for v in 8.3 8.4 8.5 8.2 8.1 8.0 7.4; do
-            if command -v "php$v" >/dev/null 2>&1 && "php$v" -m 2>/dev/null | grep -qEi "(mysqli|pdo_mysql)"; then
-                WP_PHP_BIN="php$v"
-                break
-            fi
-        done
+    if ! _wp_resolve_php_bin_for_site "$domain" WP_PHP_BIN; then
+        log_warn "[$domain] PHP CLI van thieu mysqli/pdo_mysql sau auto-fix -- bo qua."
+        return
     fi
     local WP_CMD="$WP_PHP_BIN -d display_errors=0 /usr/local/bin/wp --path=$WEB_ROOT --allow-root"
 
@@ -1282,61 +1358,10 @@ _setup_wp_redis_plugin() {
 
         log_info "[$domain] Cai dat Redis Object Cache plugin..."
 
-        # Tim PHP ban co mysqli (Fix loi thieu mysqli cua WP-CLI mac dinh tren Ubuntu va OLS)
         local WP_PHP_BIN="php"
-        local SITE_CONF="/etc/nginx/sites-available/$domain"
-        if [[ -f "$SITE_CONF" ]]; then
-            local SITE_PHP_VER=$(grep -shoP 'unix:/run/php/php\K[0-9.]+(?=-fpm.sock)' "$SITE_CONF" | head -n 1)
-            if [[ -n "$SITE_PHP_VER" ]] && command -v "php$SITE_PHP_VER" >/dev/null 2>&1; then
-                WP_PHP_BIN="php$SITE_PHP_VER"
-            fi
-        fi
-        
-        # Kiem tra xem PHP co mysqli khong
-        if ! "$WP_PHP_BIN" -m 2>/dev/null | grep -qEi "(mysqli|pdo_mysql)"; then
-            # Thu auto-install php-mysql cho ban hien tai (Fix loi web broken do thieu extension)
-            local cur_ver=$(echo "$WP_PHP_BIN" | grep -oP 'php\K[0-9.]+' | head -n 1)
-            if [[ -z "$cur_ver" ]]; then
-                cur_ver=$("$WP_PHP_BIN" -r "echo PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;" 2>/dev/null)
-            fi
-            
-            if [[ -n "$cur_ver" ]]; then
-                log_info "[Auto-Fix] PHP $cur_ver thieu MySQL extension. Dang tu dong tai va cai dat..."
-                if command -v apt-get >/dev/null 2>&1; then
-                    # Fix LiteSpeed GPG key issue that causes apt-get update to fail on Ubuntu 24.04
-                    if [[ -f /etc/apt/sources.list.d/lst_debian_repo.list ]]; then
-                        wget -qO /etc/apt/trusted.gpg.d/lst_debian_repo.gpg http://rpms.litespeedtech.com/debian/lst_debian_repo.gpg || true
-                        wget -qO - http://rpms.litespeedtech.com/debian/lst_repo.gpg | gpg --dearmor --yes -o /etc/apt/trusted.gpg.d/litespeed.gpg 2>/dev/null || true
-                    fi
-                    apt-get update >/dev/null 2>&1 || true
-                    DEBIAN_FRONTEND=noninteractive apt-get install -y "php${cur_ver}-mysql" >/dev/null 2>&1
-                elif command -v dnf >/dev/null 2>&1; then
-                    dnf install -y "php${cur_ver}-mysqlnd" >/dev/null 2>&1
-                fi
-                log_info "[Auto-Fix] Hoan tat cai dat php${cur_ver}-mysql."
-            fi
-        fi
-
-        if ! "$WP_PHP_BIN" -m 2>/dev/null | grep -qEi "(mysqli|pdo_mysql)"; then
-            local found_php=false
-            # Thu Nginx / Ubuntu PHP (php8.4, php8.3...)
-            for v in 8.4 8.3 8.5 8.2 8.1 8.0 7.4; do
-                if command -v "php$v" >/dev/null 2>&1 && "php$v" -m 2>/dev/null | grep -qEi "(mysqli|pdo_mysql)"; then
-                    WP_PHP_BIN="php$v"
-                    found_php=true
-                    break
-                fi
-            done
-            # Thu OpenLiteSpeed PHP (lsphp84, lsphp83...)
-            if [[ "$found_php" == "false" ]]; then
-                for v in 84 83 85 82 81 80 74; do
-                    if command -v "/usr/local/lsws/lsphp$v/bin/php" >/dev/null 2>&1 && "/usr/local/lsws/lsphp$v/bin/php" -m 2>/dev/null | grep -qEi "(mysqli|pdo_mysql)"; then
-                        WP_PHP_BIN="/usr/local/lsws/lsphp$v/bin/php"
-                        found_php=true
-                        break
-                    fi
-                done
-            fi
+        if ! _wp_resolve_php_bin_for_site "$domain" WP_PHP_BIN; then
+            log_warn "[$domain] PHP CLI van thieu mysqli/pdo_mysql sau auto-fix -- bo qua."
+            continue
         fi
         local WP_CMD="$WP_PHP_BIN /usr/local/bin/wp"
 
@@ -1409,56 +1434,10 @@ _setup_wp_memcached_plugin() {
 
         log_info "[$domain] Cai dat Memcached Object Cache..."
         
-        # Tim PHP ban co mysqli
         local WP_PHP_BIN="php"
-        local SITE_CONF="/etc/nginx/sites-available/$domain"
-        if [[ -f "$SITE_CONF" ]]; then
-            local SITE_PHP_VER=$(grep -shoP 'unix:/run/php/php\K[0-9.]+(?=-fpm.sock)' "$SITE_CONF" | head -n 1)
-            if [[ -n "$SITE_PHP_VER" ]] && command -v "php$SITE_PHP_VER" >/dev/null 2>&1; then
-                WP_PHP_BIN="php$SITE_PHP_VER"
-            fi
-        fi
-        if ! "$WP_PHP_BIN" -m 2>/dev/null | grep -qEi "(mysqli|pdo_mysql)"; then
-            # Thu auto-install php-mysql cho ban hien tai
-            local cur_ver=$(echo "$WP_PHP_BIN" | grep -oP 'php\K[0-9.]+' | head -n 1)
-            if [[ -z "$cur_ver" ]]; then
-                cur_ver=$("$WP_PHP_BIN" -r "echo PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;" 2>/dev/null)
-            fi
-            
-            if [[ -n "$cur_ver" ]]; then
-                log_info "[Auto-Fix] PHP $cur_ver thieu MySQL extension. Dang tu dong tai va cai dat..."
-                if command -v apt-get >/dev/null 2>&1; then
-                    # Fix LiteSpeed GPG key issue that causes apt-get update to fail on Ubuntu 24.04
-                    if [[ -f /etc/apt/sources.list.d/lst_debian_repo.list ]]; then
-                        wget -qO /etc/apt/trusted.gpg.d/lst_debian_repo.gpg http://rpms.litespeedtech.com/debian/lst_debian_repo.gpg || true
-                        wget -qO - http://rpms.litespeedtech.com/debian/lst_repo.gpg | gpg --dearmor --yes -o /etc/apt/trusted.gpg.d/litespeed.gpg 2>/dev/null || true
-                    fi
-                    apt-get update >/dev/null 2>&1 || true
-                    DEBIAN_FRONTEND=noninteractive apt-get install -y "php${cur_ver}-mysql" >/dev/null 2>&1
-                elif command -v dnf >/dev/null 2>&1; then
-                    dnf install -y "php${cur_ver}-mysqlnd" >/dev/null 2>&1
-                fi
-                log_info "[Auto-Fix] Hoan tat cai dat php${cur_ver}-mysql."
-            fi
-        fi
-
-        if ! "$WP_PHP_BIN" -m 2>/dev/null | grep -qEi "(mysqli|pdo_mysql)"; then
-            local found_php=false
-            for v in 8.4 8.3 8.5 8.2 8.1 8.0 7.4; do
-                if command -v "php$v" >/dev/null 2>&1 && "php$v" -m 2>/dev/null | grep -qEi "(mysqli|pdo_mysql)"; then
-                    WP_PHP_BIN="php$v"
-                    found_php=true
-                    break
-                fi
-            done
-            if [[ "$found_php" == "false" ]]; then
-                for v in 84 83 85 82 81 80 74; do
-                    if command -v "/usr/local/lsws/lsphp$v/bin/php" >/dev/null 2>&1 && "/usr/local/lsws/lsphp$v/bin/php" -m 2>/dev/null | grep -qEi "(mysqli|pdo_mysql)"; then
-                        WP_PHP_BIN="/usr/local/lsws/lsphp$v/bin/php"
-                        break
-                    fi
-                done
-            fi
+        if ! _wp_resolve_php_bin_for_site "$domain" WP_PHP_BIN; then
+            log_warn "[$domain] PHP CLI van thieu mysqli/pdo_mysql sau auto-fix -- bo qua."
+            continue
         fi
         local WP_CMD="$WP_PHP_BIN /usr/local/bin/wp"
 
@@ -1539,56 +1518,9 @@ _do_disable_bloat() {
     local WEB_ROOT="/var/www/$domain/public_html"
     
     local WP_PHP_BIN="php"
-    local SITE_CONF="/etc/nginx/sites-available/$domain"
-    if [[ -f "$SITE_CONF" ]]; then
-        local SITE_PHP_VER=$(grep -shoP 'unix:/run/php/php\K[0-9.]+(?=-fpm.sock)' "$SITE_CONF" | head -n 1)
-        if [[ -n "$SITE_PHP_VER" ]] && command -v "php$SITE_PHP_VER" >/dev/null 2>&1; then
-            WP_PHP_BIN="php$SITE_PHP_VER"
-        fi
-    fi
-    
-    if ! "$WP_PHP_BIN" -m 2>/dev/null | grep -qEi "(mysqli|pdo_mysql)"; then
-        # Thu auto-install php-mysql cho ban hien tai
-        local cur_ver=$(echo "$WP_PHP_BIN" | grep -oP 'php\K[0-9.]+' | head -n 1)
-        if [[ -z "$cur_ver" ]]; then
-            cur_ver=$("$WP_PHP_BIN" -r "echo PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;" 2>/dev/null)
-        fi
-        
-        if [[ -n "$cur_ver" ]]; then
-            log_info "[Auto-Fix] PHP $cur_ver thieu MySQL extension. Dang tu dong tai va cai dat..."
-            if command -v apt-get >/dev/null 2>&1; then
-                # Fix LiteSpeed GPG key issue that causes apt-get update to fail on Ubuntu 24.04
-                if [[ -f /etc/apt/sources.list.d/lst_debian_repo.list ]]; then
-                    wget -qO /etc/apt/trusted.gpg.d/lst_debian_repo.gpg http://rpms.litespeedtech.com/debian/lst_debian_repo.gpg || true
-                    wget -qO - http://rpms.litespeedtech.com/debian/lst_repo.gpg | gpg --dearmor --yes -o /etc/apt/trusted.gpg.d/litespeed.gpg 2>/dev/null || true
-                fi
-                apt-get update >/dev/null 2>&1 || true
-                DEBIAN_FRONTEND=noninteractive apt-get install -y "php${cur_ver}-mysql" >/dev/null 2>&1
-            elif command -v dnf >/dev/null 2>&1; then
-                dnf install -y "php${cur_ver}-mysqlnd" >/dev/null 2>&1
-            fi
-            log_info "[Auto-Fix] Hoan tat cai dat php${cur_ver}-mysql."
-        fi
-    fi
-
-    if ! "$WP_PHP_BIN" -m 2>/dev/null | grep -qEi "(mysqli|pdo_mysql)"; then
-        local found_php=false
-        for v in 8.4 8.3 8.5 8.2 8.1 8.0 7.4; do
-            if command -v "php$v" >/dev/null 2>&1 && "php$v" -m 2>/dev/null | grep -qEi "(mysqli|pdo_mysql)"; then
-                WP_PHP_BIN="php$v"
-                found_php=true
-                break
-            fi
-        done
-        if [[ "$found_php" == "false" ]]; then
-            for v in 84 83 85 82 81 80 74; do
-                if command -v "/usr/local/lsws/lsphp$v/bin/php" >/dev/null 2>&1 && "/usr/local/lsws/lsphp$v/bin/php" -m 2>/dev/null | grep -qEi "(mysqli|pdo_mysql)"; then
-                    WP_PHP_BIN="/usr/local/lsws/lsphp$v/bin/php"
-                    found_php=true
-                    break
-                fi
-            done
-        fi
+    if ! _wp_resolve_php_bin_for_site "$domain" WP_PHP_BIN; then
+        log_warn "[$domain] PHP CLI van thieu mysqli/pdo_mysql sau auto-fix -- bo qua."
+        return
     fi
     local WP_CMD="$WP_PHP_BIN -d display_errors=0 /usr/local/bin/wp --path=$WEB_ROOT --allow-root"
 
@@ -1689,23 +1621,11 @@ _do_image_optimization() {
     local WEB_ROOT="/var/www/$domain/public_html"
     
     local WP_PHP_BIN="php"
-    local SITE_CONF="/etc/nginx/sites-available/$domain"
-    if [[ -f "$SITE_CONF" ]]; then
-        local SITE_PHP_VER=$(grep -shoP 'unix:/run/php/php\K[0-9.]+(?=-fpm.sock)' "$SITE_CONF" | head -n 1)
-        if [[ -n "$SITE_PHP_VER" ]] && command -v "php$SITE_PHP_VER" >/dev/null 2>&1; then
-            WP_PHP_BIN="php$SITE_PHP_VER"
-        fi
+    if ! _wp_resolve_php_bin_for_site "$domain" WP_PHP_BIN; then
+        log_warn "[$domain] PHP CLI van thieu mysqli/pdo_mysql sau auto-fix -- bo qua."
+        return
     fi
-    
-    if ! "$WP_PHP_BIN" -m 2>/dev/null | grep -qEi "(mysqli|pdo_mysql)"; then
-        for v in 8.3 8.4 8.5 8.2 8.1 8.0 7.4; do
-            if command -v "php$v" >/dev/null 2>&1 && "php$v" -m 2>/dev/null | grep -qEi "(mysqli|pdo_mysql)"; then
-                WP_PHP_BIN="php$v"
-                break
-            fi
-        done
-    fi
-    local WP_CMD="$WP_PHP_BIN -d /usr/local/bin/wp --path=$WEB_ROOT --allow-root"
+    local WP_CMD="$WP_PHP_BIN -d display_errors=0 /usr/local/bin/wp --path=$WEB_ROOT --allow-root"
 
     if [[ ! -f "$WEB_ROOT/wp-config.php" ]]; then
         echo -e "${RED}$domain không phải WordPress site.${NC}"

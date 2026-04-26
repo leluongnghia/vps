@@ -1,4 +1,4 @@
-# VPS Manager Status Report — v1.4.1
+# VPS Manager Status Report — v1.4.3
 
 ## ✅ Completed (v1.4.0)
 1. **OpenLiteSpeed Module** (`modules/ols.sh`)
@@ -37,6 +37,12 @@
    - Added disk space check before download
    - Added timeout + error checking for `wget` download
    - Added error checking for `tar` extraction
+
+## ✅ Completed (v1.4.3) — Hotfixes
+8. **Nginx WordPress Object Cache PHP resolver** (`modules/wordpress_performance.sh`)
+   - Ensures WP-CLI uses the site PHP-FPM version when available
+   - Auto-installs and enables `mysqli`, `pdo_mysql`, and `mysqlnd`
+   - Verifies PHP MySQL extensions before installing Redis/Memcached Object Cache plugins
 
 ## 📋 All Modules — Syntax Status
 All 24 .sh files: **✅ PASS** (`bash -n` verified)
