@@ -41,21 +41,37 @@ get_installed_php_version() {
 
 
 wp_performance_menu() {
+    local active_stack="nginx"
+    if type detect_active_stack &>/dev/null; then
+        active_stack=$(detect_active_stack)
+    fi
+
     while true; do
         clear
         echo -e "${BLUE}=================================================${NC}"
         echo -e "${GREEN}    🚀 WordPress Performance Optimization${NC}"
+        if [[ "$active_stack" == "ols" ]]; then
+            echo -e "${YELLOW}           (Mode: OpenLiteSpeed)${NC}"
+        else
+            echo -e "${YELLOW}           (Mode: Nginx LEMP)${NC}"
+        fi
         echo -e "${BLUE}=================================================${NC}"
         echo -e "${CYAN}--- ⚙️  Server-level (Toàn bộ server) ---${NC}"
-        echo -e "1.  🚀 Auto-Optimize Server (PHP + MySQL + Nginx + OPcache)"
-        echo -e "2.  ⚡ PHP-FPM Tuning (Memory, Workers)"
-        echo -e "3.  💾 OPcache Optimization"
+        
+        if [[ "$active_stack" == "nginx" ]]; then
+            echo -e "1.  🚀 Auto-Optimize Server (PHP + MySQL + Nginx + OPcache)"
+            echo -e "2.  ⚡ PHP-FPM Tuning (Memory, Workers)"
+            echo -e "3.  💾 OPcache Optimization"
+            echo -e "5.  🔥 Nginx FastCGI Micro-Caching"
+            echo -e "7.  🌐 HTTP/2 & Brotli Compression"
+            echo -e "13. 🎀 PHP Preload (Nạp trước PHP vào RAM)"
+        elif [[ "$active_stack" == "ols" ]]; then
+            echo -e "14. ✨ Tối ưu LSCache chuẩn Premium (OpenLiteSpeed)"
+        fi
+
+        # Shared items
         echo -e "4.  🗄️  MySQL/MariaDB Tuning"
-        echo -e "5.  🔥 Nginx FastCGI Micro-Caching"
-        echo -e "6.  📦 Enable Object Cache (Redis/Memcached)"
-        echo -e "7.  🌐 HTTP/2 & Brotli Compression"
-        echo -e "13. 🎀 PHP Preload (Nạp trước PHP vào RAM)"
-        echo -e "14. ✨ Tối ưu LSCache chuẩn Premium (OpenLiteSpeed)"
+        echo -e "6.  📦 Enable Object Cache (Redis/Valkey)"
         echo -e "15. 🔥 Preload Cache (Warm-up Sitemap)"
         echo -e "16. 💾 Tối ưu Disk I/O (noatime + XFS)"
         echo -e "17. ⚡ Fix TBT/Render-Blocking Nâng Cao (ElementsKit, FontAwesome)"
@@ -72,20 +88,20 @@ wp_performance_menu() {
         read -p "Select [0-17]: " choice
 
         case $choice in
-            1) auto_optimize_server ;;
-            2) tune_php_fpm ;;
-            3) optimize_opcache ;;
+            1) [[ "$active_stack" == "nginx" ]] && auto_optimize_server || echo -e "${RED}Chỉ dành cho Nginx!${NC}" && pause ;;
+            2) [[ "$active_stack" == "nginx" ]] && tune_php_fpm || echo -e "${RED}Chỉ dành cho Nginx!${NC}" && pause ;;
+            3) [[ "$active_stack" == "nginx" ]] && optimize_opcache || echo -e "${RED}Chỉ dành cho Nginx!${NC}" && pause ;;
             4) tune_mysql ;;
-            5) setup_fastcgi_microcache ;;
+            5) [[ "$active_stack" == "nginx" ]] && setup_fastcgi_microcache || echo -e "${RED}Chỉ dành cho Nginx!${NC}" && pause ;;
             6) setup_object_cache ;;
-            7) enable_http2_brotli ;;
+            7) [[ "$active_stack" == "nginx" ]] && enable_http2_brotli || echo -e "${RED}Chỉ dành cho Nginx!${NC}" && pause ;;
             8) cleanup_wordpress_db ;;
             9) disable_wordpress_bloat ;;
             10) setup_image_optimization ;;
             11) benchmark_wordpress ;;
             12) optimize_system_kernel ;;
-            13) php_preload_menu ;;
-            14) setup_lscache_premium ;;
+            13) [[ "$active_stack" == "nginx" ]] && php_preload_menu || echo -e "${RED}Chỉ dành cho Nginx!${NC}" && pause ;;
+            14) [[ "$active_stack" == "ols" ]] && setup_lscache_premium || echo -e "${RED}Chỉ dành cho OLS!${NC}" && pause ;;
             15) preload_cache_sitemap ;;
             16) optimize_disk_io ;;
             17) fix_tbt_advanced ;;
