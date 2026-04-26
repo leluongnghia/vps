@@ -1296,6 +1296,10 @@ _setup_wp_redis_plugin() {
         if ! "$WP_PHP_BIN" -m 2>/dev/null | grep -qEi "(mysqli|pdo_mysql)"; then
             # Thu auto-install php-mysql cho ban hien tai (Fix loi web broken do thieu extension)
             local cur_ver=$(echo "$WP_PHP_BIN" | grep -oP 'php\K[0-9.]+' | head -n 1)
+            if [[ -z "$cur_ver" ]]; then
+                cur_ver=$("$WP_PHP_BIN" -r "echo PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;" 2>/dev/null)
+            fi
+            
             if [[ -n "$cur_ver" ]]; then
                 log_info "[Auto-Fix] PHP $cur_ver thieu MySQL extension. Dang tu dong tai va cai dat..."
                 if command -v apt-get >/dev/null 2>&1; then
@@ -1417,6 +1421,10 @@ _setup_wp_memcached_plugin() {
         if ! "$WP_PHP_BIN" -m 2>/dev/null | grep -qEi "(mysqli|pdo_mysql)"; then
             # Thu auto-install php-mysql cho ban hien tai
             local cur_ver=$(echo "$WP_PHP_BIN" | grep -oP 'php\K[0-9.]+' | head -n 1)
+            if [[ -z "$cur_ver" ]]; then
+                cur_ver=$("$WP_PHP_BIN" -r "echo PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;" 2>/dev/null)
+            fi
+            
             if [[ -n "$cur_ver" ]]; then
                 log_info "[Auto-Fix] PHP $cur_ver thieu MySQL extension. Dang tu dong tai va cai dat..."
                 if command -v apt-get >/dev/null 2>&1; then
@@ -1542,6 +1550,10 @@ _do_disable_bloat() {
     if ! "$WP_PHP_BIN" -m 2>/dev/null | grep -qEi "(mysqli|pdo_mysql)"; then
         # Thu auto-install php-mysql cho ban hien tai
         local cur_ver=$(echo "$WP_PHP_BIN" | grep -oP 'php\K[0-9.]+' | head -n 1)
+        if [[ -z "$cur_ver" ]]; then
+            cur_ver=$("$WP_PHP_BIN" -r "echo PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;" 2>/dev/null)
+        fi
+        
         if [[ -n "$cur_ver" ]]; then
             log_info "[Auto-Fix] PHP $cur_ver thieu MySQL extension. Dang tu dong tai va cai dat..."
             if command -v apt-get >/dev/null 2>&1; then
