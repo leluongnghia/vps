@@ -22,18 +22,55 @@ install_nginx() {
     if is_installed nginx; then
         log_warn "Nginx is already installed."
     else
-        log_info "Installing Nginx..."
-        pkg_update
+        log_info "Installing Nginx (Mainline - QUIC HTTP/3 Support)..."
+        
+        # Cấu hình Repo Mainline (Nginx 1.25.0+) để hỗ trợ QUIC HTTP/3
+        if [[ "$OS_FAMILY" == "debian" ]]; then
+            apt-get install -y curl gnupg2 ca-certificates lsb-release
+            curl -fsSL https://nginx.org/keys/nginx_signing.key | gpg --dearmor -o /usr/share/keyrings/nginx-archive-keyring.gpg --yes
+            
+            local os_name_lower
+            os_name_lower=$(cat /etc/os-release | grep -E '^ID=' | cut -d= -f2 | tr -d '"')
+            
+            echo "deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] http://nginx.org/packages/mainline/${os_name_lower} $(lsb_release -cs) nginx" > /etc/apt/sources.list.d/nginx.list
+            
+            cat > /etc/apt/preferences.d/99nginx <<EOF
+Package: *
+Pin: origin nginx.org
+Pin: release o=nginx
+Pin-Priority: 900
+EOF
+            apt-get update
+        elif [[ "$OS_FAMILY" == "rhel" ]]; then
+            cat > /etc/yum.repos.d/nginx.repo <<EOF
+[nginx-mainline]
+name=nginx mainline repo
+baseurl=http://nginx.org/packages/mainline/centos/\$releasever/\$basearch/
+gpgcheck=1
+enabled=1
+gpgkey=https://nginx.org/keys/nginx_signing.key
+module_hotfixes=true
+EOF
+        fi
+
         pkg_install nginx
         
+        # Đảm bảo tương thích cấu trúc thư mục sites-available/sites-enabled (Debian style)
+        if [[ ! -d /etc/nginx/sites-available ]]; then
+            mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
+            if ! grep -q "sites-enabled" /etc/nginx/nginx.conf; then
+                sed -i '/include \/etc\/nginx\/conf\.d\/\*\.conf;/a \    include \/etc\/nginx\/sites-enabled\/\*;' /etc/nginx/nginx.conf
+            fi
+        fi
+        
         # Increase global upload limit right after install
-        if [[ -f /etc/nginx/nginx.conf ]]; then
-            sed -i '/http {/a \        client_max_body_size 128M;' /etc/nginx/nginx.conf
+        if [[ -f /etc/nginx/nginx.conf ]] && ! grep -q "client_max_body_size" /etc/nginx/nginx.conf; then
+            sed -i '/http {/a \    client_max_body_size 128M;' /etc/nginx/nginx.conf
         fi
         
         systemctl enable nginx
         systemctl start nginx
-        log_info "Nginx installed successfully."
+        log_info "Nginx (Mainline) installed successfully."
     fi
 }
 
