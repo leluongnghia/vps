@@ -1279,7 +1279,10 @@ _setup_wp_redis_plugin() {
 
         log_info "[$domain] Cai dat Redis Object Cache plugin..."
 
-        # Tim PHP ban co mysqli (Fix loi thieu mysqli cua WP-CLI mac dinh)
+        # Cho mot chut de dich vu khoi tao Socket (Fix timing issue)
+        sleep 2
+
+        # Tim PHP ban co mysqli (Fix loi thieu mysqli cua WP-CLI mac dinh tren Ubuntu va OLS)
         local WP_PHP_BIN="php"
         local SITE_CONF="/etc/nginx/sites-available/$domain"
         if [[ -f "$SITE_CONF" ]]; then
@@ -1288,15 +1291,31 @@ _setup_wp_redis_plugin() {
                 WP_PHP_BIN="php$SITE_PHP_VER"
             fi
         fi
+        
+        # Kiem tra xem PHP co mysqli khong
         if ! "$WP_PHP_BIN" -m 2>/dev/null | grep -qEi "(mysqli|pdo_mysql)"; then
-            for v in 8.3 8.4 8.5 8.2 8.1 8.0 7.4; do
+            local found_php=false
+            # Thu Nginx / Ubuntu PHP (php8.4, php8.3...)
+            for v in 8.4 8.3 8.5 8.2 8.1 8.0 7.4; do
                 if command -v "php$v" >/dev/null 2>&1 && "php$v" -m 2>/dev/null | grep -qEi "(mysqli|pdo_mysql)"; then
                     WP_PHP_BIN="php$v"
+                    found_php=true
                     break
                 fi
             done
+            # Thu OpenLiteSpeed PHP (lsphp84, lsphp83...)
+            if [[ "$found_php" == "false" ]]; then
+                for v in 84 83 85 82 81 80 74; do
+                    if command -v "/usr/local/lsws/lsphp$v/bin/php" >/dev/null 2>&1 && "/usr/local/lsws/lsphp$v/bin/php" -m 2>/dev/null | grep -qEi "(mysqli|pdo_mysql)"; then
+                        WP_PHP_BIN="/usr/local/lsws/lsphp$v/bin/php"
+                        found_php=true
+                        break
+                    fi
+                done
+            fi
         fi
         local WP_CMD="$WP_PHP_BIN /usr/local/bin/wp"
+
 
         # 1. Cai + kich hoat plugin redis-cache
         if ! $WP_CMD plugin is-installed redis-cache --path="$site_root" --allow-root 2>/dev/null; then
@@ -1471,12 +1490,23 @@ _do_disable_bloat() {
     fi
     
     if ! "$WP_PHP_BIN" -m 2>/dev/null | grep -qEi "(mysqli|pdo_mysql)"; then
-        for v in 8.3 8.4 8.5 8.2 8.1 8.0 7.4; do
+        local found_php=false
+        for v in 8.4 8.3 8.5 8.2 8.1 8.0 7.4; do
             if command -v "php$v" >/dev/null 2>&1 && "php$v" -m 2>/dev/null | grep -qEi "(mysqli|pdo_mysql)"; then
                 WP_PHP_BIN="php$v"
+                found_php=true
                 break
             fi
         done
+        if [[ "$found_php" == "false" ]]; then
+            for v in 84 83 85 82 81 80 74; do
+                if command -v "/usr/local/lsws/lsphp$v/bin/php" >/dev/null 2>&1 && "/usr/local/lsws/lsphp$v/bin/php" -m 2>/dev/null | grep -qEi "(mysqli|pdo_mysql)"; then
+                    WP_PHP_BIN="/usr/local/lsws/lsphp$v/bin/php"
+                    found_php=true
+                    break
+                fi
+            done
+        fi
     fi
     local WP_CMD="$WP_PHP_BIN -d display_errors=0 /usr/local/bin/wp --path=$WEB_ROOT --allow-root"
 
