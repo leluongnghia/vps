@@ -79,6 +79,16 @@ _wp_enable_php_mysql_extension() {
 
     if _wp_php_has_mysql "$php_bin"; then
         log_info "[Auto-Fix] PHP $ver da bat mysqli/pdo_mysql."
+        # Reload FPM so web server picks up the new extension
+        if systemctl list-units --type=service --state=running 2>/dev/null | grep -q "php${ver}-fpm"; then
+            systemctl reload "php${ver}-fpm" >/dev/null 2>&1 || true
+        elif systemctl list-units --type=service --state=running 2>/dev/null | grep -q "php-fpm"; then
+            systemctl reload php-fpm >/dev/null 2>&1 || true
+        fi
+        # Reload OLS if present
+        if systemctl is-active --quiet lshttpd 2>/dev/null; then
+            systemctl reload lshttpd >/dev/null 2>&1 || /usr/local/lsws/bin/lswsctrl restart >/dev/null 2>&1 || true
+        fi
         return 0
     fi
 
