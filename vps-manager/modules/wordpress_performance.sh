@@ -1260,6 +1260,9 @@ _setup_wp_redis_plugin() {
         return
     fi
 
+    # Cho mot chut de dich vu khoi tao Socket sau khi restart (Fix timing issue)
+    sleep 2
+
     # Xac dinh host/socket
     local redis_host="127.0.0.1"
     local redis_port="6379"
@@ -1279,9 +1282,6 @@ _setup_wp_redis_plugin() {
 
         log_info "[$domain] Cai dat Redis Object Cache plugin..."
 
-        # Cho mot chut de dich vu khoi tao Socket (Fix timing issue)
-        sleep 2
-
         # Tim PHP ban co mysqli (Fix loi thieu mysqli cua WP-CLI mac dinh tren Ubuntu va OLS)
         local WP_PHP_BIN="php"
         local SITE_CONF="/etc/nginx/sites-available/$domain"
@@ -1297,11 +1297,19 @@ _setup_wp_redis_plugin() {
             # Thu auto-install php-mysql cho ban hien tai (Fix loi web broken do thieu extension)
             local cur_ver=$(echo "$WP_PHP_BIN" | grep -oP 'php\K[0-9.]+' | head -n 1)
             if [[ -n "$cur_ver" ]]; then
+                log_info "[Auto-Fix] PHP $cur_ver thieu MySQL extension. Dang tu dong tai va cai dat..."
                 if command -v apt-get >/dev/null 2>&1; then
+                    # Fix LiteSpeed GPG key issue that causes apt-get update to fail on Ubuntu 24.04
+                    if [[ -f /etc/apt/sources.list.d/lst_debian_repo.list ]]; then
+                        wget -qO /etc/apt/trusted.gpg.d/lst_debian_repo.gpg http://rpms.litespeedtech.com/debian/lst_debian_repo.gpg || true
+                        wget -qO - http://rpms.litespeedtech.com/debian/lst_repo.gpg | gpg --dearmor --yes -o /etc/apt/trusted.gpg.d/litespeed.gpg 2>/dev/null || true
+                    fi
+                    apt-get update >/dev/null 2>&1 || true
                     DEBIAN_FRONTEND=noninteractive apt-get install -y "php${cur_ver}-mysql" >/dev/null 2>&1
                 elif command -v dnf >/dev/null 2>&1; then
                     dnf install -y "php${cur_ver}-mysqlnd" >/dev/null 2>&1
                 fi
+                log_info "[Auto-Fix] Hoan tat cai dat php${cur_ver}-mysql."
             fi
         fi
 
@@ -1407,12 +1415,42 @@ _setup_wp_memcached_plugin() {
             fi
         fi
         if ! "$WP_PHP_BIN" -m 2>/dev/null | grep -qEi "(mysqli|pdo_mysql)"; then
-            for v in 8.3 8.4 8.5 8.2 8.1 8.0 7.4; do
+            # Thu auto-install php-mysql cho ban hien tai
+            local cur_ver=$(echo "$WP_PHP_BIN" | grep -oP 'php\K[0-9.]+' | head -n 1)
+            if [[ -n "$cur_ver" ]]; then
+                log_info "[Auto-Fix] PHP $cur_ver thieu MySQL extension. Dang tu dong tai va cai dat..."
+                if command -v apt-get >/dev/null 2>&1; then
+                    # Fix LiteSpeed GPG key issue that causes apt-get update to fail on Ubuntu 24.04
+                    if [[ -f /etc/apt/sources.list.d/lst_debian_repo.list ]]; then
+                        wget -qO /etc/apt/trusted.gpg.d/lst_debian_repo.gpg http://rpms.litespeedtech.com/debian/lst_debian_repo.gpg || true
+                        wget -qO - http://rpms.litespeedtech.com/debian/lst_repo.gpg | gpg --dearmor --yes -o /etc/apt/trusted.gpg.d/litespeed.gpg 2>/dev/null || true
+                    fi
+                    apt-get update >/dev/null 2>&1 || true
+                    DEBIAN_FRONTEND=noninteractive apt-get install -y "php${cur_ver}-mysql" >/dev/null 2>&1
+                elif command -v dnf >/dev/null 2>&1; then
+                    dnf install -y "php${cur_ver}-mysqlnd" >/dev/null 2>&1
+                fi
+                log_info "[Auto-Fix] Hoan tat cai dat php${cur_ver}-mysql."
+            fi
+        fi
+
+        if ! "$WP_PHP_BIN" -m 2>/dev/null | grep -qEi "(mysqli|pdo_mysql)"; then
+            local found_php=false
+            for v in 8.4 8.3 8.5 8.2 8.1 8.0 7.4; do
                 if command -v "php$v" >/dev/null 2>&1 && "php$v" -m 2>/dev/null | grep -qEi "(mysqli|pdo_mysql)"; then
                     WP_PHP_BIN="php$v"
+                    found_php=true
                     break
                 fi
             done
+            if [[ "$found_php" == "false" ]]; then
+                for v in 84 83 85 82 81 80 74; do
+                    if command -v "/usr/local/lsws/lsphp$v/bin/php" >/dev/null 2>&1 && "/usr/local/lsws/lsphp$v/bin/php" -m 2>/dev/null | grep -qEi "(mysqli|pdo_mysql)"; then
+                        WP_PHP_BIN="/usr/local/lsws/lsphp$v/bin/php"
+                        break
+                    fi
+                done
+            fi
         fi
         local WP_CMD="$WP_PHP_BIN /usr/local/bin/wp"
 
@@ -1501,6 +1539,26 @@ _do_disable_bloat() {
         fi
     fi
     
+    if ! "$WP_PHP_BIN" -m 2>/dev/null | grep -qEi "(mysqli|pdo_mysql)"; then
+        # Thu auto-install php-mysql cho ban hien tai
+        local cur_ver=$(echo "$WP_PHP_BIN" | grep -oP 'php\K[0-9.]+' | head -n 1)
+        if [[ -n "$cur_ver" ]]; then
+            log_info "[Auto-Fix] PHP $cur_ver thieu MySQL extension. Dang tu dong tai va cai dat..."
+            if command -v apt-get >/dev/null 2>&1; then
+                # Fix LiteSpeed GPG key issue that causes apt-get update to fail on Ubuntu 24.04
+                if [[ -f /etc/apt/sources.list.d/lst_debian_repo.list ]]; then
+                    wget -qO /etc/apt/trusted.gpg.d/lst_debian_repo.gpg http://rpms.litespeedtech.com/debian/lst_debian_repo.gpg || true
+                    wget -qO - http://rpms.litespeedtech.com/debian/lst_repo.gpg | gpg --dearmor --yes -o /etc/apt/trusted.gpg.d/litespeed.gpg 2>/dev/null || true
+                fi
+                apt-get update >/dev/null 2>&1 || true
+                DEBIAN_FRONTEND=noninteractive apt-get install -y "php${cur_ver}-mysql" >/dev/null 2>&1
+            elif command -v dnf >/dev/null 2>&1; then
+                dnf install -y "php${cur_ver}-mysqlnd" >/dev/null 2>&1
+            fi
+            log_info "[Auto-Fix] Hoan tat cai dat php${cur_ver}-mysql."
+        fi
+    fi
+
     if ! "$WP_PHP_BIN" -m 2>/dev/null | grep -qEi "(mysqli|pdo_mysql)"; then
         local found_php=false
         for v in 8.4 8.3 8.5 8.2 8.1 8.0 7.4; do

@@ -125,6 +125,11 @@ pkg_install() {
 
 pkg_update() {
     if [[ "$OS_FAMILY" == "debian" ]]; then
+        # Fix LiteSpeed GPG error if it exists before running apt-get update
+        if [[ -f /etc/apt/sources.list.d/lst_debian_repo.list ]]; then
+            wget -qO /etc/apt/trusted.gpg.d/lst_debian_repo.gpg http://rpms.litespeedtech.com/debian/lst_debian_repo.gpg 2>/dev/null || true
+            wget -qO - http://rpms.litespeedtech.com/debian/lst_repo.gpg 2>/dev/null | gpg --dearmor --yes -o /etc/apt/trusted.gpg.d/litespeed.gpg 2>/dev/null || true
+        fi
         apt-get update -qq
     elif [[ "$OS_FAMILY" == "rhel" ]]; then
         dnf makecache
