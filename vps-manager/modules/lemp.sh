@@ -267,6 +267,7 @@ _install_object_cache_nginx() {
 
         # Tắt TCP port → bảo mật, loại bỏ overhead
         sed -i 's/^port 6379/#port 6379/g'              "$conf_file"
+        sed -i '/^# port /a port 0' "$conf_file" 2>/dev/null || true
         sed -i 's/^tcp-keepalive 300/tcp-keepalive 0/g' "$conf_file"
         # Tắt RDB compression/checksum không cần thiết (pure object cache)
         sed -i 's/rdbcompression yes/rdbcompression no/g' "$conf_file"
@@ -283,8 +284,9 @@ _install_object_cache_nginx() {
             cat >> "$conf_file" <<SOCKCONF
 
 # ── vps-manager: Unix Socket config (Premium-grade) ──
+port 0
 unixsocket ${socket_path}
-unixsocketperm 770
+unixsocketperm 777
 maxmemory ${maxmem_mb}mb
 maxmemory-policy allkeys-lfu
 save ""
@@ -309,14 +311,17 @@ SOCKCONF
         mkdir -p "$override_dir"
         cat > "${override_dir}/socket-dir.conf" <<SYSOVERRIDE
 [Service]
-ExecStartPre=/bin/mkdir -p ${socket_dir}
-ExecStartPre=/bin/chown ${cache_type}:${cache_type} ${socket_dir}
+RuntimeDirectory=${cache_type}
+RuntimeDirectoryMode=0755
 SYSOVERRIDE
     done
 
     systemctl daemon-reload
     systemctl enable "${service_name}" 2>/dev/null || true
     systemctl restart "${service_name}" 2>/dev/null || true
+    
+    # Đợi 2s để socket kịp khởi tạo trước khi WordPress setup gọi tới
+    sleep 2
 
     sleep 1
 
