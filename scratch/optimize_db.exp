@@ -1,0 +1,30 @@
+#!/usr/bin/expect -f
+set timeout 30
+set host "146.190.92.67"
+set user "root"
+set password "LeLuongVinh@02022022@V"
+set web_root "/var/www/bestsounds.net/public_html"
+
+spawn ssh -o StrictHostKeyChecking=no $user@$host
+expect "password:"
+send "$password\r"
+expect "root@best:~#"
+
+# Check autoload size
+send "mysql -u bestsoundsnet_u -ppbeBX1y7yjfE9oAK bestsoundsnet -e \"SELECT SUM(LENGTH(option_value)) / 1024 / 1024 AS size_mb FROM 5PZnI_options WHERE autoload = 'yes'\"\r"
+expect "root@best:~#"
+
+# Clear transients
+send "mysql -u bestsoundsnet_u -ppbeBX1y7yjfE9oAK bestsoundsnet -e \"DELETE FROM 5PZnI_options WHERE option_name LIKE '_transient_%' OR option_name LIKE '_site_transient_%'\"\r"
+expect "root@best:~#"
+
+# Optimize options table
+send "mysql -u bestsoundsnet_u -ppbeBX1y7yjfE9oAK bestsoundsnet -e \"OPTIMIZE TABLE 5PZnI_options\"\r"
+expect "root@best:~#"
+
+# Restart PHP-FPM to be sure
+send "systemctl restart php8.5-fpm\r"
+expect "root@best:~#"
+
+send "exit\r"
+expect eof

@@ -1,0 +1,24 @@
+#!/usr/bin/expect -f
+set timeout 30
+set host "146.190.92.67"
+set user "root"
+set password "LeLuongVinh@02022022@V"
+set web_root "/var/www/bestsounds.net/public_html"
+
+spawn ssh -o StrictHostKeyChecking=no $user@$host
+expect "password:"
+send "$password\r"
+expect "root@best:~#"
+
+send "php -v\r"
+expect "root@best:~#"
+
+send "wp --version --allow-root\r"
+expect "root@best:~#"
+
+# Try to list active plugins using wp-cli if available
+send "wp plugin list --status=active --allow-root --path=$web_root\r"
+expect "root@best:~#"
+
+send "exit\r"
+expect eof

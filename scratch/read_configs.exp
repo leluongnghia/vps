@@ -1,0 +1,26 @@
+#!/usr/bin/expect -f
+set timeout 30
+set host "146.190.92.67"
+set user "root"
+set password "LeLuongVinh@02022022@V"
+set web_root "/var/www/bestsounds.net/public_html"
+
+spawn ssh -o StrictHostKeyChecking=no $user@$host
+expect "password:"
+send "$password\r"
+expect "root@best:~#"
+
+# Read the entire wp-config.php
+send "cat $web_root/wp-config.php\r"
+expect "root@best:~#"
+
+# Read the entire wp-settings.php
+send "cat $web_root/wp-settings.php\r"
+expect "root@best:~#"
+
+# Check for .user.ini
+send "ls -la $web_root/.user.ini\r"
+expect "root@best:~#"
+
+send "exit\r"
+expect eof

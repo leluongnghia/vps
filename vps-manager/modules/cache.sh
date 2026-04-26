@@ -8,7 +8,7 @@ cache_menu() {
         echo -e "${BLUE}=================================================${NC}"
         echo -e "${GREEN}          Quản lý Cache${NC}"
         echo -e "${BLUE}=================================================${NC}"
-        echo -e "1. Xóa Cache (FastCGI, Redis, Memcached)"
+        echo -e "1. Xóa Cache (FastCGI, Redis/Valkey, Memcached)"
         echo -e "2. Bật/Tắt Redis PHP Extension"
         echo -e "3. Bật/Tắt Memcached PHP Extension"
         echo -e "4. Bật/Tắt Opcache"
@@ -16,9 +16,10 @@ cache_menu() {
         echo -e "6. Cấu hình Nginx cho W3 Total Cache"
         echo -e "7. Tối ưu Server cho Object Cache Pro"
         echo -e "8. Fix lỗi kết nối Redis (Connection Refused)"
+        echo -e "9. Cài đặt Object Cache (Redis/Valkey/KeyDB/Memcached)"
         echo -e "0. Quay lại Menu chính"
         echo -e "${BLUE}=================================================${NC}"
-        read -p "Nhập lựa chọn [0-8]: " choice
+        read -p "Nhập lựa chọn [0-9]: " choice
 
         case $choice in
             1) clear_all_cache ;;
@@ -29,10 +30,132 @@ cache_menu() {
             6) setup_w3tc_nginx ;;
             7) setup_object_cache_pro ;;
             8) fix_redis_connection ;;
+            9) install_object_cache ;;
             0) return ;;
             *) echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause ;;
         esac
     done
+}
+
+# =============================================================================
+# Cài đặt Object Cache theo loại (Redis / Valkey / KeyDB / Memcached)
+# Unix Socket theo mặc định để giảm overhead mạng nội bộ
+# =============================================================================
+
+install_object_cache() {
+    echo -e "${BLUE}=================================================${NC}"
+    echo -e "${GREEN}     Cài đặt Object Cache Server${NC}"
+    echo -e "${BLUE}=================================================${NC}"
+    echo -e "1. Redis"
+    echo -e "2. Valkey (fork mới của Redis, khuyến dùng)"
+    echo -e "3. KeyDB  (đa luồng, nhanh hơn Redis)"
+    echo -e "4. Memcached"
+    echo -e "0. Huỷ"
+    echo -e "${BLUE}=================================================${NC}"
+    read -p "Chọn loại cache [0-4]: " cache_choice
+
+    local object_cache
+    case $cache_choice in
+        1) object_cache="redis" ;;
+        2) object_cache="valkey" ;;
+        3) object_cache="keydb" ;;
+        4) object_cache="memcached" ;;
+        0) return ;;
+        *) echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause; return ;;
+    esac
+
+    log_info "Cài đặt Object Cache: $object_cache..."
+
+    if [[ "$object_cache" == "memcached" ]]; then
+        # Memcached ─ sử dụng Unix Socket
+        if [[ "$OS_FAMILY" == "debian" ]]; then
+            DEBIAN_FRONTEND=noninteractive apt-get install -y memcached &>/dev/null
+        else
+            dnf install -y memcached &>/dev/null
+        fi
+        mkdir -p /var/run/memcached
+        chown -R memcache:memcache /var/run/memcached 2>/dev/null || true
+        cat > /etc/memcached.conf <<'MEMCONF'
+-d
+logfile /var/log/memcached.log
+-m 128
+-u memcache
+-s /var/run/memcached/memcached.sock
+-a 0766
+-c 10240
+-P /var/run/memcached/memcached.pid
+MEMCONF
+        systemctl enable memcached
+        systemctl restart memcached
+        log_info "✓ Memcached đã cài (socket: /var/run/memcached/memcached.sock)"
+        pause; return
+    fi
+
+    # Redis / Valkey / KeyDB ─ đều dùng Unix Socket
+    local name_service="$object_cache"
+    local conf_file="/etc/${object_cache}/${object_cache}.conf"
+    local socket_path="/var/run/${object_cache}/${object_cache}.sock"
+
+    if [[ "$object_cache" == "redis" ]]; then
+        if [[ "$OS_FAMILY" == "debian" ]]; then
+            DEBIAN_FRONTEND=noninteractive apt-get install -y redis-server &>/dev/null
+        else
+            dnf install -y redis &>/dev/null
+        fi
+        conf_file="/etc/redis/redis.conf"
+        socket_path="/var/run/redis/redis.sock"
+        mkdir -p /var/run/redis
+        chown redis:redis /var/run/redis
+    else
+        # Valkey / KeyDB
+        if [[ "$OS_FAMILY" == "debian" ]]; then
+            DEBIAN_FRONTEND=noninteractive apt-get install -y "$object_cache" &>/dev/null
+        else
+            dnf install -y "$object_cache" &>/dev/null
+        fi
+        mkdir -p "/var/run/${object_cache}" "/var/lib/${object_cache}" "/var/log/${object_cache}"
+        chown -R "${object_cache}:${object_cache}" "/var/run/${object_cache}" 2>/dev/null || true
+    fi
+
+    if [[ ! -f "$conf_file" ]]; then
+        log_warn "Không tìm thấy file config $conf_file. Có thể gói chưa được cài."
+        pause; return
+    fi
+
+    # Backup
+    cp "$conf_file" "${conf_file}.bak.$(date +%s)" 2>/dev/null || true
+
+    # Tắt TCP port (bảo mật), chỉ dùng Unix Socket
+    sed -i 's/^port 6379/#port 6379/g'            "$conf_file"
+    sed -i 's/tcp-keepalive 300/tcp-keepalive 0/g' "$conf_file"
+    sed -i 's/rdbcompression yes/rdbcompression no/g' "$conf_file"
+    sed -i 's/rdbchecksum yes/rdbchecksum no/g'    "$conf_file"
+
+    # Chưa có unix socket thì thêm
+    if ! grep -q "^unixsocket " "$conf_file"; then
+        cat >> "$conf_file" <<CACHECONF
+
+# vps-manager object cache config
+unixsocket ${socket_path}
+unixsocketperm 777
+maxmemory 128mb
+maxmemory-policy allkeys-lfu
+save ""
+appendonly no
+activedefrag yes
+tcp-keepalive 60
+CACHECONF
+    fi
+
+    chown "${name_service}:${name_service}" "$conf_file" 2>/dev/null || true
+    chmod 600 "$conf_file"
+
+    systemctl enable "${object_cache}" 2>/dev/null || systemctl enable "${object_cache}-server" 2>/dev/null || true
+    systemctl restart "${object_cache}" 2>/dev/null || systemctl restart "${object_cache}-server" 2>/dev/null || true
+
+    log_info "✓ $object_cache đã cài đặt với Unix Socket: $socket_path"
+    echo -e "${YELLOW}Ghi chú: Thay socket path này vào wp-config.php (WP_REDIS_PATH)${NC}"
+    pause
 }
 
 fix_redis_connection() {

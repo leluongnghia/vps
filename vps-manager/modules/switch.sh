@@ -212,59 +212,277 @@ EOF
     
     systemctl start lshttpd 2>/dev/null
     systemctl reload lshttpd 2>/dev/null
-    
+
+    # Cập nhật stack config — menu sẽ hiển thị chế độ OLS
+    mkdir -p "$HOME/.vps-manager"
+    echo "ACTIVE_STACK=ols" > "$HOME/.vps-manager/stack.conf"
+
     echo -e "${GREEN}Đã di tản thành công $count website sang OpenLiteSpeed!${NC}"
     pause
 }
 
 switch_to_nginx() {
-    log_info "Bắt đầu chuyển đổi hạ tầng sang Nginx..."
-    
-    # Check Nginx installation
+    echo -e "${BLUE}════════════════════════════════════════════════════${NC}"
+    echo -e "${GREEN}   Chuyển đổi OLS → Nginx (toàn bộ website)${NC}"
+    echo -e "${BLUE}════════════════════════════════════════════════════${NC}"
+    echo -e "${YELLOW}Quá trình này sẽ:${NC}"
+    echo -e "  1. Cài Nginx + PHP-FPM (nếu chưa có)"
+    echo -e "  2. Dừng OLS, giải phóng port 80/443"
+    echo -e "  3. Tạo Nginx vhost cho từng site"
+    echo -e "  4. Cài Valkey Unix Socket (object cache L2)"
+    echo -e "  5. Cập nhật wp-config.php kết nối cache mới"
+    echo -e ""
+    read -p "Tiếp tục? [Y/n]: " confirm
+    [[ "${confirm,,}" == "n" ]] && return
+
+    local SCRIPT_DIR
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+    # ── Bước 1: Đảm bảo Nginx đã cài ──────────────────────────────────────
+    log_info "[1/5] Kiểm tra Nginx + PHP-FPM..."
     if ! command -v nginx &>/dev/null; then
-        log_error "Nginx chưa được cài đặt trên máy chủ!"
-        echo -e "Vui lòng vào Menu 1 để Cài đặt LEMP trước."
-        pause; return
+        log_info "Nginx chưa có, đang cài..."
+        source "${SCRIPT_DIR}/lemp.sh"
+        install_nginx
+    else
+        log_info "✓ Nginx đã có."
     fi
-    
-    # 1. Switch Services
-    if systemctl is-active --quiet lshttpd 2>/dev/null; then
-        log_info "Đang tắt OpenLiteSpeed..."
-        systemctl stop lshttpd 2>/dev/null
-        systemctl disable lshttpd 2>/dev/null
-    fi
-    systemctl enable nginx 2>/dev/null
-    
-    # 2. Iterate websites
-    local count=0
-    for wp_config in /var/www/*/public_html/wp-config.php /var/www/*/public_html/index.php /var/www/*/public_html/index.html; do
-        [[ ! -f "$wp_config" ]] && continue
-        local domain=$(basename $(dirname $(dirname "$wp_config")))
-        
-        if [[ -f "/etc/nginx/sites-available/$domain" ]]; then
-            log_warn "[$domain] Đã có cấu hình bên Nginx, bỏ qua..."
-            [[ ! -L "/etc/nginx/sites-enabled/$domain" ]] && ln -s /etc/nginx/sites-available/$domain /etc/nginx/sites-enabled/
-            continue
-        fi
-        
-        log_info "Đang tạo hồ sơ Virtual Host cho: $domain..."
-        source modules/site.sh
-        
-        local php_ver="8.3"
-        [[ -d "/etc/php/8.4" ]] && php_ver="8.4"
-        
-        create_nginx_config "$domain" "$php_ver"
-        
-        count=$((count+1))
+
+    # Cài PHP-FPM nếu chưa có phiên bản nào
+    local php_installed=""
+    for v in 8.3 8.2 8.1 8.4; do
+        [[ -f "/etc/php/${v}/fpm/php.ini" ]] && { php_installed="$v"; break; }
     done
-    
-    # Update global site conf
+    if [[ -z "$php_installed" ]]; then
+        log_info "PHP-FPM chưa có, đang cài PHP 8.3..."
+        source "${SCRIPT_DIR}/lemp.sh"
+        install_php "8.3"
+        php_installed="8.3"
+    fi
+    log_info "✓ PHP-FPM version: ${php_installed}"
+
+    # ── Bước 2: Dừng OLS ───────────────────────────────────────────────────
+    log_info "[2/5] Dừng OpenLiteSpeed..."
+    systemctl stop  lshttpd 2>/dev/null || true
+    systemctl disable lshttpd 2>/dev/null || true
+    # Giải phóng port nếu OLS vẫn chiếm
+    fuser -k 80/tcp  2>/dev/null || true
+    fuser -k 443/tcp 2>/dev/null || true
+    sleep 1
+    log_info "✓ OLS đã dừng."
+
+    # ── Bước 3: Tạo Nginx vhost cho từng site ──────────────────────────────
+    log_info "[3/5] Migrate virtual hosts..."
+    source "${SCRIPT_DIR}/site.sh" 2>/dev/null || true
+
+    local count=0
+    local sites_found=()
+
+    # Quét tất cả site trong /var/www/
+    for site_dir in /var/www/*/; do
+        local domain
+        domain=$(basename "$site_dir")
+        local pub_html="${site_dir}public_html"
+
+        # Bỏ qua thư mục không phải site thật
+        [[ "$domain" == "html" || "$domain" == "default" ]] && continue
+        [[ ! -d "$pub_html" ]] && continue
+
+        sites_found+=("$domain")
+
+        # Phát hiện PHP version từ các symlink LSPHP hoặc dùng default
+        local site_php="$php_installed"
+        # Thử đọc từ OLS vhconf nếu có
+        local ols_vhconf="/usr/local/lsws/conf/vhosts/${domain}/vhconf.conf"
+        if [[ -f "$ols_vhconf" ]]; then
+            # Tìm lsphp83/lsphp82/... trong path
+            local detected_ver
+            detected_ver=$(grep -oP 'lsphp\K\d+' "$ols_vhconf" | head -1)
+            if [[ -n "$detected_ver" ]]; then
+                # "83" -> "8.3"
+                site_php="${detected_ver:0:1}.${detected_ver:1}"
+            fi
+        fi
+        # Fallback: dùng php version nào đã cài cao nhất
+        for v in 8.4 8.3 8.2 8.1; do
+            [[ -f "/etc/php/${v}/fpm/php.ini" ]] && { site_php="$v"; break; }
+        done
+
+        if [[ -f "/etc/nginx/sites-available/${domain}" ]]; then
+            log_warn "  [${domain}] Nginx vhost đã tồn tại, enable lại..."
+            [[ ! -L "/etc/nginx/sites-enabled/${domain}" ]] && \
+                ln -sf "/etc/nginx/sites-available/${domain}" "/etc/nginx/sites-enabled/${domain}"
+        else
+            log_info "  Tạo Nginx vhost: ${domain} (PHP ${site_php})"
+            if type create_nginx_config &>/dev/null; then
+                create_nginx_config "$domain" "$site_php"
+            else
+                # Fallback vhost tối thiểu
+                _make_minimal_nginx_vhost "$domain" "$site_php"
+            fi
+        fi
+
+        # Fix quyền thư mục web
+        chown -R www-data:www-data "$pub_html" 2>/dev/null || true
+
+        count=$(( count + 1 ))
+    done
+
+    log_info "✓ Đã migrate ${count} site sang Nginx."
+
+    # ── Bước 4: Cài Valkey Unix Socket ─────────────────────────────────────
+    log_info "[4/5] Cài đặt Valkey Object Cache (Unix Socket)..."
+    if ! command -v valkey-server &>/dev/null && ! command -v valkey-cli &>/dev/null; then
+        source "${SCRIPT_DIR}/lemp.sh" 2>/dev/null || true
+        if type _install_object_cache_nginx &>/dev/null; then
+            _install_object_cache_nginx "valkey"
+        else
+            # Fallback cài trực tiếp
+            apt-get install -y valkey &>/dev/null 2>&1 || \
+                apt-get install -y redis-server &>/dev/null 2>&1 || true
+        fi
+    else
+        log_info "✓ Valkey/Redis đã được cài sẵn."
+    fi
+
+    # Xác định socket path đang dùng
+    local cache_socket=""
+    [[ -S "/var/run/valkey/valkey.sock" ]] && cache_socket="/var/run/valkey/valkey.sock"
+    [[ -S "/var/run/redis/redis.sock"   ]] && cache_socket="/var/run/redis/redis.sock"
+    [[ -S "/tmp/valkey.sock"            ]] && cache_socket="/tmp/valkey.sock"
+    [[ -S "/tmp/redis.sock"             ]] && cache_socket="/tmp/redis.sock"
+
+    # ── Bước 5: Cập nhật wp-config.php ────────────────────────────────────
+    log_info "[5/5] Cập nhật Object Cache trong wp-config.php..."
+    local db_idx=0
+    for domain in "${sites_found[@]}"; do
+        local wpcfg="/var/www/${domain}/public_html/wp-config.php"
+        [[ ! -f "$wpcfg" ]] && continue
+
+        # Xoá config OLS/cache cũ
+        sed -i "/WP_REDIS_SCHEME\|WP_REDIS_PATH\|WP_REDIS_HOST\|WP_REDIS_PORT\|WP_CACHE_KEY_SALT\|WP_REDIS_DATABASE/d" "$wpcfg"
+
+        if [[ -n "$cache_socket" ]]; then
+            sed -i "/table_prefix/i define( 'WP_REDIS_SCHEME',   'unix' );"            "$wpcfg"
+            sed -i "/table_prefix/i define( 'WP_REDIS_PATH',     '${cache_socket}' );" "$wpcfg"
+            sed -i "/table_prefix/i define( 'WP_REDIS_DATABASE', ${db_idx} );"         "$wpcfg"
+            sed -i "/table_prefix/i define( 'WP_CACHE_KEY_SALT', '${domain}:' );"      "$wpcfg"
+            log_info "  ✓ ${domain} → Unix Socket DB#${db_idx}"
+            db_idx=$(( db_idx + 1 ))
+        fi
+    done
+
+    # ── Bước 6: Dọn dẹp OLS (giải phóng disk) ────────────────────────────
+    log_info "[+] Dọn dẹp OpenLiteSpeed để giải phóng disk..."
+    local disk_before
+    disk_before=$(df -BM / | awk 'NR==2{print $3}')
+
+    # Gỡ gói openlitespeed và toàn bộ lsphp
+    if [[ "$OS_FAMILY" == "debian" ]]; then
+        DEBIAN_FRONTEND=noninteractive apt-get remove -y --purge \
+            openlitespeed lsphp* 2>/dev/null || true
+        apt-get autoremove -y 2>/dev/null || true
+
+        # Xóa OLS apt repo để không update lại
+        rm -f /etc/apt/sources.list.d/openlitespeed.list \
+              /etc/apt/sources.list.d/lsphp.list \
+              /etc/apt/trusted.gpg.d/lst_*.gpg 2>/dev/null || true
+    else
+        dnf remove -y openlitespeed lsphp* 2>/dev/null || true
+        rm -f /etc/yum.repos.d/openlitespeed.repo \
+              /etc/yum.repos.d/litespeed.repo 2>/dev/null || true
+    fi
+
+    # Xóa thư mục OLS còn sót
+    local ols_dirs=(
+        /usr/local/lsws          # binary, conf, vhosts, logs
+        /tmp/lshttpd             # socket files
+        /etc/systemd/system/lshttpd.service.d
+    )
+    for d in "${ols_dirs[@]}"; do
+        if [[ -e "$d" ]]; then
+            rm -rf "$d" 2>/dev/null && log_info "  ✓ Đã xóa: $d"
+        fi
+    done
+
+    # Reload systemd sau khi xóa service
+    systemctl daemon-reload 2>/dev/null || true
+
+    # Xóa log OLS còn nằm trong /var/log
+    rm -rf /var/log/lsws 2>/dev/null || true
+
+    local disk_after
+    disk_after=$(df -BM / | awk 'NR==2{print $3}')
+    local freed=$(( ${disk_before%M} - ${disk_after%M} ))
+    log_info "✓ Dọn dẹp xong. Giải phóng ~${freed}MB disk."
+
+    # ── Khởi động Nginx ────────────────────────────────────────────────────
+    systemctl enable nginx
+    if nginx -t 2>/dev/null; then
+        systemctl restart nginx
+        log_info "✓ Nginx đang chạy."
+    else
+        log_error "Nginx config lỗi! Chạy 'nginx -t' để xem chi tiết."
+    fi
+
+    # Cập nhật stack marker
+    mkdir -p "$HOME/.vps-manager"
+    echo "ACTIVE_STACK=nginx" > "$HOME/.vps-manager/stack.conf"
     if [[ -f ~/.vps-manager/sites_data.conf ]]; then
         sed -i 's/^webserver=.*/webserver=nginx/' ~/.vps-manager/sites_data.conf
     fi
-    
-    nginx -t && systemctl start nginx 2>/dev/null && systemctl restart nginx 2>/dev/null
-    
-    echo -e "${GREEN}Đã khôi phục thành công $count website về Nginx!${NC}"
+
+    echo ""
+    echo -e "${GREEN}════════════════════════════════════════════════════${NC}"
+    echo -e "${GREEN}  ✅ Chuyển đổi OLS → Nginx hoàn tất!${NC}"
+    echo -e "${GREEN}  Đã migrate : ${count} website${NC}"
+    echo -e "${GREEN}  Giải phóng : ~${freed}MB disk${NC}"
+    [[ -n "$cache_socket" ]] && \
+        echo -e "${CYAN}  Object Cache: Unix Socket → ${cache_socket}${NC}"
+    echo -e "${YELLOW}  Bước tiếp theo:${NC}"
+    echo -e "  • Cài SSL: vps → SSL/TLS → Let's Encrypt từng domain"
+    echo -e "  • Kích hoạt Redis Object Cache plugin trong WordPress"
+    echo -e "${GREEN}════════════════════════════════════════════════════${NC}"
     pause
+}
+
+# Tạo Nginx vhost tối thiểu khi site.sh chưa load được
+_make_minimal_nginx_vhost() {
+    local domain="$1" php_ver="$2"
+    local sock="/run/php/php${php_ver}-fpm.sock"
+    local root="/var/www/${domain}/public_html"
+    mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
+
+    cat > "/etc/nginx/sites-available/${domain}" <<NGINXEOF
+server {
+    listen 80;
+    server_name ${domain} www.${domain};
+    root ${root};
+    index index.php index.html;
+
+    client_max_body_size 128M;
+
+    location / {
+        try_files \$uri \$uri/ /index.php?\$args;
+    }
+
+    location ~ \.php$ {
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:${sock};
+        fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
+        include fastcgi_params;
+    }
+
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|webp|woff2?)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        access_log off;
+    }
+
+    location = /favicon.ico { log_not_found off; access_log off; }
+    location = /robots.txt  { allow all; log_not_found off; access_log off; }
+    location ~ /\.          { deny all; }
+}
+NGINXEOF
+    ln -sf "/etc/nginx/sites-available/${domain}" "/etc/nginx/sites-enabled/${domain}"
 }

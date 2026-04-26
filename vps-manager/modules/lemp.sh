@@ -1,86 +1,8 @@
 #!/bin/bash
 
-# modules/lemp.sh - LEMP Stack Installation
-
-install_lemp_menu() {
-    clear
-    echo -e "${BLUE}=================================================${NC}"
-    echo -e "${GREEN}          LEMP Stack Installation${NC}"
-    echo -e "${BLUE}=================================================${NC}"
-    echo -e "1. Install Full LEMP Stack (Recommended)"
-    echo -e "2. Install Nginx Only"
-    echo -e "3. Install MariaDB Only"
-    echo -e "4. Install PHP Only"
-    echo -e "5. Fix PHP Extensions (DOM/XML/MBSTRING/CLI symlinks)"
-    echo -e "0. Back to Main Menu"
-    echo -e "${BLUE}=================================================${NC}"
-    read -p "Enter your choice [0-5]: " choice
-
-    case $choice in
-        1)
-            install_nginx
-            install_mariadb
-            install_php
-            
-            # Auto-install phpMyAdmin
-            if [[ -f "$ROOT_DIR/modules/phpmyadmin.sh" ]]; then
-                log_info "Tự động cài đặt phpMyAdmin..."
-                source "$ROOT_DIR/modules/phpmyadmin.sh"
-                install_phpmyadmin
-            elif [[ -f "modules/phpmyadmin.sh" ]]; then
-                log_info "Tự động cài đặt phpMyAdmin..."
-                source "modules/phpmyadmin.sh"
-                install_phpmyadmin
-            fi
-            
-            # Hỗ trợ lựa chọn Object Cache (Valkey / Redis)
-            echo ""
-            echo -e "${YELLOW}Bạn có muốn cài đặt Memory Cache (Valkey/Redis) cho Server không?${NC}"
-            echo -e "1. Valkey (Khuyên dùng - Nhanh hơn, thay thế Redis 100%)"
-            echo -e "2. Redis (Truyền thống)"
-            echo -e "0. Bỏ qua"
-            read -p "Chọn [0-2]: " cache_choice
-            
-            if [[ "$cache_choice" == "1" || "$cache_choice" == "2" ]]; then
-                if [[ -f "$ROOT_DIR/modules/wordpress_performance.sh" ]]; then
-                    source "$ROOT_DIR/modules/wordpress_performance.sh"
-                else
-                    source "modules/wordpress_performance.sh" 2>/dev/null
-                fi
-                if [[ "$cache_choice" == "1" ]]; then
-                     install_valkey
-                else
-                     install_redis
-                fi
-            fi
-            
-            pause
-            ;;
-        2)
-            install_nginx
-            pause
-            ;;
-        3)
-            install_mariadb
-            pause
-            ;;
-        4)
-            install_php
-            pause
-            ;;
-        5)
-            fix_php_extensions
-            pause
-            ;;
-        0)
-            return
-            ;;
-        *)
-            echo -e "${RED}Invalid choice!${NC}"
-            pause
-            ;;
-    esac
-}
+# modules/lemp.sh - LEMP Stack Component Installers
+# Chú ý: Menu cài đặt đầy đủ được quản lý qua nginx.sh (install_nginx_stack_menu)
+#         và ols.sh (install_ols_stack). File này cung cấp các hàm component riêng lẻ.
 
 install_nginx() {
     # Xử lý xung đột với OpenLiteSpeed
@@ -118,32 +40,289 @@ install_nginx() {
 install_mariadb() {
     if is_installed mariadb-server; then
         log_warn "MariaDB is already installed."
-    else
-        log_info "Installing MariaDB..."
-        pkg_install mariadb-server
-        systemctl enable mariadb
-        systemctl start mariadb
-        
-        # Tự động tạo mật khẩu root an toàn và cấu hình
-        local root_pass
-        root_pass=$(openssl rand -base64 24 | tr -dc 'a-zA-Z0-9' | head -c 24)
-        
-        # Thực thi gộp 1 lần thông qua heredoc để không bị văng phiên (session) sau lệnh đổi mật khẩu đầu tiên
-        mysql <<EOF
-ALTER USER 'root'@'localhost' IDENTIFIED BY '${root_pass}';
-DELETE FROM mysql.user WHERE User='';
-DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');
-DROP DATABASE IF EXISTS test;
-DELETE FROM mysql.db WHERE Db='test' OR Db='test\_%';
-FLUSH PRIVILEGES;
-EOF
-        
-        # Lưu vào .my.cnf
-        echo -e "[client]\nuser=root\npassword=\"${root_pass}\"" > /root/.my.cnf
-        chmod 600 /root/.my.cnf
-        
-        log_info "MariaDB installed and secured! Tự động tạo cấu hình Root."
+        _tune_mariadb_config
+        return
     fi
+
+    log_info "Cài đặt MariaDB..."
+    pkg_install mariadb-server
+    systemctl enable mariadb
+    systemctl start mariadb
+
+    # Tạo mật khẩu admin mạnh
+    local db_admin_pass
+    db_admin_pass=$(openssl rand -base64 32 | tr -dc 'a-zA-Z0-9' | head -c 32)
+
+    # Bảo mật: đổi tên user root -> wpdbadmin (wptangtoc pattern)
+    # Hacker brute-force khó đoán tên user hơn
+    mariadb <<SQLEOF 2>/dev/null || mysql <<SQLEOF2 2>/dev/null
+use mysql;
+FLUSH PRIVILEGES;
+CREATE USER IF NOT EXISTS 'wpdbadmin'@'localhost' IDENTIFIED BY '${db_admin_pass}';
+GRANT ALL PRIVILEGES ON *.* TO 'wpdbadmin'@'localhost' WITH GRANT OPTION;
+DROP USER IF EXISTS 'root'@'localhost';
+DROP USER IF EXISTS ''@'localhost';
+DROP DATABASE IF EXISTS test;
+DELETE FROM mysql.db WHERE Db='test' OR Db='test_%';
+FLUSH PRIVILEGES;
+SQLEOF
+use mysql;
+ALTER USER 'root'@'localhost' IDENTIFIED BY '${db_admin_pass}';
+DELETE FROM mysql.user WHERE User='';
+DROP DATABASE IF EXISTS test;
+FLUSH PRIVILEGES;
+SQLEOF2
+
+    # Ghi credentials
+    cat > /root/.my.cnf <<MYCNF
+# Managed by VPS-Manager
+[client]
+host     = localhost
+user     = wpdbadmin
+password = ${db_admin_pass}
+
+[mysql_upgrade]
+host     = localhost
+user     = wpdbadmin
+password = ${db_admin_pass}
+MYCNF
+    chmod 600 /root/.my.cnf
+
+    # Áp tuning config theo RAM
+    _tune_mariadb_config
+    systemctl restart mariadb
+
+    log_info "MariaDB installed and secured! (User: wpdbadmin)"
+}
+
+_tune_mariadb_config() {
+    local mycnf="/etc/mysql/my.cnf"
+    [[ ! -f "$mycnf" ]] && mycnf="/etc/my.cnf"
+    [[ ! -f "$mycnf" ]] && { log_warn "Không tìm thấy my.cnf. Bỏ qua tuning."; return; }
+
+    if grep -q "vps-manager-db-tuning" "$mycnf" 2>/dev/null; then
+        log_info "MariaDB đã được tối ưu từ trước."; return 0
+    fi
+
+    local total_ram_mb cpu_cores
+    total_ram_mb=$(free -m | awk '/^Mem:/{print $2}')
+    cpu_cores=$(grep -c ^processor /proc/cpuinfo 2>/dev/null || echo 2)
+    local total_ram_gb=$(( total_ram_mb / 1024 ))
+    local innodb_buffer=$(( total_ram_mb / 4 ))
+    local key_buffer=$(( total_ram_mb / 6 ))
+    local db_table_size=$(( total_ram_gb * 64 ))
+    local max_connections=$(( 64 * total_ram_gb ))
+
+    # Tối thiểu cho VPS < 1GB RAM
+    if [[ "$total_ram_mb" -lt 1024 ]]; then
+        innodb_buffer=48; key_buffer=32; db_table_size=32; max_connections=300
+    fi
+    [[ "$max_connections" -lt 100 ]] && max_connections=100
+
+    # Query cache: tắt nếu > 2 CPU (MariaDB 10.8+ đã deprecated)
+    local query_cache_conf="query_cache_type = 0
+query_cache_size = 0"
+    if [[ "$cpu_cores" -le 2 ]]; then
+        query_cache_conf="query_cache_type = 1
+query_cache_limit = 2M
+query_cache_min_res_unit = 2k
+query_cache_size = 50M"
+    fi
+
+    cat >> "$mycnf" <<DBCONF
+
+# vps-manager-db-tuning (wptangtoc-grade, RAM-auto-scaled)
+[mysqld]
+key_buffer_size         = ${key_buffer}M
+table_cache             = 2000
+innodb_buffer_pool_size = ${innodb_buffer}M
+max_connections         = ${max_connections}
+${query_cache_conf}
+tmp_table_size          = ${db_table_size}M
+max_heap_table_size     = ${db_table_size}M
+thread_cache_size       = 81
+max_allowed_packet      = 64M
+wait_timeout            = 60
+interactive_timeout     = 60
+skip-log-bin
+skip-networking
+DBCONF
+
+    log_info "MariaDB tuning: RAM=${total_ram_mb}MB, InnoDB=${innodb_buffer}M, MaxConn=${max_connections}"
+}
+
+# ==============================================================================
+# Cài đặt Object Cache (L2) cho Nginx stack
+# Kiến trúc 2 tầng: L1 Nginx FastCGI Cache + L2 Unix Socket Object Cache
+# Tham khảo: wptangtoc + research best practices 2025
+# ==============================================================================
+
+_install_object_cache_nginx() {
+    local cache_type="${1:-valkey}"  # valkey | redis | keydb
+
+    log_info "═══════════════════════════════════════════════════"
+    log_info "  Cài đặt Object Cache L2: ${cache_type} (Unix Socket)"
+    log_info "  Mục đích: Giảm tải MariaDB 80%+, tăng tốc WP"
+    log_info "═══════════════════════════════════════════════════"
+
+    local service_name="$cache_type"
+    local conf_file socket_path socket_dir
+
+    case "$cache_type" in
+        redis)
+            conf_file="/etc/redis/redis.conf"
+            socket_dir="/var/run/redis"
+            socket_path="${socket_dir}/redis.sock"
+            ;;
+        valkey)
+            conf_file="/etc/valkey/valkey.conf"
+            socket_dir="/var/run/valkey"
+            socket_path="${socket_dir}/valkey.sock"
+            ;;
+        keydb)
+            conf_file="/etc/keydb/keydb.conf"
+            socket_dir="/var/run/keydb"
+            socket_path="${socket_dir}/keydb.sock"
+            ;;
+    esac
+
+    # ── Cài đặt gói ──
+    if [[ "$OS_FAMILY" == "debian" ]]; then
+        case "$cache_type" in
+            redis)   DEBIAN_FRONTEND=noninteractive apt-get install -y redis-server &>/dev/null ;;
+            valkey)  DEBIAN_FRONTEND=noninteractive apt-get install -y valkey &>/dev/null ;;
+            keydb)   DEBIAN_FRONTEND=noninteractive apt-get install -y keydb &>/dev/null ;;
+        esac
+    else
+        case "$cache_type" in
+            redis)  dnf install -y redis &>/dev/null ;;
+            valkey) dnf install -y valkey &>/dev/null ;;
+            keydb)  dnf install -y keydb &>/dev/null ;;
+        esac
+    fi
+
+    # ── Tạo thư mục socket ──
+    mkdir -p "$socket_dir"
+    chown "${cache_type}:${cache_type}" "$socket_dir" 2>/dev/null || \
+        chown "redis:redis" "$socket_dir" 2>/dev/null || true
+    chmod 755 "$socket_dir"
+
+    # ── Cấu hình Unix Socket (tắt TCP, chỉ Unix) ──
+    if [[ -f "$conf_file" ]]; then
+        # Backup
+        cp "$conf_file" "${conf_file}.bak.$(date +%s)" 2>/dev/null || true
+
+        # Tắt TCP port → bảo mật, loại bỏ overhead
+        sed -i 's/^port 6379/#port 6379/g'              "$conf_file"
+        sed -i 's/^tcp-keepalive 300/tcp-keepalive 0/g' "$conf_file"
+        # Tắt RDB compression/checksum không cần thiết (pure object cache)
+        sed -i 's/rdbcompression yes/rdbcompression no/g' "$conf_file"
+        sed -i 's/rdbchecksum yes/rdbchecksum no/g'       "$conf_file"
+
+        # Thêm Unix Socket config nếu chưa có
+        if ! grep -q "^unixsocket " "$conf_file"; then
+            # Tính maxmemory: 10% RAM (không chiếm quá nhiều, để MariaDB và PHP-FPM)
+            local total_ram_mb; total_ram_mb=$(free -m | awk '/^Mem:/{print $2}')
+            local maxmem_mb=$(( total_ram_mb / 10 ))
+            [[ "$maxmem_mb" -lt 64 ]]  && maxmem_mb=64
+            [[ "$maxmem_mb" -gt 512 ]] && maxmem_mb=512
+
+            cat >> "$conf_file" <<SOCKCONF
+
+# ── vps-manager: Unix Socket config (wptangtoc-grade) ──
+unixsocket ${socket_path}
+unixsocketperm 770
+maxmemory ${maxmem_mb}mb
+maxmemory-policy allkeys-lfu
+save ""
+appendonly no
+activedefrag yes
+tcp-keepalive 60
+SOCKCONF
+        fi
+
+        # Fix quyền config file
+        chown "${cache_type}:${cache_type}" "$conf_file" 2>/dev/null || \
+            chown "redis:redis" "$conf_file" 2>/dev/null || true
+        chmod 640 "$conf_file"
+    else
+        log_warn "Không tìm thấy file config ${conf_file}. Có thể gói chưa cài được."
+        return 1
+    fi
+
+    # ── Systemd override: đảm bảo socket dir tồn tại trước khi service start ──
+    local override_dir="/etc/systemd/system/${service_name}.service.d"
+    mkdir -p "$override_dir"
+    cat > "${override_dir}/socket-dir.conf" <<SYSOVERRIDE
+[Service]
+ExecStartPre=/bin/mkdir -p ${socket_dir}
+ExecStartPre=/bin/chown ${service_name}:${service_name} ${socket_dir}
+SYSOVERRIDE
+
+    systemctl daemon-reload
+    systemctl enable "${service_name}" 2>/dev/null || \
+        systemctl enable "${service_name}-server" 2>/dev/null || true
+    systemctl restart "${service_name}" 2>/dev/null || \
+        systemctl restart "${service_name}-server" 2>/dev/null || true
+
+    sleep 1
+
+    # ── Thêm www-data vào group của cache service ──
+    # Đây là bước quan trọng nhất khi dùng Unix Socket với PHP-FPM
+    local cache_group="${service_name}"
+    if getent group "$cache_group" &>/dev/null; then
+        usermod -aG "$cache_group" www-data 2>/dev/null || true
+        log_info "✓ Đã thêm www-data vào group ${cache_group}"
+    fi
+    # Đảm bảo socket có thể truy cập
+    chmod 770 "$socket_path" 2>/dev/null || true
+
+    # ── Cài PHP Redis extension ──
+    log_info "Cài đặt PHP Redis extension..."
+    if [[ "$OS_FAMILY" == "debian" ]]; then
+        for phpver in 8.3 8.2 8.1 8.4; do
+            if [[ -f "/etc/php/${phpver}/fpm/php.ini" ]]; then
+                DEBIAN_FRONTEND=noninteractive apt-get install -y "php${phpver}-redis" &>/dev/null || true
+                phpenmod -v "$phpver" redis 2>/dev/null || true
+                systemctl restart "php${phpver}-fpm" 2>/dev/null || true
+                log_info "✓ PHP ${phpver}-redis extension đã bật"
+            fi
+        done
+    else
+        for phpver in 83 82 81; do
+            dnf install -y "php${phpver}-php-redis" &>/dev/null || \
+            dnf install -y "php-redis" &>/dev/null || true
+        done
+    fi
+
+    # ── Verify socket hoạt động ──
+    if [[ -S "$socket_path" ]]; then
+        log_info "✓ ${cache_type} Unix Socket đang hoạt động: ${socket_path}"
+    else
+        log_warn "⚠ Socket ${socket_path} chưa tồn tại. Kiểm tra: systemctl status ${service_name}"
+    fi
+
+    # ── In hướng dẫn wp-config.php ──
+    echo ""
+    echo -e "${GREEN}═══════════════════════════════════════════════════════${NC}"
+    echo -e "${GREEN}  ✓ ${cache_type} đã cài thành công với Unix Socket!${NC}"
+    echo -e "${YELLOW}  Thêm vào wp-config.php của mỗi WordPress site:${NC}"
+    echo ""
+    echo "  define('WP_REDIS_SCHEME', 'unix');"
+    echo "  define('WP_REDIS_PATH',   '${socket_path}');"
+    echo "  define('WP_REDIS_DATABASE', 0);  // Tăng số này cho mỗi site"
+    echo "  define('WP_CACHE_KEY_SALT', 'tensite:');"
+    echo ""
+    echo -e "${CYAN}  Plugin đề xuất: Redis Cache by Till Krüss${NC}"
+    echo -e "${CYAN}  (Tương thích với Redis, Valkey, KeyDB)${NC}"
+    echo -e "${GREEN}═══════════════════════════════════════════════════════${NC}"
+    echo ""
+
+    # Lưu socket path để các module khác dùng
+    mkdir -p /etc/vps-manager
+    echo "OBJECT_CACHE_TYPE=${cache_type}" > /etc/vps-manager/cache.conf
+    echo "OBJECT_CACHE_SOCKET=${socket_path}" >> /etc/vps-manager/cache.conf
+    chmod 600 /etc/vps-manager/cache.conf
 }
 
 install_php() {

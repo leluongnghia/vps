@@ -1,0 +1,44 @@
+#!/usr/bin/expect -f
+set timeout 30
+set host "146.190.92.67"
+set user "root"
+set password "LeLuongVinh@02022022@V"
+
+spawn ssh -o StrictHostKeyChecking=no $user@$host
+expect {
+    "password:" {
+        send "$password\r"
+    }
+    timeout {
+        puts "Timeout waiting for password prompt"
+        exit 1
+    }
+}
+
+expect "root@best:~#"
+# Find the config file
+send "grep -rl 'bestsounds.net' /etc/nginx/sites-enabled/ /etc/nginx/conf.d/ 2>/dev/null | head -n 1\r"
+expect -re "(/etc/nginx/.*)\r\n"
+set config_file $expect_out(1,string)
+puts "Config file: $config_file"
+
+# Find the root directory
+send "grep 'root ' $config_file | awk '{print \$2}' | sed 's/;//' | head -n 1\r"
+expect -re "(/.*)\r\n"
+set web_root $expect_out(1,string)
+puts "Web root: $web_root"
+
+# Check error logs
+send "tail -n 50 /var/log/nginx/error.log\r"
+expect "root@best:~#"
+
+# Check WordPress debug.log if it exists
+send "tail -n 50 $web_root/wp-content/debug.log 2>/dev/null\r"
+expect "root@best:~#"
+
+# Try to list plugins to confirm directory name
+send "ls $web_root/wp-content/plugins/\r"
+expect "root@best:~#"
+
+send "exit\r"
+expect eof

@@ -1,0 +1,22 @@
+#!/usr/bin/expect -f
+set timeout 10
+set host "146.190.92.67"
+set user "root"
+set password "LeLuongVinh@02022022@V"
+
+spawn ssh -o StrictHostKeyChecking=no $user@$host
+expect {
+    "password:" {
+        send "$password\r"
+    }
+    timeout {
+        puts "Timeout waiting for password prompt"
+        exit 1
+    }
+}
+
+expect "# "
+send "grep -r 'server_name .*bestsounds.net' /etc/nginx/sites-enabled/ /etc/nginx/conf.d/ /etc/nginx/nginx.conf 2>/dev/null | head -n 1\r"
+expect "# "
+send "exit\r"
+expect eof

@@ -1,0 +1,34 @@
+#!/usr/bin/expect -f
+set timeout 30
+set host "146.190.92.67"
+set user "root"
+set password "LeLuongVinh@02022022@V"
+set web_root "/var/www/bestsounds.net/public_html"
+
+spawn ssh -o StrictHostKeyChecking=no $user@$host
+expect "password:"
+send "$password\r"
+expect "root@best:~#"
+
+# Increase memory limit in wp-config.php
+send "sed -i \"s/\\/\\* That's all, stop editing! Happy publishing. \\*\\//define('WP_MEMORY_LIMIT', '2048M');\\n\\/\\* That's all, stop editing! Happy publishing. \\*\\//\" $web_root/wp-config.php\r"
+expect "root@best:~#"
+
+# Check php-fpm service name
+send "systemctl list-units --type=service | grep php\r"
+expect "root@best:~#"
+
+# Restart the correct php-fpm service
+send "systemctl restart php8.3-fpm || systemctl restart php8.2-fpm || systemctl restart php8.1-fpm || systemctl restart php-fpm\r"
+expect "root@best:~#"
+
+# Flush cache
+send "wp cache flush --allow-root --path=$web_root\r"
+expect "root@best:~#"
+
+# Check site status
+send "curl -I https://bestsounds.net/\r"
+expect "root@best:~#"
+
+send "exit\r"
+expect eof

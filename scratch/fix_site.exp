@@ -1,0 +1,34 @@
+#!/usr/bin/expect -f
+set timeout 30
+set host "146.190.92.67"
+set user "root"
+set password "LeLuongVinh@02022022@V"
+set web_root "/var/www/bestsounds.net/public_html"
+
+spawn ssh -o StrictHostKeyChecking=no $user@$host
+expect "password:"
+send "$password\r"
+expect "root@best:~#"
+
+# List plugins
+send "ls -F $web_root/wp-content/plugins/\r"
+expect "root@best:~#"
+
+# Check if seo-by-rank-math exists
+send "ls -d $web_root/wp-content/plugins/seo-by-rank-math/\r"
+expect "root@best:~#"
+
+# Check the memory limit in wp-config.php
+send "grep 'WP_MEMORY_LIMIT' $web_root/wp-config.php\r"
+expect "root@best:~#"
+
+# Try to deactivate rank math by renaming it
+send "mv $web_root/wp-content/plugins/seo-by-rank-math $web_root/wp-content/plugins/seo-by-rank-math.bak\r"
+expect "root@best:~#"
+
+# Check logs again
+send "tail -n 20 /var/log/nginx/error.log\r"
+expect "root@best:~#"
+
+send "exit\r"
+expect eof

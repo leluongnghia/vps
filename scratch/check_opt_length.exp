@@ -1,0 +1,18 @@
+#!/usr/bin/expect -f
+set timeout 30
+set host "146.190.92.67"
+set user "root"
+set password "LeLuongVinh@02022022@V"
+set web_root "/var/www/bestsounds.net/public_html"
+
+spawn ssh -o StrictHostKeyChecking=no $user@$host
+expect "password:"
+send "$password\r"
+expect "root@best:~#"
+
+# Query the database for stylesheet and template options
+send "mysql -u bestsoundsnet_u -ppbeBX1y7yjfE9oAK bestsoundsnet -e \"SELECT option_name, LENGTH(option_value) FROM wp_options WHERE option_name IN ('stylesheet', 'template', 'active_plugins')\"\r"
+expect "root@best:~#"
+
+send "exit\r"
+expect eof

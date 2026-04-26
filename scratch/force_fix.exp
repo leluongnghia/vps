@@ -1,0 +1,48 @@
+#!/usr/bin/expect -f
+set timeout 30
+set host "146.190.92.67"
+set user "root"
+set password "LeLuongVinh@02022022@V"
+set web_root "/var/www/bestsounds.net/public_html"
+
+spawn ssh -o StrictHostKeyChecking=no $user@$host
+expect "password:"
+send "$password\r"
+expect "root@best:~#"
+
+# Create a small PHP script to fix the active_plugins option
+send "cat << 'EOF' > $web_root/fix_plugins.php\n"
+send "<?php\n"
+send "include 'wp-load.php';\n"
+send "\$active_plugins = get_option('active_plugins');\n"
+send "if (\$active_plugins) {\n"
+send "    \$key = array_search('seo-by-rank-math/rank-math.php', \$active_plugins);\n"
+send "    if (\$key !== false) {\n"
+send "        unset(\$active_plugins\[\$key\]);\n"
+send "        update_option('active_plugins', array_values(\$active_plugins));\n"
+send "        echo 'Rank Math removed from active_plugins\\n';\n"
+send "    } else {\n"
+send "        echo 'Rank Math not found in active_plugins\\n';\n"
+send "    }\n"
+send "}\n"
+send "EOF\r"
+expect "root@best:~#"
+
+# Run the PHP script
+send "php $web_root/fix_plugins.php\r"
+expect "root@best:~#"
+
+# Remove the script
+send "rm $web_root/fix_plugins.php\r"
+expect "root@best:~#"
+
+# Flush cache
+send "wp cache flush --allow-root --path=$web_root\r"
+expect "root@best:~#"
+
+# Check homepage again
+send "curl -I https://bestsounds.net/\r"
+expect "root@best:~#"
+
+send "exit\r"
+expect eof

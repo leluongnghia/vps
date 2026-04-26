@@ -1,0 +1,21 @@
+#!/usr/bin/expect -f
+set timeout 30
+set host "146.190.92.67"
+set user "root"
+set password "LeLuongVinh@02022022@V"
+set web_root "/var/www/bestsounds.net/public_html"
+
+spawn ssh -o StrictHostKeyChecking=no $user@$host
+expect "password:"
+send "$password\r"
+expect "root@best:~#"
+
+send "grep 'table_prefix' $web_root/wp-config.php\r"
+expect "root@best:~#"
+
+# Also list tables to be sure
+send "mysql -u bestsoundsnet_u -ppbeBX1y7yjfE9oAK bestsoundsnet -e 'SHOW TABLES'\r"
+expect "root@best:~#"
+
+send "exit\r"
+expect eof

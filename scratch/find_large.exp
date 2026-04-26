@@ -1,0 +1,26 @@
+#!/usr/bin/expect -f
+set timeout 30
+set host "146.190.92.67"
+set user "root"
+set password "LeLuongVinh@02022022@V"
+set web_root "/var/www/bestsounds.net/public_html"
+
+spawn ssh -o StrictHostKeyChecking=no $user@$host
+expect "password:"
+send "$password\r"
+expect "root@best:~#"
+
+# Check files in fast-indexing-api
+send "ls -lh $web_root/wp-content/plugins/fast-indexing-api/includes/\r"
+expect "root@best:~#"
+
+# Find any file that is unusually large in the whole web root
+send "find $web_root -type f -size +10M\r"
+expect "root@best:~#"
+
+# Check if there's any 'seo-by-rank-math' directory anywhere else
+send "find $web_root -name 'seo-by-rank-math' -type d\r"
+expect "root@best:~#"
+
+send "exit\r"
+expect eof

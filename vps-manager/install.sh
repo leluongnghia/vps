@@ -147,8 +147,8 @@ auto_install_stack() {
     echo -e "${GREEN}   AUTO INSTALL: Chọn Cấu Trúc Máy Chủ Web${NC}"
     echo -e "${YELLOW}=================================================${NC}"
     echo -e "Bạn muốn xây dựng máy chủ VPS này theo trường phái nào?"
-    echo -e "1. Nginx thuần & FastCGI (Stack Truyền Thống chịu tải trâu bò)"
-    echo -e "2. OpenLiteSpeed & LSCache & Valkey (Stack Tốc Độ Ánh Sáng cho WP) ${YELLOW}[HOT]${NC}"
+    echo -e "1. 🌐 Nginx (LEMP Stack truyền thống - ổn định, chịu tải cao)"
+    echo -e "2. ⚡ OpenLiteSpeed (LSCache + Valkey - Tốc độ ánh sáng cho WordPress) ${YELLOW}[HOT]${NC}"
     echo -e ""
     read -p "Chọn [1-2, mặc định 1]: " stack_choice
 
@@ -179,12 +179,13 @@ auto_install_stack() {
         echo -e "${BLUE}[2/7] Đang cài đặt ${web_server} & MariaDB...${NC}"
         source modules/lemp.sh
         install_mariadb
-        
+
         if [[ "$web_server" == "OpenLiteSpeed" ]]; then
             source modules/ols.sh
             # Cài OLS và tự động nhét lựa chọn 4 (LSPHP 8.4)
             echo "4" | install_ols_stack
         else
+            source modules/nginx.sh
             install_nginx
             echo -e "${BLUE}[3/7] Đang cài đặt PHP 8.4...${NC}"
             install_php "8.4"
@@ -203,17 +204,17 @@ auto_install_stack() {
         echo -e "${BLUE}[6/7] Đang cấu hình Firewall...${NC}"
         source modules/security.sh
         setup_firewall "auto"
-        
+
         echo -e "${BLUE}[7/7] Đang cấu hình Monit Watchdog...${NC}"
         source modules/monit.sh
         monit_install "auto"
-        
+
         echo -e "${GREEN}=================================================${NC}"
         echo -e "${GREEN}Quá trình khởi tạo Server đã hoàn tất xuất sắc!${NC}"
     else
         echo -e "${YELLOW}Đã huỷ Auto-Install.${NC}"
     fi
-    
+
     read -p "Nhấn Enter để về Menu chính..."
 }
 
@@ -249,7 +250,7 @@ main() {
         fi
         
         # Check if installed to skip auto-install prompt
-        if ! command -v nginx &> /dev/null || ! command -v php &> /dev/null; then
+        if ! command -v nginx &> /dev/null && ! command -v lshttpd &> /dev/null; then
             echo -e "${BLUE}=================================================${NC}"
             echo -e "Đây là lần đầu tiên chạy VPS Manager."
             echo -e "Bạn có muốn chạy Auto-Install toàn bộ hệ thống LEMP không?"

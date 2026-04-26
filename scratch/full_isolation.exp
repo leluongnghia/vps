@@ -1,0 +1,36 @@
+#!/usr/bin/expect -f
+set timeout 30
+set host "146.190.92.67"
+set user "root"
+set password "LeLuongVinh@02022022@V"
+set web_root "/var/www/bestsounds.net/public_html"
+
+spawn ssh -o StrictHostKeyChecking=no $user@$host
+expect "password:"
+send "$password\r"
+expect "root@best:~#"
+
+# Deactivate all plugins by renaming
+send "mv $web_root/wp-content/plugins $web_root/wp-content/plugins.off\r"
+expect "root@best:~#"
+send "mkdir $web_root/wp-content/plugins\r"
+expect "root@best:~#"
+
+# Switch to twentytwentyfour
+send "wp theme activate twentytwentyfour --allow-root --path=$web_root\r"
+expect "root@best:~#"
+
+# Flush cache
+send "wp cache flush --allow-root --path=$web_root\r"
+expect "root@best:~#"
+
+# Check site status
+send "curl -I https://bestsounds.net/\r"
+expect "root@best:~#"
+
+# If it still fails, check for any strange files in wp-includes or wp-admin that shouldn't be there
+send "ls -lt $web_root/wp-includes | head -n 10\r"
+expect "root@best:~#"
+
+send "exit\r"
+expect eof

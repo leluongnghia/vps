@@ -156,11 +156,11 @@ _install_lsphp() {
         "lsphp${lsphp_ver}-intl"
         "lsphp${lsphp_ver}-gd"
         "lsphp${lsphp_ver}-imagick"
+        "lsphp${lsphp_ver}-imap"
     )
 
     if [[ "$OS_FAMILY" == "debian" ]]; then
         DEBIAN_FRONTEND=noninteractive apt-get install -y "${packages[@]}" 2>/dev/null || {
-            # Thử cài từng gói, bỏ qua gói không có
             for pkg in "${packages[@]}"; do
                 DEBIAN_FRONTEND=noninteractive apt-get install -y "$pkg" &>/dev/null || true
             done
@@ -173,22 +173,45 @@ _install_lsphp() {
         }
     fi
 
-    # Cấu hình php.ini cho LSPHP
+    # ── Cấu hình php.ini nâng cao cho LSPHP (chuẩn wptangtoc) ──
     local lsphp_ini="/usr/local/lsws/lsphp${lsphp_ver}/etc/php/${ver}/litespeed/php.ini"
     if [[ -f "$lsphp_ini" ]]; then
-        sed -i -E "s/^[; ]*upload_max_filesize.*/upload_max_filesize = 128M/" "$lsphp_ini"
-        sed -i -E "s/^[; ]*post_max_size.*/post_max_size = 128M/" "$lsphp_ini"
-        sed -i -E "s/^[; ]*memory_limit.*/memory_limit = 256M/" "$lsphp_ini"
-        sed -i -E "s/^[; ]*max_execution_time.*/max_execution_time = 300/" "$lsphp_ini"
-        sed -i -E "s/^[; ]*max_input_vars.*/max_input_vars = 3000/" "$lsphp_ini"
-        # Bật OPcache
-        sed -i -E "s/^[; ]*opcache.enable.*/opcache.enable = 1/" "$lsphp_ini"
-        sed -i -E "s/^[; ]*opcache.memory_consumption.*/opcache.memory_consumption = 256/" "$lsphp_ini"
-        sed -i -E "s/^[; ]*opcache.max_accelerated_files.*/opcache.max_accelerated_files = 10000/" "$lsphp_ini"
-        log_info "Đã cấu hình php.ini cho LSPHP ${ver}"
+        # Upload / Execution limits
+        sed -i -E "s/^[; ]*upload_max_filesize.*/upload_max_filesize = 128M/"  "$lsphp_ini"
+        sed -i -E "s/^[; ]*post_max_size.*/post_max_size = 128M/"              "$lsphp_ini"
+        sed -i -E "s/^[; ]*memory_limit.*/memory_limit = 256M/"               "$lsphp_ini"
+        sed -i -E "s/^[; ]*max_execution_time.*/max_execution_time = 300/"    "$lsphp_ini"
+        sed -i -E "s/^[; ]*max_input_vars.*/max_input_vars = 3000/"           "$lsphp_ini"
+
+        # Security
+        sed -i -E "s/expose_php = On/expose_php = off/g" "$lsphp_ini"
+
+        # OPcache (tối ưu theo wptangtoc)
+        sed -i '/opcache/d' "$lsphp_ini" 2>/dev/null
+        cat >> "$lsphp_ini" << 'OPCACHE_CONF'
+
+; --- VPS Manager OPcache (wptangtoc-grade) ---
+opcache.enable = 1
+opcache.enable_cli = 1
+opcache.memory_consumption = 256
+opcache.interned_strings_buffer = 16
+opcache.max_accelerated_files = 10000
+opcache.revalidate_freq = 60
+opcache.fast_shutdown = 1
+opcache.jit = tracing
+opcache.jit_buffer_size = 64M
+realpath_cache_size = 2M
+realpath_cache_ttl = 7200
+OPCACHE_CONF
+
+        log_info "✓ Đã cấu hình php.ini + OPcache + JIT cho LSPHP ${ver}"
     fi
 
-    log_info "LSPHP ${ver} đã được cài đặt."
+    # ── Tạo symlink php binary ──
+    ln -sf "/usr/local/lsws/lsphp${lsphp_ver}/bin/lsphp" "/usr/local/lsws/fcgi-bin/lsphp${lsphp_ver}" 2>/dev/null || true
+    ln -sf "/usr/local/lsws/lsphp${lsphp_ver}/bin/php"   "/usr/bin/php" 2>/dev/null || true
+
+    log_info "✓ LSPHP ${ver} đã được cài đặt."
 }
 
 _set_ols_webadmin_pass() {
@@ -202,45 +225,98 @@ _set_ols_webadmin_pass() {
         # Set password cho OLS WebAdmin
         if [[ -f /usr/local/lsws/admin/misc/htpasswd.sh ]]; then
             /usr/local/lsws/admin/misc/htpasswd.sh -b /usr/local/lsws/admin/conf/htpasswd admin "$new_pass" &>/dev/null
+        elif [[ -f /usr/local/lsws/admin/fcgi-bin/admin_php ]]; then
+            # Mới hơn: dùng admin_php
+            local enc
+            enc=$(/usr/local/lsws/admin/fcgi-bin/admin_php -q /usr/local/lsws/admin/misc/htpasswd.php "$new_pass" 2>/dev/null)
+            echo ""> /usr/local/lsws/admin/conf/htpasswd
+            echo "admin:${enc}" >> /usr/local/lsws/admin/conf/htpasswd
         fi
-        log_info "WebAdmin password được tạo. Xem tại: $pass_file"
+        log_info "✓ WebAdmin password được tạo. Xem tại: $pass_file"
     fi
 }
 
 _configure_ols_base() {
-    # Đảm bảo thư mục vhosts tồn tại
-    mkdir -p "$OLS_VHOSTS_DIR"
-    mkdir -p "$OLS_WEBROOT"
+    # Load kernel tuning helpers nếu có
+    if [[ -f "$(dirname "${BASH_SOURCE[0]}")/../core/kernel_tuning.sh" ]]; then
+        source "$(dirname "${BASH_SOURCE[0]}")/../core/kernel_tuning.sh"
+    fi
 
-    # Cấu hình OLS lắng nghe cổng 80/443
+    # Tính thông số auto-scaling theo RAM (như wptangtoc)
+    if type calc_ols_tuning_params &>/dev/null; then
+        calc_ols_tuning_params
+    else
+        local total_ram_mb; total_ram_mb=$(free -m | awk '/^Mem:/{print $2}')
+        local cpu_cores; cpu_cores=$(grep -c ^processor /proc/cpuinfo 2>/dev/null || echo 2)
+        if   [[ "$total_ram_mb" -le 1200 ]]; then OLS_BUFFER_SIZE="64M";  OLS_KA_TIMEOUT=15; OLS_KA_REQS=1000
+        elif [[ "$total_ram_mb" -le 2500 ]]; then OLS_BUFFER_SIZE="128M"; OLS_KA_TIMEOUT=30; OLS_KA_REQS=3000
+        elif [[ "$total_ram_mb" -le 4500 ]]; then OLS_BUFFER_SIZE="192M"; OLS_KA_TIMEOUT=45; OLS_KA_REQS=5000
+        elif [[ "$total_ram_mb" -le 8500 ]]; then OLS_BUFFER_SIZE="256M"; OLS_KA_TIMEOUT=45; OLS_KA_REQS=8000
+        else                                       OLS_BUFFER_SIZE="384M"; OLS_KA_TIMEOUT=60; OLS_KA_REQS=10000
+        fi
+        OLS_MAX_CONN=$(( 1024 * cpu_cores * 3 ))
+        OLS_RAM_MB="$total_ram_mb"
+    fi
+
+    # Đảm bảo thư mục tồn tại
+    mkdir -p "$OLS_VHOSTS_DIR" "$OLS_WEBROOT"
+
     if [[ -f "$OLS_CONF" ]]; then
-        # Đồng bộ User/Group chạy OLS với Nginx (www-data) để tránh lỗi 403 Forbidden
+        # ── User/Group ──
         sed -i 's/^user.*nobody.*/user                      www-data/' "$OLS_CONF" 2>/dev/null
         sed -i 's/^group.*nogroup.*/group                     www-data/' "$OLS_CONF" 2>/dev/null
         sed -i 's/^group.*nobody.*/group                     www-data/' "$OLS_CONF" 2>/dev/null
 
-        # Sửa lỗi 503: Phân quyền lại thư mục socket để www-data có thể ghi (vì mặc định do nobody tạo ra)
+        # ── Socket dir ──
         mkdir -p /tmp/lshttpd
         chown -R www-data:www-data /tmp/lshttpd 2>/dev/null
 
-        # Tạo fallback SSL nếu chưa tồn tại, OLS sẽ crash listener 443 nếu thiếu file SSL
+        # ── Fallback SSL tự ký ──
         if [[ ! -f "/usr/local/lsws/conf/example.crt" ]]; then
-            openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+            openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
                 -keyout /usr/local/lsws/conf/example.key \
                 -out /usr/local/lsws/conf/example.crt \
                 -subj "/C=VN/ST=HCM/L=HCM/O=VPS/CN=example.com" 2>/dev/null
             chown -R lsadm:lsadm /usr/local/lsws/conf/example.* 2>/dev/null
         fi
 
-        # 1. Tối ưu OLS LSCache nhét vào RAM giống WpTangToc
-        if ! grep -q "totalInMemCacheSize" "$OLS_CONF" 2>/dev/null; then
-            sed -i '/module cache {/a \  totalInMemCacheSize     64M\n  maxCachedFileSize       10M' "$OLS_CONF" 2>/dev/null
-            log_info "Đã kích hoạt LSCache lưu trữ trực tiếp trên RAM (64M) cho hệ thống."
+        # ── inMemBufSize / QUIC / Tuning (auto-scale theo RAM) ──
+        # Xoá các dòng cũ của chúng ta nếu có để tránh duplicate
+        sed -i '/# vps-manager-ols-tuning/,+2d' "$OLS_CONF" 2>/dev/null
+
+        # Áp dụng thông số auto-scale vào OLS config
+        if grep -q "inMemBufSize" "$OLS_CONF" 2>/dev/null; then
+            sed -i "s/inMemBufSize.*/inMemBufSize              ${OLS_BUFFER_SIZE}/" "$OLS_CONF"
+        else
+            sed -i "/swappingDir/a \  inMemBufSize              ${OLS_BUFFER_SIZE}" "$OLS_CONF" 2>/dev/null || true
         fi
 
-        # Đảm bảo listeners có trong config (nội dung cơ bản)
+        # keepAlive tuning
+        if grep -q "maxKeepAliveReq" "$OLS_CONF" 2>/dev/null; then
+            sed -i "s/maxKeepAliveReq.*/maxKeepAliveReq         ${OLS_KA_REQS}/" "$OLS_CONF"
+            sed -i "s/keepAliveTimeout.*/keepAliveTimeout        ${OLS_KA_TIMEOUT}/" "$OLS_CONF"
+        fi
+
+        # maxConnections
+        if grep -q "maxConnections" "$OLS_CONF" 2>/dev/null; then
+            sed -i "s/maxConnections.*/maxConnections          ${OLS_MAX_CONN}/" "$OLS_CONF"
+            sed -i "s/maxSSLConnections.*/maxSSLConnections       ${OLS_MAX_CONN}/" "$OLS_CONF"
+        fi
+
+        # ── QUIC HTTP/3 bật sẵn ──
+        if ! grep -q "quicEnable" "$OLS_CONF" 2>/dev/null; then
+            sed -i '/tuning  {/a \  quicEnable              1\n  quicShmDir              /dev/shm' "$OLS_CONF" 2>/dev/null || true
+        fi
+
+        # ── LSCache RAM: totalInMemCacheSize ──
+        if ! grep -q "totalInMemCacheSize" "$OLS_CONF" 2>/dev/null; then
+            sed -i '/module cache {/a \  totalInMemCacheSize     64M\n  maxCachedFileSize       10M' "$OLS_CONF" 2>/dev/null
+            log_info "✓ LSCache in-RAM (64M) đã được kích hoạt."
+        fi
+
+        # ── Listeners ──
         if ! grep -q "listener HTTP" "$OLS_CONF" 2>/dev/null; then
-            cat >> "$OLS_CONF" <<'EOF'
+            cat >> "$OLS_CONF" << 'EOF'
 
 listener HTTP {
   address                 *:80
@@ -253,9 +329,12 @@ listener HTTPS {
   keyFile                 /usr/local/lsws/conf/example.key
   certFile                /usr/local/lsws/conf/example.crt
   enableQuic              1
+  enableSpdy              15
 }
 EOF
         fi
+
+        log_info "✓ OLS base config đã được tối ưu (RAM: ${OLS_RAM_MB:-?}MB, Buf: ${OLS_BUFFER_SIZE}, MaxConn: ${OLS_MAX_CONN})"
     fi
 }
 
