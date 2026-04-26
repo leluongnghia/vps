@@ -1294,6 +1294,18 @@ _setup_wp_redis_plugin() {
         
         # Kiem tra xem PHP co mysqli khong
         if ! "$WP_PHP_BIN" -m 2>/dev/null | grep -qEi "(mysqli|pdo_mysql)"; then
+            # Thu auto-install php-mysql cho ban hien tai (Fix loi web broken do thieu extension)
+            local cur_ver=$(echo "$WP_PHP_BIN" | grep -oP 'php\K[0-9.]+' | head -n 1)
+            if [[ -n "$cur_ver" ]]; then
+                if command -v apt-get >/dev/null 2>&1; then
+                    DEBIAN_FRONTEND=noninteractive apt-get install -y "php${cur_ver}-mysql" >/dev/null 2>&1
+                elif command -v dnf >/dev/null 2>&1; then
+                    dnf install -y "php${cur_ver}-mysqlnd" >/dev/null 2>&1
+                fi
+            fi
+        fi
+
+        if ! "$WP_PHP_BIN" -m 2>/dev/null | grep -qEi "(mysqli|pdo_mysql)"; then
             local found_php=false
             # Thu Nginx / Ubuntu PHP (php8.4, php8.3...)
             for v in 8.4 8.3 8.5 8.2 8.1 8.0 7.4; do

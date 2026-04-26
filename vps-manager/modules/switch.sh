@@ -258,8 +258,12 @@ switch_to_nginx() {
         source "${SCRIPT_DIR}/lemp.sh"
         install_php "8.3"
         php_installed="8.3"
+    else
+        log_info "Đang kiểm tra và cài đặt bổ sung các extension còn thiếu cho PHP ${php_installed}..."
+        source "${SCRIPT_DIR}/lemp.sh"
+        _install_single_php "$php_installed" >/dev/null 2>&1 || true
     fi
-    log_info "✓ PHP-FPM version: ${php_installed}"
+    log_info "✓ PHP-FPM version mặc định: ${php_installed}"
 
     # ── Bước 2: Dừng OLS ───────────────────────────────────────────────────
     log_info "[2/5] Dừng OpenLiteSpeed..."
@@ -303,10 +307,13 @@ switch_to_nginx() {
                 site_php="${detected_ver:0:1}.${detected_ver:1}"
             fi
         fi
-        # Fallback: dùng php version nào đã cài cao nhất
-        for v in 8.4 8.3 8.2 8.1; do
-            [[ -f "/etc/php/${v}/fpm/php.ini" ]] && { site_php="$v"; break; }
-        done
+        
+        # Nếu PHP detected từ OLS không được cài sẵn cho Nginx, tiến hành cài bổ sung
+        if [[ ! -f "/etc/php/${site_php}/fpm/php.ini" ]]; then
+            log_info "  [${domain}] Đang cài bổ sung PHP ${site_php} (FPM) để khớp với OLS..."
+            source "${SCRIPT_DIR}/lemp.sh"
+            _install_single_php "$site_php" >/dev/null 2>&1 || true
+        fi
 
         if [[ -f "/etc/nginx/sites-available/${domain}" ]]; then
             log_warn "  [${domain}] Nginx vhost đã tồn tại, enable lại..."
