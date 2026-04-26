@@ -1113,8 +1113,8 @@ install_valkey() {
     usermod -aG valkey nobody 2>/dev/null || true
 
     systemctl daemon-reload 2>/dev/null
-    systemctl enable valkey 2>/dev/null
-    systemctl restart valkey 2>/dev/null
+    systemctl enable valkey 2>/dev/null || systemctl enable valkey-server 2>/dev/null
+    systemctl restart valkey 2>/dev/null || systemctl restart valkey-server 2>/dev/null
 
     local php_ver=$(get_installed_php_version)
     if [[ "$OS_FAMILY" == "rhel" ]]; then
@@ -1279,9 +1279,28 @@ _setup_wp_redis_plugin() {
 
         log_info "[$domain] Cai dat Redis Object Cache plugin..."
 
+        # Tim PHP ban co mysqli (Fix loi thieu mysqli cua WP-CLI mac dinh)
+        local WP_PHP_BIN="php"
+        local SITE_CONF="/etc/nginx/sites-available/$domain"
+        if [[ -f "$SITE_CONF" ]]; then
+            local SITE_PHP_VER=$(grep -shoP 'unix:/run/php/php\K[0-9.]+(?=-fpm.sock)' "$SITE_CONF" | head -n 1)
+            if [[ -n "$SITE_PHP_VER" ]] && command -v "php$SITE_PHP_VER" >/dev/null 2>&1; then
+                WP_PHP_BIN="php$SITE_PHP_VER"
+            fi
+        fi
+        if ! "$WP_PHP_BIN" -m 2>/dev/null | grep -qEi "(mysqli|pdo_mysql)"; then
+            for v in 8.3 8.4 8.5 8.2 8.1 8.0 7.4; do
+                if command -v "php$v" >/dev/null 2>&1 && "php$v" -m 2>/dev/null | grep -qEi "(mysqli|pdo_mysql)"; then
+                    WP_PHP_BIN="php$v"
+                    break
+                fi
+            done
+        fi
+        local WP_CMD="$WP_PHP_BIN /usr/local/bin/wp"
+
         # 1. Cai + kich hoat plugin redis-cache
-        if ! wp plugin is-installed redis-cache --path="$site_root" --allow-root 2>/dev/null; then
-            if wp plugin install redis-cache --activate --path="$site_root" --allow-root; then
+        if ! $WP_CMD plugin is-installed redis-cache --path="$site_root" --allow-root 2>/dev/null; then
+            if $WP_CMD plugin install redis-cache --activate --path="$site_root" --allow-root; then
                 echo "  v Plugin redis-cache: CAI + KICH HOAT"
                 # Fix ownership
                 chown -R www-data:www-data "$site_root/wp-content/plugins/redis-cache" 2>/dev/null || chown -R nobody:nobody "$site_root/wp-content/plugins/redis-cache" 2>/dev/null
@@ -1290,22 +1309,22 @@ _setup_wp_redis_plugin() {
                 continue
             fi
         else
-            wp plugin activate redis-cache --path="$site_root" --allow-root 2>/dev/null
+            $WP_CMD plugin activate redis-cache --path="$site_root" --allow-root 2>/dev/null
             echo "  v Plugin redis-cache: KICH HOAT"
         fi
 
         # 2. Ghi hang so vao wp-config.php
-        wp config set WP_REDIS_SCHEME "$redis_scheme" --type=constant --path="$site_root" --allow-root 2>/dev/null
-        wp config set WP_REDIS_HOST   "$redis_host"   --type=constant --path="$site_root" --allow-root 2>/dev/null
-        wp config set WP_REDIS_PORT   "$redis_port"   --raw --type=constant --path="$site_root" --allow-root 2>/dev/null
-        wp config set WP_CACHE        "true"          --raw --type=constant --path="$site_root" --allow-root 2>/dev/null
+        $WP_CMD config set WP_REDIS_SCHEME "$redis_scheme" --type=constant --path="$site_root" --allow-root 2>/dev/null
+        $WP_CMD config set WP_REDIS_HOST   "$redis_host"   --type=constant --path="$site_root" --allow-root 2>/dev/null
+        $WP_CMD config set WP_REDIS_PORT   "$redis_port"   --raw --type=constant --path="$site_root" --allow-root 2>/dev/null
+        $WP_CMD config set WP_CACHE        "true"          --raw --type=constant --path="$site_root" --allow-root 2>/dev/null
         echo "  v wp-config.php: WP_REDIS_HOST / WP_CACHE da ghi"
 
         # 3. Enable drop-in (object-cache.php)
         # Xoa drop-in cu (tu LSCache, Memcached...) de tranh loi "Drop-in is invalid"
         rm -f "$site_root/wp-content/object-cache.php" 2>/dev/null
         
-        wp redis enable --path="$site_root" --allow-root 2>/dev/null \
+        $WP_CMD redis enable --path="$site_root" --allow-root 2>/dev/null \
             && echo "  v Object Cache drop-in: DA BAT" \
             || echo "  ! Chay 'wp redis enable' thu cong trong WP Admin"
 
@@ -1346,16 +1365,37 @@ _setup_wp_memcached_plugin() {
         found=$((found+1))
 
         log_info "[$domain] Cai dat Memcached Object Cache..."
+        
+        # Tim PHP ban co mysqli
+        local WP_PHP_BIN="php"
+        local SITE_CONF="/etc/nginx/sites-available/$domain"
+        if [[ -f "$SITE_CONF" ]]; then
+            local SITE_PHP_VER=$(grep -shoP 'unix:/run/php/php\K[0-9.]+(?=-fpm.sock)' "$SITE_CONF" | head -n 1)
+            if [[ -n "$SITE_PHP_VER" ]] && command -v "php$SITE_PHP_VER" >/dev/null 2>&1; then
+                WP_PHP_BIN="php$SITE_PHP_VER"
+            fi
+        fi
+        if ! "$WP_PHP_BIN" -m 2>/dev/null | grep -qEi "(mysqli|pdo_mysql)"; then
+            for v in 8.3 8.4 8.5 8.2 8.1 8.0 7.4; do
+                if command -v "php$v" >/dev/null 2>&1 && "php$v" -m 2>/dev/null | grep -qEi "(mysqli|pdo_mysql)"; then
+                    WP_PHP_BIN="php$v"
+                    break
+                fi
+            done
+        fi
+        local WP_CMD="$WP_PHP_BIN /usr/local/bin/wp"
+
         local mc_dropin="$site_root/wp-content/object-cache.php"
         if [[ ! -f "$mc_dropin" ]]; then
             curl -fsSL "https://raw.githubusercontent.com/Ipstenu/memcached-redux/master/object-cache.php" \
                 -o "$mc_dropin" 2>/dev/null \
                 && echo "  v Memcached object-cache.php: TAI XONG" \
                 || { log_warn "[$domain] Tai drop-in that bai."; continue; }
+            chown www-data:www-data "$mc_dropin" 2>/dev/null || chown nobody:nobody "$mc_dropin" 2>/dev/null
         else
             echo "  v object-cache.php: DA CO"
         fi
-        wp config set WP_CACHE "true" --raw --type=constant --path="$site_root" --allow-root 2>/dev/null
+        $WP_CMD config set WP_CACHE "true" --raw --type=constant --path="$site_root" --allow-root 2>/dev/null
         echo "  v WP_CACHE=true: GHI VAO wp-config.php"
         echo ""
     done
