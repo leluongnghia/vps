@@ -1089,21 +1089,28 @@ install_valkey() {
         pkg_install valkey-server
     fi
     
+    # Đảm bảo thư mục socket tồn tại sau khi reboot (vì /var/run là tmpfs)
+    echo "d /var/run/valkey 0755 valkey valkey -" > /etc/tmpfiles.d/valkey.conf
+    systemd-tmpfiles --create /etc/tmpfiles.d/valkey.conf 2>/dev/null || mkdir -p /var/run/valkey && chown valkey:valkey /var/run/valkey
+    
     # Configure Unix Socket for Object Cache
     local vconf="/etc/valkey/valkey.conf"
     if [[ ! -f "$vconf" ]]; then vconf="/etc/valkey/valkey-server.conf"; fi
     if [[ -f "$vconf" ]] && ! grep -q "^unixsocket " "$vconf"; then
-        mkdir -p /var/run/valkey && chown valkey:valkey /var/run/valkey 2>/dev/null || true
         echo "unixsocket /var/run/valkey/valkey.sock" >> "$vconf"
-        echo "unixsocketperm 770" >> "$vconf"
+        echo "unixsocketperm 777" >> "$vconf"
         # Optional: memory optimization
         if ! grep -q "^maxmemory " "$vconf"; then
             echo "maxmemory 256mb" >> "$vconf"
             echo "maxmemory-policy allkeys-lru" >> "$vconf"
         fi
+    else
+        # Nếu đã có, ghi đè quyền 777 để chắc chắn Nginx (www-data) và OLS (nobody) đều đọc được
+        sed -i 's/^unixsocketperm.*/unixsocketperm 777/g' "$vconf" 2>/dev/null
     fi
-    # Add www-data to valkey group for socket access
-    usermod -aG valkey www-data 2>/dev/null || usermod -aG redis www-data 2>/dev/null
+    # Phân quyền user cho an toàn dự phòng
+    usermod -aG valkey www-data 2>/dev/null || true
+    usermod -aG valkey nobody 2>/dev/null || true
 
     systemctl daemon-reload 2>/dev/null
     systemctl enable valkey 2>/dev/null
@@ -1117,7 +1124,7 @@ install_valkey() {
         pkg_install php${php_ver}-redis
         phpenmod -v ${php_ver} redis 2>/dev/null
         systemctl daemon-reload 2>/dev/null
-        systemctl restart php${php_ver}-fpm
+        systemctl restart php${php_ver}-fpm 2>/dev/null || systemctl restart lshttpd 2>/dev/null
     fi
     log_info "Valkey installed and enabled (sử dụng php-redis module)."
 }
@@ -1138,22 +1145,34 @@ install_redis() {
         pkg_update
         pkg_install redis-server
         
+        # Đảm bảo thư mục socket tồn tại sau khi reboot
+        echo "d /var/run/redis 0755 redis redis -" > /etc/tmpfiles.d/redis.conf
+        systemd-tmpfiles --create /etc/tmpfiles.d/redis.conf 2>/dev/null || mkdir -p /var/run/redis && chown redis:redis /var/run/redis
+        
         # Configure Unix Socket for Object Cache
         local rconf="/etc/redis/redis.conf"
         if [[ -f "$rconf" ]] && ! grep -q "^unixsocket " "$rconf"; then
-            mkdir -p /var/run/redis && chown redis:redis /var/run/redis 2>/dev/null || true
             echo "unixsocket /var/run/redis/redis.sock" >> "$rconf"
-            echo "unixsocketperm 770" >> "$rconf"
+            echo "unixsocketperm 777" >> "$rconf"
             if ! grep -q "^maxmemory " "$rconf"; then
                 echo "maxmemory 256mb" >> "$rconf"
                 echo "maxmemory-policy allkeys-lru" >> "$rconf"
             fi
+        else
+            sed -i 's/^unixsocketperm.*/unixsocketperm 777/g' "$rconf" 2>/dev/null
         fi
-        # Add www-data to redis group for socket access
-        usermod -aG redis www-data 2>/dev/null
+        usermod -aG redis www-data 2>/dev/null || true
+        usermod -aG redis nobody 2>/dev/null || true
         
         systemctl enable redis-server
         systemctl restart redis-server
+    else
+        log_warn "Redis is already installed."
+        local rconf="/etc/redis/redis.conf"
+        sed -i 's/^unixsocketperm.*/unixsocketperm 777/g' "$rconf" 2>/dev/null
+        echo "d /var/run/redis 0755 redis redis -" > /etc/tmpfiles.d/redis.conf
+        systemd-tmpfiles --create /etc/tmpfiles.d/redis.conf 2>/dev/null || mkdir -p /var/run/redis && chown redis:redis /var/run/redis
+        systemctl restart redis-server 2>/dev/null
     fi
     
     local php_ver=$(get_installed_php_version)
@@ -1163,7 +1182,7 @@ install_redis() {
     else
         pkg_install php${php_ver}-redis
         phpenmod -v ${php_ver} redis 2>/dev/null
-        systemctl restart php${php_ver}-fpm
+        systemctl restart php${php_ver}-fpm 2>/dev/null || systemctl restart lshttpd 2>/dev/null
     fi
     log_info "Redis installed and enabled."
 }
@@ -1262,9 +1281,14 @@ _setup_wp_redis_plugin() {
 
         # 1. Cai + kich hoat plugin redis-cache
         if ! wp plugin is-installed redis-cache --path="$site_root" --allow-root 2>/dev/null; then
-            wp plugin install redis-cache --activate --path="$site_root" --allow-root 2>/dev/null \
-                && echo "  v Plugin redis-cache: CAI + KICH HOAT" \
-                || { log_warn "[$domain] Cai plugin that bai -- bo qua."; continue; }
+            if wp plugin install redis-cache --activate --path="$site_root" --allow-root; then
+                echo "  v Plugin redis-cache: CAI + KICH HOAT"
+                # Fix ownership
+                chown -R www-data:www-data "$site_root/wp-content/plugins/redis-cache" 2>/dev/null || chown -R nobody:nobody "$site_root/wp-content/plugins/redis-cache" 2>/dev/null
+            else
+                log_warn "[$domain] Cai plugin that bai (xem loi ben tren) -- bo qua."
+                continue
+            fi
         else
             wp plugin activate redis-cache --path="$site_root" --allow-root 2>/dev/null
             echo "  v Plugin redis-cache: KICH HOAT"
