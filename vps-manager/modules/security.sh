@@ -47,7 +47,7 @@ secure_php() {
     funcs="exec,passthru,shell_exec,system,proc_open,popen,curl_exec,curl_multi_exec,parse_ini_file,show_source"
     
     # Apply to all php.ini
-    for ver in 8.1 8.2 8.3; do
+    for ver in 8.1 8.2 8.3 8.4; do
         ini="/etc/php/$ver/fpm/php.ini"
         if [[ -f "$ini" ]]; then
             # Check if already disabled or append

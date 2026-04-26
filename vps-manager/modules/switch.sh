@@ -354,10 +354,13 @@ switch_to_nginx() {
 
     # Xác định socket path đang dùng
     local cache_socket=""
-    [[ -S "/var/run/valkey/valkey.sock" ]] && cache_socket="/var/run/valkey/valkey.sock"
-    [[ -S "/var/run/redis/redis.sock"   ]] && cache_socket="/var/run/redis/redis.sock"
-    [[ -S "/tmp/valkey.sock"            ]] && cache_socket="/tmp/valkey.sock"
-    [[ -S "/tmp/redis.sock"             ]] && cache_socket="/tmp/redis.sock"
+    if [[ -f /etc/vps-manager/cache.conf ]]; then
+        cache_socket=$(grep -E '^OBJECT_CACHE_SOCKET=' /etc/vps-manager/cache.conf 2>/dev/null | head -n 1 | cut -d= -f2-)
+    fi
+    [[ -z "$cache_socket" && -e "/var/run/valkey/valkey.sock" ]] && cache_socket="/var/run/valkey/valkey.sock"
+    [[ -z "$cache_socket" && -e "/var/run/redis/redis.sock"   ]] && cache_socket="/var/run/redis/redis.sock"
+    [[ -z "$cache_socket" && -e "/tmp/valkey.sock"            ]] && cache_socket="/tmp/valkey.sock"
+    [[ -z "$cache_socket" && -e "/tmp/redis.sock"             ]] && cache_socket="/tmp/redis.sock"
 
     # ── Bước 5: Cập nhật wp-config.php ────────────────────────────────────
     log_info "[5/5] Cập nhật Object Cache trong wp-config.php..."

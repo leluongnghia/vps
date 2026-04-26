@@ -253,6 +253,95 @@ ssl_auto_renew_setup() {
     pause
 }
 
+_ssl_server_names() {
+    local domain="$1"
+    if [[ $(echo "$domain" | tr -cd '.' | wc -c) -eq 1 ]]; then
+        echo "$domain www.$domain"
+    else
+        echo "$domain"
+    fi
+}
+
+_apply_manual_ssl_nginx_config() {
+    local domain="$1"
+    local cert_file="$2"
+    local key_file="$3"
+    local cipher_line="${4:-}"
+    local conf_file="/etc/nginx/sites-available/$domain"
+
+    if [[ ! -f "$conf_file" ]]; then
+        echo -e "${RED}Không tìm thấy file cấu hình Nginx!${NC}"
+        return 1
+    fi
+
+    local backup="${conf_file}.bak.$(date +%s)"
+    cp "$conf_file" "$backup"
+
+    if ! grep -qE 'listen[[:space:]].*443' "$conf_file"; then
+        sed -i 's/listen 80;/listen 443 ssl http2;/g' "$conf_file"
+        sed -i 's/listen \[::\]:80;/listen [::]:443 ssl http2;/g' "$conf_file"
+    fi
+
+    local tmp_file
+    tmp_file=$(mktemp)
+    awk -v cert="$cert_file" -v key="$key_file" -v cipher="$cipher_line" '
+        /^[[:space:]]*ssl_certificate[[:space:]]/ { next }
+        /^[[:space:]]*ssl_certificate_key[[:space:]]/ { next }
+        /^[[:space:]]*ssl_protocols[[:space:]]/ { next }
+        /^[[:space:]]*ssl_ciphers[[:space:]]/ { next }
+        {
+            if ($0 ~ /^[[:space:]]*server[[:space:]]*\{/) {
+                in_server=1
+                ssl_server=0
+                inserted=0
+            }
+            if (in_server && $0 ~ /listen[[:space:]].*443/) {
+                ssl_server=1
+            }
+
+            print
+
+            if (in_server && ssl_server && !inserted && $0 ~ /^[[:space:]]*server_name[[:space:]]/) {
+                print "    ssl_certificate " cert ";"
+                print "    ssl_certificate_key " key ";"
+                print "    ssl_protocols TLSv1.2 TLSv1.3;"
+                if (cipher != "") {
+                    print "    " cipher
+                }
+                inserted=1
+            }
+
+            if (in_server && $0 ~ /^[[:space:]]*\}/) {
+                in_server=0
+            }
+        }
+    ' "$conf_file" > "$tmp_file"
+    mv "$tmp_file" "$conf_file"
+
+    if ! grep -Fq 'return 301 https://$host$request_uri;' "$conf_file"; then
+        tmp_file=$(mktemp)
+        cat <<EOF > "$tmp_file"
+server {
+    listen 80;
+    server_name $(_ssl_server_names "$domain");
+    return 301 https://\$host\$request_uri;
+}
+EOF
+        cat "$conf_file" >> "$tmp_file"
+        mv "$tmp_file" "$conf_file"
+    fi
+
+    if nginx -t; then
+        systemctl reload nginx
+        rm -f "$backup"
+        return 0
+    fi
+
+    mv "$backup" "$conf_file"
+    nginx -t
+    return 1
+}
+
 
 
 install_ssl() {
@@ -345,32 +434,12 @@ install_zerossl() {
         --reloadcmd     "service nginx force-reload"
         
     log_info "Đang cấu hình Nginx..."
-    
-    conf_file="/etc/nginx/sites-available/$domain"
-    # Backup
-    cp "$conf_file" "${conf_file}.bak"
-    
-    # Configure SSL in Nginx (Similar logic to Cloudflare, switch port and paths)
-    sed -i 's/listen 80;/listen 443 ssl http2;/g' "$conf_file"
-    sed -i 's/listen \[::\]:80;/listen [::]:443 ssl http2;/g' "$conf_file"
-    
-    # Add SSL block
-    sed -i "/server_name .*/a \    ssl_certificate /etc/nginx/ssl/$domain/server.crt;\n    ssl_certificate_key /etc/nginx/ssl/$domain/server.key;\n    ssl_protocols TLSv1.2 TLSv1.3;" "$conf_file"
-    
-    # Add Redirect Block (Prepend)
-    tmp_file=$(mktemp)
-    cat <<EOF > "$tmp_file"
-server {
-    listen 80;
-    server_name $domain www.$domain;
-    return 301 https://\$host\$request_uri;
-}
-EOF
-    cat "$conf_file" >> "$tmp_file"
-    mv "$tmp_file" "$conf_file"
-    
-    nginx -t && systemctl reload nginx
-    echo -e "${GREEN}Cài đặt ZeroSSL thành công!${NC}"
+
+    if _apply_manual_ssl_nginx_config "$domain" "/etc/nginx/ssl/$domain/server.crt" "/etc/nginx/ssl/$domain/server.key"; then
+        echo -e "${GREEN}Cài đặt ZeroSSL thành công!${NC}"
+    else
+        echo -e "${RED}Cấu hình Nginx SSL thất bại. Đã khôi phục file backup.${NC}"
+    fi
 }
 
 install_cloudflare_ssl() {
@@ -390,48 +459,10 @@ install_cloudflare_ssl() {
     
     log_info "Đang cấu hình Nginx sử dụng Cloudflare SSL..."
     
-    # Update Nginx Config
-    conf_file="/etc/nginx/sites-available/$domain"
-    
-    # Check if config exists
-    if [[ ! -f "$conf_file" ]]; then
-        echo -e "${RED}Không tìm thấy file cấu hình Nginx!${NC}"
-        return
+    if _apply_manual_ssl_nginx_config "$domain" "/etc/nginx/ssl/$domain/origin.crt" "/etc/nginx/ssl/$domain/origin.key" "ssl_ciphers HIGH:!aNULL:!MD5;"; then
+        echo -e "${GREEN}Đã cài đặt Cloudflare Origin SSL thành công!${NC}"
+        echo -e "Lưu ý: Trên Cloudflare hãy chọn chế độ SSL là 'Full (Strict)'"
+    else
+        echo -e "${RED}Cấu hình Nginx SSL thất bại. Đã khôi phục file backup.${NC}"
     fi
-    
-    # Replace listen 80 with ssl configuration
-    # Simple substitution strategy for this script context
-    # Ideally should use template, but sed is quick fix for existing file
-    
-    # Backup
-    cp "$conf_file" "${conf_file}.bak"
-    
-    # We need to construct a new server block or modify existing.
-    # To keep it simple and robust, let's regenerate the config with SSL enabled directly.
-    # Re-using logic from site.sh would be cleaner but cross-module calls are tricky with local vars.
-    # Let's Modify existing file 
-    
-    # 1. Change listen port
-    sed -i 's/listen 80;/listen 443 ssl http2;/g' "$conf_file"
-    sed -i 's/listen \[::\]:80;/listen [::]:443 ssl http2;/g' "$conf_file"
-    
-    # 2. Add SSL paths inside server block (after server_name)
-    sed -i "/server_name .*/a \    ssl_certificate /etc/nginx/ssl/$domain/origin.crt;\n    ssl_certificate_key /etc/nginx/ssl/$domain/origin.key;\n    ssl_protocols TLSv1.2 TLSv1.3;\n    ssl_ciphers HIGH:!aNULL:!MD5;" "$conf_file"
-    
-    # 3. Add HTTP redirect block at the top
-    # Prepend redirect server block
-    tmp_file=$(mktemp)
-    cat <<EOF > "$tmp_file"
-server {
-    listen 80;
-    server_name $domain www.$domain;
-    return 301 https://\$host\$request_uri;
-}
-EOF
-    cat "$conf_file" >> "$tmp_file"
-    mv "$tmp_file" "$conf_file"
-    
-    nginx -t && systemctl reload nginx
-    echo -e "${GREEN}Đã cài đặt Cloudflare Origin SSL thành công!${NC}"
-    echo -e "Lưu ý: Trên Cloudflare hãy chọn chế độ SSL là 'Full (Strict)'"
 }

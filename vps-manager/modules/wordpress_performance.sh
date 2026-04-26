@@ -21,7 +21,7 @@ get_installed_php_version() {
 
     # Method 3: php-fpm binary in PATH
     local fpm_bin
-    fpm_bin=$(command -v php-fpm8.3 php-fpm8.2 php-fpm8.1 php-fpm 2>/dev/null | head -1)
+    fpm_bin=$(command -v php-fpm8.4 php-fpm8.3 php-fpm8.2 php-fpm8.1 php-fpm 2>/dev/null | head -1)
     if [[ -n "$fpm_bin" ]]; then
         local v
         v=$("$fpm_bin" -v 2>/dev/null | grep -oP '\d+\.\d+' | head -1)
@@ -299,10 +299,10 @@ HTEOF
         if systemctl is-active --quiet valkey 2>/dev/null || systemctl is-active --quiet redis-server 2>/dev/null; then
             log_info "10. Ket noi Object Cache (Redis/Valkey)..."
             wp litespeed-option set object true --path="$site_root" --allow-root >/dev/null 2>&1 && echo "  v Object Cache: BAT"
-            if [[ -S "/var/run/valkey/valkey.sock" ]]; then
+            if [[ -e "/var/run/valkey/valkey.sock" ]]; then
                 wp litespeed-option set object-host "/var/run/valkey/valkey.sock" --path="$site_root" --allow-root >/dev/null 2>&1
                 wp litespeed-option set object-port 0 --path="$site_root" --allow-root >/dev/null 2>&1
-            elif [[ -S "/var/run/redis/redis.sock" ]]; then
+            elif [[ -e "/var/run/redis/redis.sock" ]]; then
                 wp litespeed-option set object-host "/var/run/redis/redis.sock" --path="$site_root" --allow-root >/dev/null 2>&1
                 wp litespeed-option set object-port 0 --path="$site_root" --allow-root >/dev/null 2>&1
             else
@@ -1048,14 +1048,16 @@ setup_fastcgi_microcache() {
     log_info "Setting up Nginx FastCGI micro-caching..."
     
     # Create cache directory
-    mkdir -p /var/run/nginx-cache
-    chown -R www-data:www-data /var/run/nginx-cache
+    mkdir -p /var/cache/nginx/fastcgi
+    chown -R www-data:www-data /var/cache/nginx
     
     # Global cache config (if not exists)
-    if [[ ! -f /etc/nginx/conf.d/fastcgi_cache.conf ]]; then
+    if [[ -f /etc/nginx/conf.d/fastcgi_cache.conf ]]; then
+        sed -i 's|/var/run/nginx-cache|/var/cache/nginx/fastcgi|g' /etc/nginx/conf.d/fastcgi_cache.conf
+    else
         cat > /etc/nginx/conf.d/fastcgi_cache.conf <<EOF
 # FastCGI Cache Configuration
-fastcgi_cache_path /var/run/nginx-cache levels=1:2 keys_zone=WORDPRESS:100m inactive=60m max_size=1g;
+fastcgi_cache_path /var/cache/nginx/fastcgi levels=1:2 keys_zone=WORDPRESS:100m inactive=60m max_size=1g;
 fastcgi_cache_key "\$scheme\$request_method\$host\$request_uri";
 fastcgi_cache_use_stale error timeout invalid_header http_500 http_503;
 fastcgi_cache_valid 200 301 302 60m;
@@ -1343,9 +1345,9 @@ _setup_wp_redis_plugin() {
     local redis_host="127.0.0.1"
     local redis_port="6379"
     local redis_scheme="tcp"
-    if [[ "$backend" == "valkey" ]] && [[ -S "/var/run/valkey/valkey.sock" ]]; then
+    if [[ "$backend" == "valkey" ]] && [[ -e "/var/run/valkey/valkey.sock" ]]; then
         redis_host="/var/run/valkey/valkey.sock"; redis_scheme="unix"; redis_port="0"
-    elif [[ "$backend" == "redis" ]] && [[ -S "/var/run/redis/redis.sock" ]]; then
+    elif [[ "$backend" == "redis" ]] && [[ -e "/var/run/redis/redis.sock" ]]; then
         redis_host="/var/run/redis/redis.sock"; redis_scheme="unix"; redis_port="0"
     fi
 

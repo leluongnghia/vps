@@ -144,17 +144,18 @@ _tune_mariadb_config() {
     local total_ram_mb cpu_cores
     total_ram_mb=$(free -m | awk '/^Mem:/{print $2}')
     cpu_cores=$(grep -c ^processor /proc/cpuinfo 2>/dev/null || echo 2)
-    local total_ram_gb=$(( total_ram_mb / 1024 ))
     local innodb_buffer=$(( total_ram_mb / 4 ))
-    local key_buffer=$(( total_ram_mb / 6 ))
-    local db_table_size=$(( total_ram_gb * 64 ))
-    local max_connections=$(( 64 * total_ram_gb ))
+    local key_buffer=$(( total_ram_mb / 8 ))
+    local db_table_size=$(( total_ram_mb / 128 ))
+    local max_connections=$(( total_ram_mb / 50 ))
 
-    # Tối thiểu cho VPS < 1GB RAM
-    if [[ "$total_ram_mb" -lt 1024 ]]; then
-        innodb_buffer=48; key_buffer=32; db_table_size=32; max_connections=300
-    fi
-    [[ "$max_connections" -lt 100 ]] && max_connections=100
+    # Tuning bảo thủ cho VPS nhỏ để tránh OOM khi PHP-FPM tăng tải.
+    [[ "$innodb_buffer" -lt 48 ]] && innodb_buffer=48
+    [[ "$key_buffer" -lt 16 ]] && key_buffer=16
+    [[ "$db_table_size" -lt 16 ]] && db_table_size=16
+    [[ "$db_table_size" -gt 64 ]] && db_table_size=64
+    [[ "$max_connections" -lt 30 ]] && max_connections=30
+    [[ "$max_connections" -gt 150 ]] && max_connections=150
 
     # Query cache: tắt nếu > 2 CPU (MariaDB 10.8+ đã deprecated)
     local query_cache_conf="query_cache_type = 0
@@ -238,6 +239,21 @@ _install_object_cache_nginx() {
         esac
     fi
 
+    local service_candidate actual_service=""
+    local service_candidates=()
+    case "$cache_type" in
+        redis) service_candidates=(redis-server redis) ;;
+        valkey) service_candidates=(valkey-server valkey) ;;
+        keydb) service_candidates=(keydb-server keydb) ;;
+    esac
+    for service_candidate in "${service_candidates[@]}"; do
+        if systemctl list-unit-files "${service_candidate}.service" 2>/dev/null | grep -q "^${service_candidate}\.service" || [[ -f "/lib/systemd/system/${service_candidate}.service" ]] || [[ -f "/etc/systemd/system/${service_candidate}.service" ]]; then
+            actual_service="$service_candidate"
+            break
+        fi
+    done
+    [[ -n "$actual_service" ]] && service_name="$actual_service"
+
     # ── Tạo thư mục socket ──
     mkdir -p "$socket_dir"
     chown "${cache_type}:${cache_type}" "$socket_dir" 2>/dev/null || \
@@ -288,19 +304,19 @@ SOCKCONF
     fi
 
     # ── Systemd override: đảm bảo socket dir tồn tại trước khi service start ──
-    local override_dir="/etc/systemd/system/${service_name}.service.d"
-    mkdir -p "$override_dir"
-    cat > "${override_dir}/socket-dir.conf" <<SYSOVERRIDE
+    for s_name in "${service_candidates[@]}"; do
+        local override_dir="/etc/systemd/system/${s_name}.service.d"
+        mkdir -p "$override_dir"
+        cat > "${override_dir}/socket-dir.conf" <<SYSOVERRIDE
 [Service]
 ExecStartPre=/bin/mkdir -p ${socket_dir}
-ExecStartPre=/bin/chown ${service_name}:${service_name} ${socket_dir}
+ExecStartPre=/bin/chown ${cache_type}:${cache_type} ${socket_dir}
 SYSOVERRIDE
+    done
 
     systemctl daemon-reload
-    systemctl enable "${service_name}" 2>/dev/null || \
-        systemctl enable "${service_name}-server" 2>/dev/null || true
-    systemctl restart "${service_name}" 2>/dev/null || \
-        systemctl restart "${service_name}-server" 2>/dev/null || true
+    systemctl enable "${service_name}" 2>/dev/null || true
+    systemctl restart "${service_name}" 2>/dev/null || true
 
     sleep 1
 

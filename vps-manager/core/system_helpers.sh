@@ -97,7 +97,7 @@ detect_php_socket() {
     fi
     
     # Fallback to common versions
-    for ver in 8.3 8.2 8.1 8.0 7.4; do
+    for ver in 8.4 8.3 8.2 8.1 8.0 7.4; do
         if [[ -S "/run/php/php${ver}-fpm.sock" ]]; then
             echo "unix:/run/php/php${ver}-fpm.sock"
             return 0

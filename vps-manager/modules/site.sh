@@ -73,19 +73,21 @@ add_new_site() {
     echo -e "${YELLOW}Đang tạo cấu hình cho $domain...${NC}"
     
     # 1. Setup Global Cache if missing
-    if [[ ! -f /etc/nginx/conf.d/fastcgi_cache.conf ]]; then
+    mkdir -p /var/cache/nginx/fastcgi
+    chown -R www-data:www-data /var/cache/nginx
+    if [[ -f /etc/nginx/conf.d/fastcgi_cache.conf ]]; then
+        sed -i 's|/var/run/nginx-cache|/var/cache/nginx/fastcgi|g' /etc/nginx/conf.d/fastcgi_cache.conf
+    else
         log_info "Đang khởi tạo cấu hình FastCGI Cache Global..."
-        mkdir -p /var/run/nginx-cache
-        chown -R www-data:www-data /var/run/nginx-cache
         cat > /etc/nginx/conf.d/fastcgi_cache.conf <<EOF
-fastcgi_cache_path /var/run/nginx-cache levels=1:2 keys_zone=WORDPRESS:100m inactive=60m;
+fastcgi_cache_path /var/cache/nginx/fastcgi levels=1:2 keys_zone=WORDPRESS:100m inactive=60m;
 fastcgi_cache_key "\$scheme\$request_method\$host\$request_uri";
 fastcgi_cache_use_stale error timeout invalid_header http_500;
 fastcgi_ignore_headers Cache-Control Expires Set-Cookie;
 EOF
-        # Reload to apply global cache config first!
-        nginx -t && systemctl reload nginx
     fi
+    # Reload to apply global cache config first!
+    nginx -t && systemctl reload nginx
 
     # 2. Create web root
     mkdir -p "/var/www/$domain/public_html"
@@ -528,16 +530,23 @@ install_wordpress() {
     sed -i "s|password_here|$WP_DB_PASS|" wp-config.php
 
     # Auto inject Object Cache Unix Socket if exists
-    if [[ -S "/tmp/valkey.sock" ]] || [[ -S "/tmp/redis.sock" ]]; then
-        local socket_path=""
-        [[ -S "/tmp/redis.sock" ]] && socket_path="/tmp/redis.sock"
-        [[ -S "/tmp/valkey.sock" ]] && socket_path="/tmp/valkey.sock"
-        
-        if [[ -n "$socket_path" ]]; then
-            sed -i "/table_prefix/i define( 'WP_REDIS_SCHEME', 'unix' );" wp-config.php
-            sed -i "/table_prefix/i define( 'WP_REDIS_PATH', '$socket_path' );" wp-config.php
-            sed -i "/table_prefix/i define( 'WP_CACHE_KEY_SALT', '$domain:' );" wp-config.php
+    local socket_path=""
+    if [[ -f /etc/vps-manager/cache.conf ]]; then
+        socket_path=$(grep -E '^OBJECT_CACHE_SOCKET=' /etc/vps-manager/cache.conf 2>/dev/null | head -n 1 | cut -d= -f2-)
+    fi
+    if [[ -z "$socket_path" ]]; then
+        if [[ -e "/var/run/valkey/valkey.sock" ]]; then socket_path="/var/run/valkey/valkey.sock"
+        elif [[ -e "/var/run/redis/redis.sock" ]]; then socket_path="/var/run/redis/redis.sock"
+        elif [[ -e "/var/run/keydb/keydb.sock" ]]; then socket_path="/var/run/keydb/keydb.sock"
+        elif [[ -e "/tmp/valkey.sock" ]]; then socket_path="/tmp/valkey.sock"
+        elif [[ -e "/tmp/redis.sock" ]]; then socket_path="/tmp/redis.sock"
         fi
+    fi
+
+    if [[ -n "$socket_path" ]]; then
+        sed -i "/table_prefix/i define( 'WP_REDIS_SCHEME', 'unix' );" wp-config.php
+        sed -i "/table_prefix/i define( 'WP_REDIS_PATH', '$socket_path' );" wp-config.php
+        sed -i "/table_prefix/i define( 'WP_CACHE_KEY_SALT', '$domain:' );" wp-config.php
     fi
 
     # Fix permissions again
@@ -1034,7 +1043,7 @@ toggle_site_cache() {
                 sed -i 's/^[[:space:]]*set[[:space:]]*\$skip_cache[[:space:]]*0;.*/    set $skip_cache 1; # DEV_MODE_ACTIVE/g' "$conf"
             fi
         done
-        rm -rf /var/run/nginx-cache/* 2>/dev/null
+        rm -rf /var/cache/nginx/fastcgi/* /var/run/nginx-cache/* 2>/dev/null
         nginx -t && systemctl reload nginx
         log_info "Hoàn tất! Hệ thống đã ở chế độ Dev Mode."
         pause; return
@@ -1066,7 +1075,7 @@ toggle_site_cache() {
                 sed -i 's/^[[:space:]]*set[[:space:]]*\$skip_cache[[:space:]]*0;.*/    set $skip_cache 1; # DEV_MODE_ACTIVE/g' "$conf"
                 
                 # Xóa sạch array cache local để chắc chắn thay đổi áp dụng liền
-                rm -rf /var/run/nginx-cache/* 2>/dev/null
+                rm -rf /var/cache/nginx/fastcgi/* /var/run/nginx-cache/* 2>/dev/null
                 
                 nginx -t && systemctl reload nginx
                 log_info "Đã TẮT Cache cho $domain. Phù hợp để chỉnh sửa code/giao diện."

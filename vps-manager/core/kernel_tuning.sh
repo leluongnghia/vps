@@ -270,19 +270,21 @@ calc_mariadb_tuning_params() {
     total_ram_mb=$(free -m | awk '/^Mem:/{print $2}')
     local cpu_cores
     cpu_cores=$(grep -c ^processor /proc/cpuinfo 2>/dev/null || echo 2)
-    local total_ram_gb=$(( total_ram_mb / 1024 ))
 
     # Innodb buffer: 25% RAM
     local innodb_buffer=$(( total_ram_mb / 4 ))
-    local key_buffer=$(( total_ram_mb / 6 ))
-    local db_table_size=$(( total_ram_gb * 64 ))
-    local max_connections=$(( 64 * total_ram_gb ))
+    local key_buffer=$(( total_ram_mb / 8 ))
+    local db_table_size=$(( total_ram_mb / 64 ))
+    local max_connections=$(( total_ram_mb / 32 ))
     local max_allowed_packet=64
 
-    # Tối thiểu cho VPS nhỏ < 1GB
-    if [[ "$total_ram_mb" -lt 1024 ]]; then
-        innodb_buffer=48; key_buffer=32; db_table_size=32; max_connections=300
-    fi
+    # Giữ cấu hình bảo thủ cho VPS nhỏ để tránh OOM khi PHP-FPM tăng tải.
+    [[ "$innodb_buffer" -lt 48 ]] && innodb_buffer=48
+    [[ "$key_buffer" -lt 16 ]] && key_buffer=16
+    [[ "$db_table_size" -lt 32 ]] && db_table_size=32
+    [[ "$db_table_size" -gt 64 ]] && db_table_size=64
+    [[ "$max_connections" -lt 60 ]] && max_connections=60
+    [[ "$max_connections" -gt 200 ]] && max_connections=200
 
     # query_cache: tắt nếu > 2 CPU (MariaDB 10.8+ deprecated)
     local query_cache_type=0

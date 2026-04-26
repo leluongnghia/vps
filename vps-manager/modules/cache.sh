@@ -153,6 +153,11 @@ CACHECONF
     systemctl enable "${object_cache}" 2>/dev/null || systemctl enable "${object_cache}-server" 2>/dev/null || true
     systemctl restart "${object_cache}" 2>/dev/null || systemctl restart "${object_cache}-server" 2>/dev/null || true
 
+    mkdir -p /etc/vps-manager
+    echo "OBJECT_CACHE_TYPE=${object_cache}" > /etc/vps-manager/cache.conf
+    echo "OBJECT_CACHE_SOCKET=${socket_path}" >> /etc/vps-manager/cache.conf
+    chmod 600 /etc/vps-manager/cache.conf
+
     log_info "✓ $object_cache đã cài đặt với Unix Socket: $socket_path"
     echo -e "${YELLOW}Ghi chú: Thay socket path này vào wp-config.php (WP_REDIS_PATH)${NC}"
     pause
@@ -183,10 +188,12 @@ fix_redis_connection() {
             # Configure Redis (Socket)
             local rconf="/etc/redis/redis.conf"
             cp "$rconf" "$rconf.bak"
+            mkdir -p /var/run/redis
+            chown redis:redis /var/run/redis 2>/dev/null || true
             
             if ! grep -q "^unixsocket " "$rconf"; then
                 echo "" >> "$rconf"
-                echo "unixsocket /tmp/redis.sock" >> "$rconf"
+                echo "unixsocket /var/run/redis/redis.sock" >> "$rconf"
                 echo "unixsocketperm 770" >> "$rconf"
             fi
             
@@ -222,7 +229,13 @@ fix_redis_connection() {
     # 3. Detect Connection Method
     local redis_conf="/etc/redis/redis.conf"
     local use_socket=false
-    local socket_path="/tmp/redis.sock"
+    local socket_path="/var/run/redis/redis.sock"
+
+    if [[ -f /etc/vps-manager/cache.conf ]]; then
+        local saved_socket
+        saved_socket=$(grep -E '^OBJECT_CACHE_SOCKET=' /etc/vps-manager/cache.conf 2>/dev/null | head -n 1 | cut -d= -f2-)
+        [[ -n "$saved_socket" ]] && socket_path="$saved_socket"
+    fi
     
     if [[ ! -f "$redis_conf" ]]; then
         echo -e "${RED}Không tìm thấy file config $redis_conf. Giả định mặc định (TCP).${NC}"
@@ -312,9 +325,9 @@ setup_object_cache_pro() {
     # Call toggle_extension with an environment variable or flag to auto-select ALL and ON, or just use commands directly
     if ! dpkg -s php-redis &> /dev/null; then
         apt-get update -qq
-        apt-get install -y php-redis php8.1-redis php8.2-redis php8.3-redis 2>/dev/null
+        apt-get install -y php-redis php8.1-redis php8.2-redis php8.3-redis php8.4-redis 2>/dev/null
     fi
-    for v in 8.1 8.2 8.3; do
+    for v in 8.1 8.2 8.3 8.4; do
         phpenmod -v $v redis 2>/dev/null
         systemctl restart php$v-fpm 2>/dev/null
     done
@@ -326,8 +339,10 @@ setup_object_cache_pro() {
 
 clear_all_cache() {
     log_info "Đang xóa Nginx FastCGI Cache..."
-    rm -rf /var/run/nginx-cache/* 2>/dev/null
+    rm -rf /var/cache/nginx/fastcgi/* /var/run/nginx-cache/* 2>/dev/null
     rm -rf /var/cache/nginx/* 2>/dev/null
+    mkdir -p /var/cache/nginx/fastcgi
+    chown -R www-data:www-data /var/cache/nginx 2>/dev/null || true
     systemctl reload nginx 2>/dev/null
     
     log_info "Đang Flush Redis..."
@@ -357,40 +372,63 @@ clear_all_cache() {
 }
 
 toggle_extension() {
-    ext=$1
-    
-    # Check if module exists for common versions or install
-    # Just force install generic meta-package which usually triggers config generation
-    if ! dpkg -s php-$ext &> /dev/null; then
+    local ext=$1
+    local versions=()
+    local ver_dir ver
+
+    if [[ -d /etc/php ]]; then
+        for ver_dir in /etc/php/*/; do
+            [[ -d "$ver_dir" ]] || continue
+            ver=$(basename "$ver_dir")
+            [[ "$ver" =~ ^[0-9]+\.[0-9]+$ ]] && versions+=("$ver")
+        done
+    fi
+
+    if [[ ${#versions[@]} -eq 0 ]]; then
+        versions=(8.4 8.3 8.2 8.1)
+    else
+        IFS=$'\n' versions=($(printf '%s\n' "${versions[@]}" | sort -rV))
+        unset IFS
+    fi
+
+    if command -v dpkg >/dev/null 2>&1 && ! dpkg -s "php-$ext" &> /dev/null; then
         echo -e "${YELLOW}Extension php-$ext chưa được cài đặt. Đang cài đặt...${NC}"
         apt-get update -qq
-        apt-get install -y php-$ext
+        apt-get install -y "php-$ext" 2>/dev/null || true
     fi
-    
+
     echo -e "Chọn phiên bản PHP để cấu hình $ext:"
-    echo -e "1) PHP 8.1"
-    echo -e "2) PHP 8.2"
-    echo -e "3) PHP 8.3"
-    echo -e "4) Tất cả"
+    local idx=1
+    for ver in "${versions[@]}"; do
+        echo -e "$idx) PHP $ver"
+        idx=$((idx + 1))
+    done
+    echo -e "$idx) Tất cả"
     read -p "Chọn: " v
-    
-    case $v in
-        1) ver="8.1" ;;
-        2) ver="8.2" ;;
-        3) ver="8.3" ;;
-        4) ver="all" ;;
-        *) return ;;
-    esac
-    
-    # Ensure package for specific version exists
+
+    if ! [[ "$v" =~ ^[0-9]+$ ]]; then
+        return
+    fi
+    if [[ "$v" -eq "$idx" ]]; then
+        ver="all"
+    elif [[ "$v" -ge 1 && "$v" -lt "$idx" ]]; then
+        ver="${versions[$((v - 1))]}"
+    else
+        return
+    fi
+
+    # Ensure package for selected PHP version exists
     if [[ "$ver" != "all" ]]; then
-       if ! dpkg -s php$ver-$ext &> /dev/null && ! [[ -f "/etc/php/$ver/mods-available/$ext.ini" ]]; then
+       if command -v dpkg >/dev/null 2>&1 && ! dpkg -s "php$ver-$ext" &> /dev/null && ! [[ -f "/etc/php/$ver/mods-available/$ext.ini" ]]; then
            echo -e "${YELLOW}Cài đặt thêm php$ver-$ext...${NC}"
-           apt-get install -y php$ver-$ext
+           apt-get install -y "php$ver-$ext" 2>/dev/null || true
        fi
     else
-       # For ALL, ensure for all versions if possible
-       apt-get install -y php8.1-$ext php8.2-$ext php8.3-$ext 2>/dev/null
+       if command -v apt-get >/dev/null 2>&1; then
+           for v in "${versions[@]}"; do
+               apt-get install -y "php$v-$ext" 2>/dev/null || true
+           done
+       fi
     fi
     
     echo -e "Trạng thái mong muốn:"
@@ -408,17 +446,17 @@ toggle_extension() {
         echo -e "${RED}Lựa chọn không hợp lệ!${NC}"
         pause; return
     fi
-    
+
     if [[ "$ver" == "all" ]]; then
-        for v in 8.1 8.2 8.3; do
-             $action -v $v $ext
+        for v in "${versions[@]}"; do
+             $action -v "$v" "$ext" 2>/dev/null || true
+             systemctl restart "php$v-fpm" 2>/dev/null || true
         done
-        systemctl restart php*-fpm
     else
-        $action -v $ver $ext
-        systemctl restart php$ver-fpm
+        $action -v "$ver" "$ext"
+        systemctl restart "php$ver-fpm" 2>/dev/null || true
     fi
-    
+
     log_info "Đã cấu hình $ext -> $state."
     pause
 }

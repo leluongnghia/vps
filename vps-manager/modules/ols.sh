@@ -548,12 +548,20 @@ EOF
                 --allow-root --quiet
 
             # Auto inject Object Cache Unix Socket if exists
-            if [[ -S "/tmp/valkey.sock" ]] || [[ -S "/tmp/redis.sock" ]]; then
-                local socket_path=""
-                [[ -S "/tmp/redis.sock" ]] && socket_path="/tmp/redis.sock"
-                [[ -S "/tmp/valkey.sock" ]] && socket_path="/tmp/valkey.sock"
-                
-                if [[ -n "$socket_path" ]]; then
+            local socket_path=""
+            if [[ -f /etc/vps-manager/cache.conf ]]; then
+                socket_path=$(grep -E '^OBJECT_CACHE_SOCKET=' /etc/vps-manager/cache.conf 2>/dev/null | head -n 1 | cut -d= -f2-)
+            fi
+            if [[ -z "$socket_path" ]]; then
+                if [[ -e "/var/run/valkey/valkey.sock" ]]; then socket_path="/var/run/valkey/valkey.sock"
+                elif [[ -e "/var/run/redis/redis.sock" ]]; then socket_path="/var/run/redis/redis.sock"
+                elif [[ -e "/var/run/keydb/keydb.sock" ]]; then socket_path="/var/run/keydb/keydb.sock"
+                elif [[ -e "/tmp/valkey.sock" ]]; then socket_path="/tmp/valkey.sock"
+                elif [[ -e "/tmp/redis.sock" ]]; then socket_path="/tmp/redis.sock"
+                fi
+            fi
+            
+            if [[ -n "$socket_path" ]]; then
                     sed -i "/table_prefix/i define( 'WP_REDIS_SCHEME', 'unix' );" "$site_root/wp-config.php"
                     sed -i "/table_prefix/i define( 'WP_REDIS_PATH', '$socket_path' );" "$site_root/wp-config.php"
                     sed -i "/table_prefix/i define( 'WP_CACHE_KEY_SALT', '$domain:' );" "$site_root/wp-config.php"
