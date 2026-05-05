@@ -766,21 +766,39 @@ clone_site() {
     log_info "5/6 Tạo wp-config.php..."
     cp "$src_wp_config" "/var/www/$dest_domain/public_html/wp-config.php"
     local dest_wp_config="/var/www/$dest_domain/public_html/wp-config.php"
-    # Thay DB credentials — regex linh hoạt với cả ' và "
-    sed -i "s|define[[:space:]]*([[:space:]]*['\"]DB_NAME['\"][[:space:]]*,[[:space:]]*['\"][^'\"]*['\"])|define( 'DB_NAME', '${new_db_name}' )|g"     "$dest_wp_config"
-    sed -i "s|define[[:space:]]*([[:space:]]*['\"]DB_USER['\"][[:space:]]*,[[:space:]]*['\"][^'\"]*['\"])|define( 'DB_USER', '${new_db_user}' )|g"     "$dest_wp_config"
-    sed -i "s|define[[:space:]]*([[:space:]]*['\"]DB_PASSWORD['\"][[:space:]]*,[[:space:]]*['\"][^'\"]*['\"])|define( 'DB_PASSWORD', '${new_db_pass}' )|g" "$dest_wp_config"
-    echo -e "  ✅ wp-config.php đã cập nhật"
 
-    # ── BƯỚC 6: Search & Replace URL + Dọn dẹp ──────────────────
-    log_info "6/6 Thay thế URL và dọn dẹp..."
-
-    # Cài WP-CLI nếu chưa có
+    # Cài WP-CLI nếu chưa có (cần cho bước này và bước sau)
     if ! command -v wp &>/dev/null; then
         log_info "Đang cài WP-CLI..."
         curl -sO https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
         chmod +x wp-cli.phar && mv wp-cli.phar /usr/local/bin/wp
     fi
+
+    # Dùng wp config set để cập nhật credentials (chính xác hơn sed)
+    if command -v wp &>/dev/null; then
+        wp config set DB_NAME     "$new_db_name" --path="/var/www/$dest_domain/public_html" --allow-root --quiet 2>/dev/null
+        wp config set DB_USER     "$new_db_user" --path="/var/www/$dest_domain/public_html" --allow-root --quiet 2>/dev/null
+        wp config set DB_PASSWORD "$new_db_pass" --path="/var/www/$dest_domain/public_html" --allow-root --quiet 2>/dev/null
+    else
+        # Fallback sed nếu WP-CLI không có
+        sed -i "s/define( *'DB_NAME', *'[^']*' *);/define( 'DB_NAME', '${new_db_name}' );/"     "$dest_wp_config"
+        sed -i "s/define( *'DB_USER', *'[^']*' *);/define( 'DB_USER', '${new_db_user}' );/"     "$dest_wp_config"
+        sed -i "s/define( *'DB_PASSWORD', *'[^']*' *);/define( 'DB_PASSWORD', '${new_db_pass}' );/" "$dest_wp_config"
+    fi
+
+    # ── KIỂM TRA: Xác nhận wp-config trỏ đúng DB trước khi search-replace ──
+    local verified_db
+    verified_db=$(grep -m1 "DB_NAME" "/var/www/$dest_domain/public_html/wp-config.php" | grep -oP "(?<=['\"])[^'\"]+(?=['\"])" | tail -1)
+    if [[ "$verified_db" != "$new_db_name" ]]; then
+        log_warn "wp-config chưa cập nhật đúng (hiện: $verified_db, cần: $new_db_name). Ghi đè thủ công..."
+        sed -i "s/'DB_NAME'[[:space:]]*,[[:space:]]*'[^']*'/'DB_NAME', '${new_db_name}'/" "$dest_wp_config"
+        sed -i "s/'DB_USER'[[:space:]]*,[[:space:]]*'[^']*'/'DB_USER', '${new_db_user}'/" "$dest_wp_config"
+        sed -i "s/'DB_PASSWORD'[[:space:]]*,[[:space:]]*'[^']*'/'DB_PASSWORD', '${new_db_pass}'/" "$dest_wp_config"
+    fi
+    echo -e "  ✅ wp-config.php: DB = $(grep -m1 'DB_NAME' "/var/www/$dest_domain/public_html/wp-config.php" | grep -oP "(?<=['\"])[^'\"]+(?=['\"])" | tail -1)"
+
+    # ── BƯỚC 6: Search & Replace URL + Dọn dẹp ──────────────────
+    log_info "6/6 Thay thế URL và dọn dẹp..."
 
     cd "/var/www/$dest_domain/public_html" || true
 
@@ -791,16 +809,12 @@ clone_site() {
         wp search-replace "https://${src_domain}"     "https://${dest_domain}"     --allow-root --quiet 2>/dev/null
         wp search-replace "http://${src_domain}"      "http://${dest_domain}"      --allow-root --quiet 2>/dev/null
         wp search-replace "${src_domain}"             "${dest_domain}"             --allow-root --quiet 2>/dev/null
-        # Ép siteurl và home về đúng domain mới
-        wp option update siteurl "https://${dest_domain}" --allow-root --quiet 2>/dev/null
-        wp option update home    "https://${dest_domain}" --allow-root --quiet 2>/dev/null
         echo -e "  ✅ Search-Replace URL hoàn tất"
-    else
-        # Fallback: Dùng MariaDB trực tiếp
-        log_warn "WP-CLI không cài được. Dùng SQL để thay URL..."
-        mysql "$new_db_name" -e "UPDATE \`${src_table_prefix}options\` SET option_value='https://${dest_domain}' WHERE option_name IN ('siteurl','home');" 2>/dev/null
-        echo -e "  ✅ Đã cập nhật siteurl và home qua SQL"
     fi
+
+    # Luôn dùng SQL trực tiếp để đảm bảo siteurl/home đúng 100%
+    mysql "$new_db_name" -e "UPDATE \`${src_table_prefix}options\` SET option_value='https://${dest_domain}' WHERE option_name IN ('siteurl','home');" 2>/dev/null
+    echo -e "  ✅ siteurl/home đã cập nhật qua SQL (prefix: ${src_table_prefix})"
 
     cd - >/dev/null 2>&1 || true
 
