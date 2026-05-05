@@ -278,8 +278,8 @@ _apply_manual_ssl_nginx_config() {
     cp "$conf_file" "$backup"
 
     if ! grep -qE 'listen[[:space:]].*443' "$conf_file"; then
-        sed -i 's/listen 80;/listen 443 ssl http2;/g' "$conf_file"
-        sed -i 's/listen \[::\]:80;/listen [::]:443 ssl http2;/g' "$conf_file"
+        sed -i 's/listen 80;/listen 443 ssl;\n    http2 on;/g' "$conf_file"
+        sed -i 's/listen \[::\]:80;/listen [::]:443 ssl;\n    http2 on;/g' "$conf_file"
     fi
 
     local tmp_file
