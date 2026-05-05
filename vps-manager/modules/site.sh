@@ -670,76 +670,159 @@ delete_site() {
 clone_site() {
     echo -e "${YELLOW}--- Clone Website ---${NC}"
     select_site || return
-    src_domain="$SELECTED_DOMAIN"
-    
+    local src_domain="$SELECTED_DOMAIN"
+
     read -p "Nhập domain ĐÍCH (Mới): " dest_domain
-    
+
     if [[ -d "/var/www/$dest_domain" ]]; then
         echo -e "${RED}Domain đích đã tồn tại! Vui lòng xóa trước.${NC}"
         pause; return
     fi
-    
-    # 1. Clone Files
-    log_info "Đang copy mã nguồn..."
-    mkdir -p "/var/www/$dest_domain"
-    rsync -av --exclude 'wp-config.php' "/var/www/$src_domain/" "/var/www/$dest_domain/"
-    
-    # 2. Config Nginx for Dest
-    create_nginx_config "$dest_domain"
-    
-    # 3. Create New DB
-    # Limit db name length and complexity
-    local new_db_name=$(echo "$dest_domain" | tr -d '.-' | cut -c1-16)
-    local new_db_user="${new_db_name}_u"
-    local new_db_pass=$(openssl rand -base64 18 | tr -dc 'a-zA-Z0-9' | head -c 16)
-    
-    log_info "Đang tạo database mới cho $dest_domain..."
-    mysql -e "CREATE DATABASE ${new_db_name};"
-    mysql -e "CREATE USER '${new_db_user}'@'localhost' IDENTIFIED BY '${new_db_pass}';"
-    mysql -e "GRANT ALL PRIVILEGES ON ${new_db_name}.* TO '${new_db_user}'@'localhost';"
-    mysql -e "FLUSH PRIVILEGES;"
-    
-    # 4. Export & Import DB
-    # Attempt to extract DB name using PHP for reliability (compatible with ' or " quotes)
-    src_db_name=$(php -r "include '/var/www/$src_domain/public_html/wp-config.php'; echo DB_NAME;" 2>/dev/null)
-    
-    # Fallback to grep if PHP fails
+
+    # ── Kiểm tra wp-config.php nguồn ────────────────────────────
+    local src_wp_config="/var/www/$src_domain/public_html/wp-config.php"
+    if [[ ! -f "$src_wp_config" ]]; then
+        echo -e "${RED}Không tìm thấy wp-config.php trên site nguồn!${NC}"
+        pause; return
+    fi
+
+    # ── Đọc thông tin DB nguồn (hỗ trợ cả ' và ") ───────────────
+    local src_db_name src_table_prefix
+    src_db_name=$(grep -m1 "DB_NAME" "$src_wp_config" | grep -oP "(?<=['\"])[^'\"]+(?=['\"])" | tail -1)
+    src_table_prefix=$(grep -m1 "table_prefix" "$src_wp_config" | grep -oP "(?<=['\"])[^'\"]+(?=['\"])" | head -1)
+    src_table_prefix="${src_table_prefix:-wp_}"
+
     if [[ -z "$src_db_name" ]]; then
-        src_db_name=$(grep "DB_NAME" "/var/www/$src_domain/public_html/wp-config.php" 2>/dev/null | cut -d "'" -f 4)
+        echo -e "${RED}Không đọc được DB_NAME từ wp-config.php nguồn!${NC}"
+        pause; return
     fi
-    
-    if [[ -n "$src_db_name" ]]; then
-        log_info "Đang clone database ($src_db_name -> $new_db_name)..."
-        mysqldump "$src_db_name" | mysql "$new_db_name"
-        
-        # 5. Search & Replace URL
-        if ! command -v wp &> /dev/null; then
-             curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
-             chmod +x wp-cli.phar
-             mv wp-cli.phar /usr/local/bin/wp
+
+    # ── Tạo thông tin DB đích ────────────────────────────────────
+    local new_db_name new_db_user new_db_pass
+    new_db_name=$(echo "$dest_domain" | tr -d '.-' | cut -c1-16)
+    new_db_user="${new_db_name}_u"
+    new_db_pass=$(openssl rand -base64 18 | tr -dc 'a-zA-Z0-9' | head -c 16)
+
+    echo -e "\n${CYAN}=== Clone: ${src_domain} → ${dest_domain} ===${NC}"
+    echo -e "  DB nguồn    : ${CYAN}${src_db_name}${NC}"
+    echo -e "  Table prefix: ${CYAN}${src_table_prefix}${NC}"
+    echo -e "  DB đích     : ${CYAN}${new_db_name}${NC}"
+
+    # ── BƯỚC 1: Copy mã nguồn ────────────────────────────────────
+    log_info "1/6 Đang copy mã nguồn..."
+    mkdir -p "/var/www/$dest_domain/public_html"
+    rsync -a \
+        --exclude 'wp-config.php' \
+        --exclude 'wp-content/cache/' \
+        --exclude 'wp-content/ai1wm-backups/' \
+        --exclude '*.log' \
+        "/var/www/$src_domain/public_html/" \
+        "/var/www/$dest_domain/public_html/"
+    echo -e "  ✅ Copy mã nguồn hoàn tất"
+
+    # ── BƯỚC 2: Tạo Nginx config ─────────────────────────────────
+    log_info "2/6 Tạo cấu hình Nginx..."
+    create_nginx_config "$dest_domain"
+    echo -e "  ✅ Nginx config đã tạo"
+
+    # ── BƯỚC 3: Tạo Database mới ─────────────────────────────────
+    log_info "3/6 Tạo Database..."
+    mysql -e "CREATE DATABASE IF NOT EXISTS \`${new_db_name}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" 2>/dev/null
+    mysql -e "CREATE USER IF NOT EXISTS '${new_db_user}'@'localhost' IDENTIFIED BY '${new_db_pass}';" 2>/dev/null
+    mysql -e "GRANT ALL PRIVILEGES ON \`${new_db_name}\`.* TO '${new_db_user}'@'localhost';" 2>/dev/null
+    mysql -e "FLUSH PRIVILEGES;" 2>/dev/null
+    echo -e "  ✅ Database đã tạo"
+
+    # ── BƯỚC 4: Export & Import DB ───────────────────────────────
+    log_info "4/6 Clone Database (${src_db_name} → ${new_db_name})..."
+    local tmp_dump="/tmp/clone_$(date +%s).sql"
+    if mysqldump --single-transaction --max_allowed_packet=1G "$src_db_name" > "$tmp_dump" 2>/dev/null; then
+        if mysql "$new_db_name" < "$tmp_dump" 2>/dev/null; then
+            echo -e "  ✅ Import Database thành công ($(du -sh "$tmp_dump" | cut -f1))"
+        else
+            echo -e "  ${RED}❌ Import Database thất bại!${NC}"
+            rm -f "$tmp_dump"; pause; return
         fi
-        
-        log_info "Đang thay thế URL (Search-Replace)..."
-        cd "/var/www/$dest_domain/public_html"
-        
-        # Create new wp-config
-        cp "/var/www/$src_domain/public_html/wp-config.php" .
-        sed -i "s|DB_NAME', '.*'|DB_NAME', '$new_db_name'|" wp-config.php
-        sed -i "s|DB_USER', '.*'|DB_USER', '$new_db_user'|" wp-config.php
-        sed -i "s|DB_PASSWORD', '.*'|DB_PASSWORD', '$new_db_pass'|" wp-config.php
-        
-        wp search-replace "http://$src_domain" "http://$dest_domain" --allow-root
-        wp search-replace "https://$src_domain" "https://$dest_domain" --allow-root
-        wp search-replace "$src_domain" "$dest_domain" --allow-root
-        
-        log_info "Đã clone xong Database & Config."
     else
-        log_warn "Không tìm thấy cấu hình DB nguồn (hoặc không thể đọc wp-config.php). Chỉ copy code."
+        echo -e "  ${RED}❌ Export Database nguồn thất bại!${NC}"
+        rm -f "$tmp_dump"; pause; return
     fi
-    
+    rm -f "$tmp_dump"
+
+    # ── BƯỚC 5: Tạo wp-config.php mới ───────────────────────────
+    log_info "5/6 Tạo wp-config.php..."
+    cp "$src_wp_config" "/var/www/$dest_domain/public_html/wp-config.php"
+    local dest_wp_config="/var/www/$dest_domain/public_html/wp-config.php"
+    # Thay DB credentials — regex linh hoạt với cả ' và "
+    sed -i "s|define[[:space:]]*([[:space:]]*['\"]DB_NAME['\"][[:space:]]*,[[:space:]]*['\"][^'\"]*['\"])|define( 'DB_NAME', '${new_db_name}' )|g"     "$dest_wp_config"
+    sed -i "s|define[[:space:]]*([[:space:]]*['\"]DB_USER['\"][[:space:]]*,[[:space:]]*['\"][^'\"]*['\"])|define( 'DB_USER', '${new_db_user}' )|g"     "$dest_wp_config"
+    sed -i "s|define[[:space:]]*([[:space:]]*['\"]DB_PASSWORD['\"][[:space:]]*,[[:space:]]*['\"][^'\"]*['\"])|define( 'DB_PASSWORD', '${new_db_pass}' )|g" "$dest_wp_config"
+    echo -e "  ✅ wp-config.php đã cập nhật"
+
+    # ── BƯỚC 6: Search & Replace URL + Dọn dẹp ──────────────────
+    log_info "6/6 Thay thế URL và dọn dẹp..."
+
+    # Cài WP-CLI nếu chưa có
+    if ! command -v wp &>/dev/null; then
+        log_info "Đang cài WP-CLI..."
+        curl -sO https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+        chmod +x wp-cli.phar && mv wp-cli.phar /usr/local/bin/wp
+    fi
+
+    cd "/var/www/$dest_domain/public_html" || true
+
+    if command -v wp &>/dev/null; then
+        # Thay thế tất cả dạng URL (cả http và https, cả www và không www)
+        wp search-replace "https://www.${src_domain}" "https://www.${dest_domain}" --allow-root --quiet 2>/dev/null
+        wp search-replace "http://www.${src_domain}"  "http://www.${dest_domain}"  --allow-root --quiet 2>/dev/null
+        wp search-replace "https://${src_domain}"     "https://${dest_domain}"     --allow-root --quiet 2>/dev/null
+        wp search-replace "http://${src_domain}"      "http://${dest_domain}"      --allow-root --quiet 2>/dev/null
+        wp search-replace "${src_domain}"             "${dest_domain}"             --allow-root --quiet 2>/dev/null
+        # Ép siteurl và home về đúng domain mới
+        wp option update siteurl "https://${dest_domain}" --allow-root --quiet 2>/dev/null
+        wp option update home    "https://${dest_domain}" --allow-root --quiet 2>/dev/null
+        echo -e "  ✅ Search-Replace URL hoàn tất"
+    else
+        # Fallback: Dùng MariaDB trực tiếp
+        log_warn "WP-CLI không cài được. Dùng SQL để thay URL..."
+        mysql "$new_db_name" -e "UPDATE \`${src_table_prefix}options\` SET option_value='https://${dest_domain}' WHERE option_name IN ('siteurl','home');" 2>/dev/null
+        echo -e "  ✅ Đã cập nhật siteurl và home qua SQL"
+    fi
+
+    cd - >/dev/null 2>&1 || true
+
+    # Phân quyền
     chown -R www-data:www-data "/var/www/$dest_domain"
-    log_info "Clone hoàn tất! Domain mới: $dest_domain"
-    echo -e "DB Name: $new_db_name | User: $new_db_user | Pass: $new_db_pass"
+    find "/var/www/$dest_domain/public_html" -type d -exec chmod 755 {} \;
+    find "/var/www/$dest_domain/public_html" -type f -exec chmod 644 {} \;
+    # Xóa cache cũ và file gây lỗi phân quyền
+    rm -rf "/var/www/$dest_domain/public_html/wp-content/cache/"
+    find "/var/www/$dest_domain/public_html" -name ".user.ini" -delete 2>/dev/null
+    echo -e "  ✅ Phân quyền và dọn dẹp hoàn tất"
+
+    # ── Lưu thông tin DB vào sites_data.conf ─────────────────────
+    local data_file="$HOME/.vps-manager/sites_data.conf"
+    mkdir -p "$(dirname "$data_file")"
+    sed -i "/^$dest_domain|/d" "$data_file" 2>/dev/null || true
+    echo "$dest_domain|$new_db_name|$new_db_user|$new_db_pass" >> "$data_file"
+    chmod 600 "$data_file"
+
+    # ── Reload Nginx ──────────────────────────────────────────────
+    nginx -t &>/dev/null && systemctl reload nginx
+
+    # ── Kết quả ──────────────────────────────────────────────────
+    echo ""
+    echo -e "${GREEN}=================================================${NC}"
+    echo -e "${GREEN}  ✅ Clone hoàn tất!${NC}"
+    echo -e "${GREEN}=================================================${NC}"
+    echo -e "  Domain mới : ${CYAN}http://${dest_domain}${NC}"
+    echo -e "  DB Name    : ${CYAN}${new_db_name}${NC}"
+    echo -e "  DB User    : ${CYAN}${new_db_user}${NC}"
+    echo -e "  DB Pass    : ${CYAN}${new_db_pass}${NC}"
+    echo ""
+    echo -e "${YELLOW}Bước tiếp theo:${NC}"
+    echo -e "  → Menu SSL → Cài đặt SSL → chọn ${CYAN}${dest_domain}${NC} → Let's Encrypt"
+    echo -e "${GREEN}=================================================${NC}"
     pause
 }
 
