@@ -634,13 +634,26 @@ delete_site() {
     select_site || return
     domain="$SELECTED_DOMAIN"
     
-    echo -e "${RED}CẢNH BÁO: Hành động này sẽ xóa toàn bộ mã nguồn và cơ sở dữ liệu của $domain!${NC}"
-    read -p "Bạn có CHẮC CHẮN muốn xóa $domain không? (nhập 'y' để đồng ý): " confirm
-    
+    echo -e "${RED}╔══════════════════════════════════════════════════╗${NC}"
+    echo -e "${RED}║  ⚠  CẢNH BÁO: KHÔNG THỂ HOÀN TÁC!              ║${NC}"
+    echo -e "${RED}║  Xóa toàn bộ mã nguồn + Database của: $domain${NC}"
+    echo -e "${RED}╚══════════════════════════════════════════════════╝${NC}"
+    echo -e "${YELLOW}Gõ chính xác tên domain để xác nhận: ${CYAN}$domain${NC}"
+    read -r confirm_domain
+
+    if [[ "$confirm_domain" != "$domain" ]]; then
+        echo -e "${YELLOW}Tên domain không khớp. Đã hủy thao tác xóa.${NC}"
+        pause; return
+    fi
+
+    echo -ne "${RED}Xác nhận lần cuối - Nhập 'y' để xóa: ${NC}"
+    read -r confirm
+
     if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
         echo -e "${YELLOW}Đã hủy thao tác xóa.${NC}"
         pause; return
     fi
+
 
     log_info "Đang xóa website $domain..."
 
