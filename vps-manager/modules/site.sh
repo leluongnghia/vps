@@ -631,28 +631,8 @@ select_site() {
 
 delete_site() {
     echo -e "${YELLOW}--- Xóa Website ---${NC}"
-    
-    echo -e "\n${CYAN}Danh sách Website trên VPS:${NC}"
-    local has_site=false
-    for d in /var/www/*; do
-        if [[ -d "$d" && "$(basename "$d")" != "html" ]]; then
-            echo -e "  - $(basename "$d")"
-            has_site=true
-        fi
-    done
-    
-    if [[ "$has_site" == false ]]; then
-        echo -e "${RED}Không tìm thấy website nào!${NC}"
-        return
-    fi
-    
-    echo ""
-    read -p "Nhập chính xác tên miền cần xóa: " domain
-    
-    if [[ -z "$domain" || ! -d "/var/www/$domain" || "$domain" == "html" ]]; then
-        echo -e "${RED}Tên miền không tồn tại trên hệ thống!${NC}"
-        pause; return
-    fi
+    select_site || return
+    local domain="$SELECTED_DOMAIN"
     
     echo -e "${RED}╔══════════════════════════════════════════════════╗${NC}"
     echo -e "${RED}║  ⚠  CẢNH BÁO: KHÔNG THỂ HOÀN TÁC!              ║${NC}"
