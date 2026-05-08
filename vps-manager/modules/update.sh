@@ -78,13 +78,22 @@ do_update() {
     LOCAL_VERSION=$(echo "$LOCAL_VERSION" | tr -d '[:space:]')
     REMOTE_VERSION=$(echo "$REMOTE_VERSION" | tr -d '[:space:]')
 
-    if [[ -n "$REMOTE_VERSION" ]] && [[ "$LOCAL_VERSION" = "$REMOTE_VERSION" ]]; then
-        echo -e "${GREEN}✅ Script đã là phiên bản mới nhất (v$LOCAL_VERSION)!${NC}"
-        pause; return 0
-    fi
-
     if [[ -n "$REMOTE_VERSION" ]]; then
-        echo -e "${GREEN}Phát hiện phiên bản mới: v$LOCAL_VERSION -> v$REMOTE_VERSION${NC}"
+        if [[ "$LOCAL_VERSION" == "$REMOTE_VERSION" ]]; then
+            echo -e "${GREEN}✅ Script đã là phiên bản mới nhất (v$LOCAL_VERSION)!${NC}"
+            pause; return 0
+        fi
+        
+        # So sánh version xem remote có thực sự lớn hơn local không
+        local HIGHER_VERSION
+        HIGHER_VERSION=$(printf '%s\n%s' "$LOCAL_VERSION" "$REMOTE_VERSION" | sort -V | tail -n1)
+        
+        if [[ "$HIGHER_VERSION" == "$LOCAL_VERSION" ]]; then
+            echo -e "${GREEN}✅ Script đã là phiên bản mới nhất (v$LOCAL_VERSION) hoặc cao hơn bản remote (v$REMOTE_VERSION do cache).${NC}"
+            pause; return 0
+        else
+            echo -e "${GREEN}Phát hiện phiên bản mới: v$LOCAL_VERSION -> v$REMOTE_VERSION${NC}"
+        fi
     else
         echo -e "${YELLOW}Không thể lấy thông tin phiên bản, tiếp tục cập nhật...${NC}"
     fi
