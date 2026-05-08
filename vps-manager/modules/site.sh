@@ -631,21 +631,34 @@ select_site() {
 
 delete_site() {
     echo -e "${YELLOW}--- Xóa Website ---${NC}"
-    select_site || return
-    domain="$SELECTED_DOMAIN"
+    
+    echo -e "\n${CYAN}Danh sách Website trên VPS:${NC}"
+    local has_site=false
+    for d in /var/www/*; do
+        if [[ -d "$d" && "$(basename "$d")" != "html" ]]; then
+            echo -e "  - $(basename "$d")"
+            has_site=true
+        fi
+    done
+    
+    if [[ "$has_site" == false ]]; then
+        echo -e "${RED}Không tìm thấy website nào!${NC}"
+        return
+    fi
+    
+    echo ""
+    read -p "Nhập chính xác tên miền cần xóa: " domain
+    
+    if [[ -z "$domain" || ! -d "/var/www/$domain" || "$domain" == "html" ]]; then
+        echo -e "${RED}Tên miền không tồn tại trên hệ thống!${NC}"
+        pause; return
+    fi
     
     echo -e "${RED}╔══════════════════════════════════════════════════╗${NC}"
     echo -e "${RED}║  ⚠  CẢNH BÁO: KHÔNG THỂ HOÀN TÁC!              ║${NC}"
     echo -e "${RED}║  Xóa toàn bộ mã nguồn + Database của: $domain${NC}"
     echo -e "${RED}╚══════════════════════════════════════════════════╝${NC}"
-    echo -e "${YELLOW}Gõ chính xác tên domain để xác nhận: ${CYAN}$domain${NC}"
-    read -r confirm_domain
-
-    if [[ "$confirm_domain" != "$domain" ]]; then
-        echo -e "${YELLOW}Tên domain không khớp. Đã hủy thao tác xóa.${NC}"
-        pause; return
-    fi
-
+    
     echo -ne "${RED}Xác nhận lần cuối - Nhập 'y' để xóa: ${NC}"
     read -r confirm
 
@@ -795,7 +808,18 @@ clone_site() {
         sed -i "s/'DB_USER'[[:space:]]*,[[:space:]]*'[^']*'/'DB_USER', '${new_db_user}'/" "$dest_wp_config"
         sed -i "s/'DB_PASSWORD'[[:space:]]*,[[:space:]]*'[^']*'/'DB_PASSWORD', '${new_db_pass}'/" "$dest_wp_config"
     fi
-    echo -e "  ✅ wp-config.php: DB = $(grep -m1 'DB_NAME' "/var/www/$dest_domain/public_html/wp-config.php" | grep -oP "(?<=['\"])[^'\"]+(?=['\"])" | tail -1)"
+    
+    # KIỂM TRA LẦN CUỐI: Chắc chắn 100% wp-config.php trỏ đúng DB mới để không làm hỏng site gốc
+    verified_db=$(grep -m1 "DB_NAME" "/var/www/$dest_domain/public_html/wp-config.php" | grep -oP "(?<=['\"])[^'\"]+(?=['\"])" | tail -1)
+    if [[ "$verified_db" == "$src_db_name" || "$verified_db" != "$new_db_name" ]]; then
+        echo -e "${RED}❌ LỖI NGHIÊM TRỌNG: wp-config.php của site mới vẫn trỏ về DB cũ ($src_db_name)!${NC}"
+        echo -e "${RED}Đã dừng lệnh search-replace để bảo vệ site gốc.${NC}"
+        pause; return
+    fi
+    echo -e "  ✅ wp-config.php đã cấu hình đúng DB mới: $verified_db"
+
+    # Đổi các thông số chứa tên miền cũ trong wp-config.php (như WP_CACHE_KEY_SALT, WP_HOME, WP_SITEURL)
+    sed -i "s|${src_domain}|${dest_domain}|g" "$dest_wp_config"
 
     # ── BƯỚC 6: Search & Replace URL + Dọn dẹp ──────────────────
     log_info "6/6 Thay thế URL và dọn dẹp..."
@@ -804,17 +828,25 @@ clone_site() {
 
     if command -v wp &>/dev/null; then
         # Thay thế tất cả dạng URL (cả http và https, cả www và không www)
-        wp search-replace "https://www.${src_domain}" "https://www.${dest_domain}" --allow-root --quiet 2>/dev/null
-        wp search-replace "http://www.${src_domain}"  "http://www.${dest_domain}"  --allow-root --quiet 2>/dev/null
-        wp search-replace "https://${src_domain}"     "https://${dest_domain}"     --allow-root --quiet 2>/dev/null
-        wp search-replace "http://${src_domain}"      "http://${dest_domain}"      --allow-root --quiet 2>/dev/null
-        wp search-replace "${src_domain}"             "${dest_domain}"             --allow-root --quiet 2>/dev/null
-        echo -e "  ✅ Search-Replace URL hoàn tất"
+        # Sử dụng tham số --path để ép buộc chạy trên thư mục của site mới
+        local dest_path="/var/www/$dest_domain/public_html"
+        wp search-replace "https://www.${src_domain}" "https://www.${dest_domain}" --path="$dest_path" --allow-root --quiet 2>/dev/null
+        wp search-replace "http://www.${src_domain}"  "http://www.${dest_domain}"  --path="$dest_path" --allow-root --quiet 2>/dev/null
+        wp search-replace "https://${src_domain}"     "https://${dest_domain}"     --path="$dest_path" --allow-root --quiet 2>/dev/null
+        wp search-replace "http://${src_domain}"      "http://${dest_domain}"      --path="$dest_path" --allow-root --quiet 2>/dev/null
+        wp search-replace "${src_domain}"             "${dest_domain}"             --path="$dest_path" --allow-root --quiet 2>/dev/null
+        echo -e "  ✅ Search-Replace URL hoàn tất trên DB mới"
     fi
 
-    # Luôn dùng SQL trực tiếp để đảm bảo siteurl/home đúng 100%
+    # Luôn dùng SQL trực tiếp để đảm bảo siteurl/home đúng 100% (chạy thẳng trên $new_db_name)
     mysql "$new_db_name" -e "UPDATE \`${src_table_prefix}options\` SET option_value='https://${dest_domain}' WHERE option_name IN ('siteurl','home');" 2>/dev/null
     echo -e "  ✅ siteurl/home đã cập nhật qua SQL (prefix: ${src_table_prefix})"
+
+    # Xóa Object Cache (Redis/Memcached) của site mới để tránh dính cache URL cũ
+    if command -v wp &>/dev/null; then
+        wp cache flush --path="/var/www/$dest_domain/public_html" --allow-root --quiet 2>/dev/null
+        echo -e "  ✅ Đã flush Object Cache cho site mới"
+    fi
 
     cd - >/dev/null 2>&1 || true
 
