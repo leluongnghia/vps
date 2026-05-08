@@ -807,14 +807,24 @@ clone_site() {
     cd "/var/www/$dest_domain/public_html" || true
 
     if command -v wp &>/dev/null; then
+        # Tìm bản PHP có sẵn mysqli để tránh lỗi thiếu extension của PHP mặc định
+        local wp_php="php"
+        for bin in php8.4 php8.3 php8.2 php8.1 php8.0 php7.4 php; do
+            if command -v $bin &>/dev/null && $bin -m 2>/dev/null | grep -qi mysqli; then
+                wp_php=$bin
+                break
+            fi
+        done
+        local wp_cmd="$wp_php $(which wp)"
+
         # Thay thế tất cả dạng URL (cả http và https, cả www và không www)
         # Sử dụng tham số --path để ép buộc chạy trên thư mục của site mới
         local dest_path="/var/www/$dest_domain/public_html"
-        wp search-replace "https://www.${src_domain}" "https://www.${dest_domain}" --path="$dest_path" --allow-root --quiet 2>/dev/null
-        wp search-replace "http://www.${src_domain}"  "http://www.${dest_domain}"  --path="$dest_path" --allow-root --quiet 2>/dev/null
-        wp search-replace "https://${src_domain}"     "https://${dest_domain}"     --path="$dest_path" --allow-root --quiet 2>/dev/null
-        wp search-replace "http://${src_domain}"      "http://${dest_domain}"      --path="$dest_path" --allow-root --quiet 2>/dev/null
-        wp search-replace "${src_domain}"             "${dest_domain}"             --path="$dest_path" --allow-root --quiet 2>/dev/null
+        $wp_cmd search-replace "https://www.${src_domain}" "https://www.${dest_domain}" --path="$dest_path" --allow-root --quiet 2>/dev/null
+        $wp_cmd search-replace "http://www.${src_domain}"  "http://www.${dest_domain}"  --path="$dest_path" --allow-root --quiet 2>/dev/null
+        $wp_cmd search-replace "https://${src_domain}"     "https://${dest_domain}"     --path="$dest_path" --allow-root --quiet 2>/dev/null
+        $wp_cmd search-replace "http://${src_domain}"      "http://${dest_domain}"      --path="$dest_path" --allow-root --quiet 2>/dev/null
+        $wp_cmd search-replace "${src_domain}"             "${dest_domain}"             --path="$dest_path" --allow-root --quiet 2>/dev/null
         echo -e "  ✅ Search-Replace URL hoàn tất trên DB mới"
     fi
 
@@ -824,7 +834,14 @@ clone_site() {
 
     # Xóa Object Cache (Redis/Memcached) của site mới để tránh dính cache URL cũ
     if command -v wp &>/dev/null; then
-        wp cache flush --path="/var/www/$dest_domain/public_html" --allow-root --quiet 2>/dev/null
+        local wp_php="php"
+        for bin in php8.4 php8.3 php8.2 php8.1 php8.0 php7.4 php; do
+            if command -v $bin &>/dev/null && $bin -m 2>/dev/null | grep -qi mysqli; then
+                wp_php=$bin
+                break
+            fi
+        done
+        $wp_php $(which wp) cache flush --path="/var/www/$dest_domain/public_html" --allow-root --quiet 2>/dev/null
         echo -e "  ✅ Đã flush Object Cache cho site mới"
     fi
 
@@ -908,9 +925,25 @@ rename_site() {
              curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar; chmod +x wp-cli.phar; mv wp-cli.phar /usr/local/bin/wp
         fi
         
-        wp search-replace "http://$old_domain" "http://$new_domain" --allow-root
-        wp search-replace "https://$old_domain" "https://$new_domain" --allow-root
-        wp search-replace "$old_domain" "$new_domain" --allow-root
+        # Tìm bản PHP có sẵn mysqli để tránh lỗi thiếu extension của PHP mặc định
+        local wp_php="php"
+        for bin in php8.4 php8.3 php8.2 php8.1 php8.0 php7.4 php; do
+            if command -v $bin &>/dev/null && $bin -m 2>/dev/null | grep -qi mysqli; then
+                wp_php=$bin
+                break
+            fi
+        done
+        
+        local wp_cmd="$wp_php $(which wp)"
+        
+        $wp_cmd search-replace "http://$old_domain" "http://$new_domain" --allow-root
+        $wp_cmd search-replace "https://$old_domain" "https://$new_domain" --allow-root
+        $wp_cmd search-replace "$old_domain" "$new_domain" --allow-root
+        
+        # Đổi luôn các thông số trong wp-config.php (như WP_CACHE_KEY_SALT, WP_HOME)
+        sed -i "s|${old_domain}|${new_domain}|g" "wp-config.php"
+        
+        $wp_cmd cache flush --allow-root --quiet 2>/dev/null
     fi
     
     log_info "Đổi tên thành công: $old_domain -> $new_domain"

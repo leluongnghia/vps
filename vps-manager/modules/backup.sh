@@ -392,9 +392,19 @@ perform_smart_restore() {
         
         if [[ -n "$source_domain" ]] && [[ "$source_domain" != "$target_domain" ]]; then
             log_info "Migrate Domain: $source_domain -> $target_domain"
-            wp search-replace "http://$source_domain" "http://$target_domain" --allow-root --quiet
-            wp search-replace "https://$source_domain" "https://$target_domain" --allow-root --quiet
-            wp search-replace "$source_domain" "$target_domain" --allow-root --quiet
+            # Tìm bản PHP có mysqli để chạy WP-CLI
+            local wp_php="php"
+            for bin in php8.4 php8.3 php8.2 php8.1 php8.0 php7.4 php; do
+                if command -v $bin &>/dev/null && $bin -m 2>/dev/null | grep -qi mysqli; then
+                    wp_php=$bin
+                    break
+                fi
+            done
+            local wp_cmd="$wp_php $(which wp)"
+
+            $wp_cmd search-replace "http://$source_domain" "http://$target_domain" --allow-root --quiet
+            $wp_cmd search-replace "https://$source_domain" "https://$target_domain" --allow-root --quiet
+            $wp_cmd search-replace "$source_domain" "$target_domain" --allow-root --quiet
         fi
     fi
 
@@ -911,11 +921,20 @@ restore_site_local() {
         
         cd "/var/www/$target_domain/public_html"
         # Run search-replace allow-root
-        # Try http and https permutations
-        wp search-replace "http://$source_domain" "http://$target_domain" --allow-root
-        wp search-replace "https://$source_domain" "https://$target_domain" --allow-root
-        wp search-replace "$source_domain" "$target_domain" --allow-root
+         if command -v wp &>/dev/null; then
+        local wp_php="php"
+        for bin in php8.4 php8.3 php8.2 php8.1 php8.0 php7.4 php; do
+            if command -v $bin &>/dev/null && $bin -m 2>/dev/null | grep -qi mysqli; then
+                wp_php=$bin
+                break
+            fi
+        done
+        local wp_cmd="$wp_php $(which wp)"
         
+        $wp_cmd search-replace "http://$source_domain" "http://$target_domain" --allow-root
+        $wp_cmd search-replace "https://$source_domain" "https://$target_domain" --allow-root
+        $wp_cmd search-replace "$source_domain" "$target_domain" --allow-root
+    fi    
         log_info "Đã thay thế URL xong."
     fi
     
