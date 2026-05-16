@@ -18,6 +18,7 @@ security_menu() {
         echo -e "8.  🛡️  8G Firewall (WAF nâng cao - tích hợp 7G)"
         echo -e "9.  🌍 Chặn IP theo Quốc gia (GeoIP Block)"
         echo -e "10. 🔒 Bảo mật PHP (Disable Dangerous Functions)"
+        echo -e "11. 🛡️  Kiểm tra & Vá lỗi Bảo mật (Nginx Rift - CVE-2026-42945)"
         echo -e "0.  Quay lại Menu chính"
         echo -e "${BLUE}=================================================${NC}"
         read -p "Nhập lựa chọn [0-10]: " choice
@@ -33,6 +34,7 @@ security_menu() {
             8) setup_8g_firewall ;;
             9) setup_geoip_block ;;
             10) secure_php ;;
+            11) security_patch_system ;;
             0) return ;;
             *) echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause ;;
         esac
@@ -520,5 +522,115 @@ GEOF
 
     nginx -t && systemctl reload nginx && log_info "\u2705 GeoIP Block \u0111\u00e3 \u0111\u01b0\u1ee3c c\u1ea5u h\u00ecnh!"
     echo -e "${YELLOW}Qu\u1ed1c gia b\u1ecb block: ${country_list}${NC}"
+    pause
+}
+
+security_patch_system() {
+    clear
+    echo -e "${BLUE}=================================================${NC}"
+    echo -e "${RED}    🛡️  KIỂM TRA & VÁ LỖI BẢO MẬT HỆ THỐNG${NC}"
+    echo -e "${BLUE}=================================================${NC}"
+    echo -e "Thông tin các lỗ hổng mới (Cập nhật May 2026):"
+    echo -e "${YELLOW}1. CVE-2026-42945 (Nginx Rift)${NC}"
+    echo -e "   - Loại: Heap-based Buffer Overflow (ngx_http_rewrite_module)"
+    echo -e "   - Tác động: Gây crash (DoS) hoặc RCE."
+    echo -e "${YELLOW}2. CVE-2026-31431 (Copy Fail) & CVE-2026-43284/43500 (Dirty Frag)${NC}"
+    echo -e "   - Loại: Local Privilege Escalation (LPE) trên Linux Kernel"
+    echo -e "   - Tác động: Cho phép user thường leo thang đặc quyền lên root."
+    echo -e "${YELLOW}3. Lỗ hổng PHP (FPM, MBString, SOAP)${NC}"
+    echo -e "   - Loại: XSS và các lỗi bộ nhớ"
+    echo -e "${BLUE}=================================================${NC}"
+    
+    echo -e "1. Kiểm tra phiên bản hiện tại..."
+    local ng_ver
+    ng_ver=$(nginx -v 2>&1 | grep -oP 'nginx/\K[0-9.]+')
+    echo -e "  - Nginx: v${ng_ver:-Unknown}"
+    
+    local kernel_ver
+    kernel_ver=$(uname -r)
+    echo -e "  - Kernel: $kernel_ver"
+    
+    if command -v php >/dev/null; then
+        local php_ver
+        php_ver=$(php -v | head -n1 | grep -oP 'PHP \K[0-9.]+')
+        echo -e "  - PHP: v${php_ver:-Unknown}"
+    fi
+    
+    if [[ -f /etc/os-release ]]; then
+        source /etc/os-release
+        echo -e "  - Hệ điều hành: $PRETTY_NAME"
+    fi
+
+    echo ""
+    echo -e "2. Đang quét cấu hình Nginx tìm các rule có nguy cơ..."
+    # Pattern: rewrite with capture groups + ? in replacement followed by rewrite/set/if
+    local risky_found=0
+    if [[ -d /etc/nginx/sites-enabled ]]; then
+        for conf in /etc/nginx/sites-enabled/*; do
+            if grep -q "rewrite .*\$.*?.*" "$conf"; then
+                echo -e "  ${YELLOW}⚠ Phát hiện cấu hình rewrite có dấu hỏi (?) và biến capture tại: $(basename "$conf")${NC}"
+                risky_found=$((risky_found + 1))
+            fi
+        done
+    fi
+    
+    if [[ $risky_found -eq 0 ]]; then
+        echo -e "  ${GREEN}✓ Không tìm thấy cấu hình Nginx rewrite có nguy cơ lộ liễu.${NC}"
+    else
+        echo -e "  ${YELLOW}⚠ Đã tìm thấy $risky_found vị trí có thể bị kích hoạt lỗ hổng. Cần cập nhật Nginx ngay.${NC}"
+    fi
+
+    echo ""
+    read -p "Bạn có muốn tiến hành cập nhật bản vá bảo mật (Nginx, Kernel, PHP) ngay bây giờ? [Y/n]: " confirm
+    [[ "${confirm,,}" == "n" ]] && return
+
+    log_info "Đang cập nhật danh sách gói..."
+    if [[ "$OS_FAMILY" == "debian" || "$OS_FAMILY" == "ubuntu" ]]; then
+        apt-get update
+        
+        log_info "Đang nâng cấp Nginx..."
+        apt-get install --only-upgrade -y nginx nginx-common nginx-full nginx-core 2>/dev/null
+        
+        log_info "Đang nâng cấp PHP..."
+        apt-get install --only-upgrade -y php* 2>/dev/null
+        
+        log_info "Đang nâng cấp Linux Kernel & các gói hệ thống khác..."
+        # Use full-upgrade to ensure kernel updates dependencies are met
+        DEBIAN_FRONTEND=noninteractive apt-get full-upgrade -y 2>/dev/null
+        
+    else
+        log_info "Đang cập nhật Nginx, PHP và Kernel qua dnf/yum..."
+        dnf upgrade -y nginx php* kernel* 2>/dev/null
+        dnf upgrade -y 2>/dev/null
+    fi
+
+    local new_ng_ver new_kernel_ver new_php_ver
+    new_ng_ver=$(nginx -v 2>&1 | grep -oP 'nginx/\K[0-9.]+')
+    new_kernel_ver=$(uname -r)
+    if command -v php >/dev/null; then
+        new_php_ver=$(php -v | head -n1 | grep -oP 'PHP \K[0-9.]+')
+    fi
+    
+    echo -e "${BLUE}=================================================${NC}"
+    echo -e "${GREEN}✅ Quá trình cập nhật hoàn tất!${NC}"
+    if [[ "$ng_ver" != "$new_ng_ver" ]]; then
+        echo -e "  - Nginx đã cập nhật: $ng_ver -> $new_ng_ver"
+        systemctl restart nginx 2>/dev/null
+    fi
+    
+    if [[ -n "$new_php_ver" && "$php_ver" != "$new_php_ver" ]]; then
+        echo -e "  - PHP đã cập nhật: $php_ver -> $new_php_ver"
+        systemctl restart php*-fpm 2>/dev/null
+    fi
+    
+    echo -e "  - Kernel hiện tại: $new_kernel_ver"
+    echo -e "${YELLOW}Lưu ý: Nếu Kernel vừa được cập nhật, bạn CẦN KHỞI ĐỘNG LẠI (Reboot) VPS để Kernel mới có hiệu lực và chống lại lỗi LPE.${NC}"
+    echo -e "${BLUE}=================================================${NC}"
+    
+    read -p "Bạn có muốn khởi động lại (Reboot) VPS ngay bây giờ không? [y/N]: " do_reboot
+    if [[ "${do_reboot,,}" == "y" ]]; then
+        echo -e "${RED}Đang khởi động lại hệ thống... Vui lòng kết nối lại sau ít phút.${NC}"
+        reboot
+    fi
     pause
 }
