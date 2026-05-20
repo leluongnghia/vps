@@ -247,10 +247,11 @@ wp_nginx_config_menu() {
     select_wp_site || return
     
     echo -e "\n${YELLOW}Nginx SEO Configs - $SELECTED_DOMAIN${NC}"
-    echo "1. Apply Yoast SEO Nginx Rules"
-    echo "2. Apply Rank Math SEO Nginx Rules"
+    echo "1. Apply Yoast SEO Nginx Rules (Standard + Premium)"
+    echo "2. Apply Rank Math SEO Nginx Rules (with XSL style support)"
     echo "3. Apply WebP Express Rules"
     echo "4. Block User Enumeration API (Security)"
+    echo "5. Apply Advanced Security Hardening (Block Backups, sensitive files, PHP in Cache)"
     echo "0. Back"
     read -p "Select: " c
     
@@ -268,14 +269,20 @@ wp_nginx_config_menu() {
     case $c in
         1) # Yoast
             snippet="$snippet_dir/yoast-$SELECTED_DOMAIN.conf"
-            log_info "Tạo cấu hình Yoast SEO..."
+            log_info "Tạo cấu hình Yoast SEO (Premium)..."
             cat > "$snippet" <<EOF
-# Yoast SEO Sitemaps
+# Yoast SEO Sitemaps (including Premium extension rewrites)
 location ~ ([^/]*)sitemap(.*).x(m|s)l$ {
   rewrite ^/sitemap.xml$ /sitemap_index.xml permanent;
   rewrite ^/([a-z]+)?-?sitemap.xsl$ /index.php?yoast-sitemap-xsl=\$1 last;
   rewrite ^/sitemap_index.xml$ /index.php?sitemap=1 last;
   rewrite ^/([^/]+?)-sitemap([0-9]+)?.xml$ /index.php?sitemap=\$1&sitemap_n=\$2 last;
+  
+  # Premium Extensions
+  rewrite ^/news-sitemap.xml$ /index.php?sitemap=wpseo_news last;
+  rewrite ^/locations.kml$ /index.php?sitemap=wpseo_local_kml last;
+  rewrite ^/geo-sitemap.xml$ /index.php?sitemap=wpseo_local last;
+  rewrite ^/video-sitemap.xsl$ /index.php?yoast-sitemap-xsl=video last;
 }
 EOF
             # Auto include
@@ -291,9 +298,10 @@ EOF
             snippet="$snippet_dir/rankmath-$SELECTED_DOMAIN.conf"
             log_info "Tạo cấu hình Rank Math..."
             cat > "$snippet" <<EOF
-# Rank Math Sitemaps
+# Rank Math Sitemaps (including XSL stylesheets support)
 rewrite ^/sitemap_index.xml$ /index.php?sitemap=1 last;
 rewrite ^/([^/]+?)-sitemap([0-9]+)?.xml$ /index.php?sitemap=\$1&sitemap_n=\$2 last;
+rewrite ^/([a-z]+)?-sitemap\.xsl$ /index.php?xsl=\$1 last;
 EOF
             if ! grep -q "rankmath-$SELECTED_DOMAIN.conf" "$conf"; then
                 sed -i "/server_name/a \    include $snippet;" "$conf"
@@ -342,6 +350,40 @@ EOF
             fi
             nginx -t && systemctl reload nginx
             log_info "Đã chặn User Enumeration."
+            ;;
+
+        5) # Security Hardening
+            snippet="$snippet_dir/hardening-$SELECTED_DOMAIN.conf"
+            log_info "Tạo cấu hình Security Hardening..."
+            cat > "$snippet" <<EOF
+# Comprehensive Security Hardening (Inspired by HOSTVN & VPS Manager)
+location /sql { access_log off; log_not_found off; return 444; }
+location /wp-content/updraft { access_log off; log_not_found off; return 444; }
+location /wp-content/backups-dup-pro { access_log off; log_not_found off; return 444; }
+location /wp-snapshots { access_log off; log_not_found off; return 444; }
+location /wp-content/uploads/sucuri { access_log off; log_not_found off; return 444; }
+location /wp-content/uploads/nginx-helper { access_log off; log_not_found off; return 444; }
+location = /wp-config.php { access_log off; log_not_found off; return 444; }
+location = /wp-config-sample.php { access_log off; log_not_found off; return 444; }
+location = /readme.html { access_log off; log_not_found off; return 444; }
+location = /license.txt { access_log off; log_not_found off; return 444; }
+
+location /wp-content/cache {
+    location ~* \.(?:css(\.map)?|js(\.map)?|.html)$ {
+        add_header Access-Control-Allow-Origin *;
+        access_log off;
+        log_not_found off;
+        expires 365d;
+    }
+    location ~ \.php$ { access_log off; log_not_found off; return 444; }
+}
+EOF
+            if ! grep -q "hardening-$SELECTED_DOMAIN.conf" "$conf"; then
+                sed -i "/server_name/a \    include $snippet;" "$conf"
+                log_info "Đã thêm include vào $conf"
+            fi
+            nginx -t && systemctl reload nginx
+            log_info "Đã áp dụng Security Hardening Rules thành công."
             ;;
     esac
     pause

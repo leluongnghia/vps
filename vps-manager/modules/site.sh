@@ -58,6 +58,47 @@ add_new_site() {
     if ! validate_domain "$domain"; then
         pause; return
     fi
+
+    # Rollback mechanism on failure (inspired by HOSTVN Script)
+    local NEED_ROLLBACK="true"
+    _rollback_add_new_site() {
+        local exit_code=$?
+        if [[ "$NEED_ROLLBACK" != "true" || "$exit_code" -eq 0 ]]; then
+            return
+        fi
+
+        echo -e "\n${YELLOW}⚠️ Đang tự động dọn dẹp tài nguyên bị lỗi (Rollback)...${NC}"
+        
+        # 1. Clean root directory
+        if [[ -d "/var/www/$domain" ]]; then
+            rm -rf "/var/www/$domain"
+        fi
+        
+        # 2. Clean Nginx configurations
+        rm -f "/etc/nginx/sites-available/$domain"
+        rm -f "/etc/nginx/sites-enabled/$domain"
+        systemctl reload nginx 2>/dev/null
+
+        # 3. Clean MySQL Database & User if created
+        if [[ -n "$WP_DB_NAME" ]] && command -v mysql &> /dev/null; then
+            mysql -e "DROP DATABASE IF EXISTS \`${WP_DB_NAME}\`;" 2>/dev/null
+            if [[ -n "$WP_DB_USER" ]]; then
+                mysql -e "DROP USER IF EXISTS '${WP_DB_USER}'@'localhost';" 2>/dev/null
+            fi
+            mysql -e "FLUSH PRIVILEGES;" 2>/dev/null
+        fi
+
+        # 4. Clean local persistent sites data
+        local data_file="$HOME/.vps-manager/sites_data.conf"
+        if [[ -f "$data_file" ]]; then
+            sed -i "/^$domain|/d" "$data_file" 2>/dev/null
+            sed -i "/^docker:$domain|/d" "$data_file" 2>/dev/null
+        fi
+
+        echo -e "${GREEN}✅ Dọn dẹp hoàn tất.${NC}"
+        trap - EXIT
+    }
+    trap _rollback_add_new_site EXIT
     
     # Check disk space (require 2GB free for WordPress)
     if ! check_disk_space "/var/www" 2048; then
@@ -258,6 +299,8 @@ EOF
     fi
 
     log_info "Hoàn tất thêm website $domain."
+    NEED_ROLLBACK="false"
+    trap - EXIT
     pause
 }
 
