@@ -963,6 +963,16 @@ optimize_opcache() {
         mkdir -p "$conf_dir"
     fi
     local opcache_ini="$conf_dir/10-opcache.ini"
+
+    local jit_setting="1255"
+    local jit_buffer="128M"
+    
+    # Phát hiện PHP >= 8.4 để cấu hình JIT an toàn (Tránh bug cạn bộ nhớ do lệch bytecode khi JIT + validate_timestamps=0)
+    if [[ "$php_ver" == "8.4" || "$php_ver" == 8.[5-9]* || "$php_ver" == [9-9]* ]]; then
+        log_warn "Phát hiện PHP $php_ver (>= 8.4). Tự động tắt JIT để tránh lỗi cạn bộ nhớ (Allowed memory size exhausted) khi chạy Web!"
+        jit_setting="off"
+        jit_buffer="0"
+    fi
     
     # Aggressive OPcache settings for WordPress
     cat > "$opcache_ini" <<EOF
@@ -975,20 +985,20 @@ opcache.interned_strings_buffer=16
 opcache.max_accelerated_files=10000
 opcache.max_wasted_percentage=5
 opcache.use_cwd=1
-opcache.validate_timestamps=0
-opcache.revalidate_freq=0
+opcache.validate_timestamps=1
+opcache.revalidate_freq=2
 opcache.save_comments=1
 opcache.fast_shutdown=1
 opcache.enable_file_override=1
 opcache.optimization_level=0x7FFEBFFF
-opcache.jit=1255
-opcache.jit_buffer_size=128M
+opcache.jit=${jit_setting}
+opcache.jit_buffer_size=${jit_buffer}
 EOF
     
     systemctl restart php${php_ver}-fpm
     
-    log_info "OPcache optimized with JIT compilation"
-    echo -e "${YELLOW}Note: Set opcache.validate_timestamps=1 in development${NC}"
+    log_info "OPcache optimized with JIT status: ${jit_setting}"
+    echo -e "${YELLOW}Note: Set opcache.validate_timestamps=1 (Currently enabled with 2s interval to prevent bytecode drift)${NC}"
     
     if [[ -z "$auto_mode" ]]; then pause; fi
 }
