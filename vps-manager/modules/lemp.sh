@@ -369,11 +369,16 @@ _install_object_cache_nginx() {
     done
     [[ -n "$actual_service" ]] && service_name="$actual_service"
 
-    # ── Tạo thư mục socket ──
+    # ── Tạo thư mục socket với quyền www-data group ─────
+    # www-data cần đọc/ghi socket → socket_dir phải chown về group www-data
     mkdir -p "$socket_dir"
-    chown "${cache_type}:${cache_type}" "$socket_dir" 2>/dev/null || \
-        chown "redis:redis" "$socket_dir" 2>/dev/null || true
-    chmod 755 "$socket_dir"
+    # Xác định user owner của cache service
+    local cache_user
+    cache_user=$(id -nu "${cache_type}" 2>/dev/null || id -nu "redis" 2>/dev/null || echo "${cache_type}")
+    # Dir: cache_user:www-data → cache service ghi, www-data (PHP-FPM) đọc
+    chown "${cache_user}:www-data" "$socket_dir" 2>/dev/null || \
+        chown "${cache_type}:www-data" "$socket_dir" 2>/dev/null || true
+    chmod 750 "$socket_dir"
 
     # ── Cấu hình Unix Socket (tắt TCP, chỉ Unix) ──
     if [[ -f "$conf_file" ]]; then
@@ -401,7 +406,7 @@ _install_object_cache_nginx() {
 # ── vps-manager: Unix Socket config (Premium-grade) ──
 port 0
 unixsocket ${socket_path}
-unixsocketperm 777
+unixsocketperm 660
 maxmemory ${maxmem_mb}mb
 maxmemory-policy allkeys-lfu
 save ""
@@ -431,24 +436,43 @@ RuntimeDirectoryMode=0755
 SYSOVERRIDE
     done
 
-    systemctl daemon-reload
-    systemctl enable "${service_name}" 2>/dev/null || true
-    systemctl restart "${service_name}" 2>/dev/null || true
-    
-    # Đợi 2s để socket kịp khởi tạo trước khi WordPress setup gọi tới
-    sleep 2
-
-    sleep 1
-
-    # ── Thêm www-data vào group của cache service ──
-    # Đây là bước quan trọng nhất khi dùng Unix Socket với PHP-FPM
-    local cache_group="${service_name}"
+    # ── Thêm www-data vào group của cache service TRƯỚC khi start ──
+    # Phải làm TRƯỚC restart để process PHP-FPM mới kế thừa group membership
+    local cache_group
+    cache_group=$(getent group "${cache_type}" 2>/dev/null | cut -d: -f1 || \
+                  getent group "redis"         2>/dev/null | cut -d: -f1 || \
+                  echo "${cache_type}")
     if getent group "$cache_group" &>/dev/null; then
         usermod -aG "$cache_group" www-data 2>/dev/null || true
         log_info "✓ Đã thêm www-data vào group ${cache_group}"
     fi
-    # Đảm bảo socket có thể truy cập
-    chmod 770 "$socket_path" 2>/dev/null || true
+
+    systemctl daemon-reload
+    systemctl enable "${service_name}" 2>/dev/null || true
+    systemctl restart "${service_name}" 2>/dev/null || true
+
+    # Đợi socket khởi tạo (tối đa 5s)
+    local waited=0
+    while [[ ! -S "$socket_path" ]] && [[ $waited -lt 5 ]]; do
+        sleep 1; waited=$((waited+1))
+    done
+
+    # ── Fix quyền socket sau khi service tạo ra ──────────
+    # socket owner: cache_user:www-data, mode 660 → PHP-FPM (www-data) đọc được
+    if [[ -S "$socket_path" ]]; then
+        chown "${cache_user:-${cache_type}}:www-data" "$socket_path" 2>/dev/null || true
+        chmod 660 "$socket_path" 2>/dev/null || true
+        log_info "✓ Socket permissions: ${cache_user}:www-data 660"
+    fi
+
+    # ── Restart PHP-FPM SAU khi thay đổi group ───────────
+    # Process PHP-FPM cũ không có group www-data mới → PHẢI restart để kế thừa
+    for phpver in 8.4 8.3 8.2 8.1; do
+        if systemctl is-active --quiet "php${phpver}-fpm" 2>/dev/null; then
+            systemctl restart "php${phpver}-fpm" 2>/dev/null || true
+            log_info "✓ Restarted php${phpver}-fpm (kế thừa group ${cache_group})"
+        fi
+    done
 
     # ── Cài PHP Redis extension ──
     log_info "Cài đặt PHP Redis extension..."

@@ -587,9 +587,18 @@ install_wordpress() {
     fi
 
     if [[ -n "$socket_path" ]]; then
+        # Đếm số site hiện tại để dùng DB index riêng (tránh cache collision)
+        local db_index=0
+        local data_file="$HOME/.vps-manager/sites_data.conf"
+        if [[ -f "$data_file" ]]; then
+            db_index=$(grep -c '|' "$data_file" 2>/dev/null || echo 0)
+        fi
+
         sed -i "/table_prefix/i define( 'WP_REDIS_SCHEME', 'unix' );" wp-config.php
         sed -i "/table_prefix/i define( 'WP_REDIS_PATH', '$socket_path' );" wp-config.php
-        sed -i "/table_prefix/i define( 'WP_CACHE_KEY_SALT', '$domain:' );" wp-config.php
+        sed -i "/table_prefix/i define( 'WP_REDIS_DATABASE', ${db_index} );" wp-config.php
+        sed -i "/table_prefix/i define( 'WP_CACHE_KEY_SALT', '${domain}:' );" wp-config.php
+        log_info "  ✓ Object Cache: Unix Socket $socket_path (DB=${db_index})"
     fi
 
     # Auto-configure security, performance, PHP-FPM pool
@@ -620,6 +629,28 @@ _auto_configure_wp_site() {
         local pool_file="/etc/php/$php_ver/fpm/pool.d/${domain}.conf"
         local pool_sock="/run/php/php${php_ver}-fpm-${domain}.sock"
         if [[ ! -f "$pool_file" ]]; then
+
+            # Xác định socket dir của cache (cần thêm vào open_basedir)
+            local cache_sock_dir=""
+            if [[ -f /etc/vps-manager/cache.conf ]]; then
+                local sock_path
+                sock_path=$(grep '^OBJECT_CACHE_SOCKET=' /etc/vps-manager/cache.conf 2>/dev/null | cut -d= -f2-)
+                [[ -n "$sock_path" ]] && cache_sock_dir=$(dirname "$sock_path")
+            fi
+            # Fallback auto-detect
+            if [[ -z "$cache_sock_dir" ]]; then
+                if   [[ -d /var/run/valkey ]]; then cache_sock_dir="/var/run/valkey"
+                elif [[ -d /run/valkey    ]]; then cache_sock_dir="/run/valkey"
+                elif [[ -d /var/run/redis ]]; then cache_sock_dir="/var/run/redis"
+                elif [[ -d /run/redis     ]]; then cache_sock_dir="/run/redis"
+                elif [[ -d /var/run/keydb ]]; then cache_sock_dir="/var/run/keydb"
+                fi
+            fi
+
+            # open_basedir: domain root + /tmp + socket dir (nếu có)
+            local open_basedir="/var/www/${domain}/:/tmp/"
+            [[ -n "$cache_sock_dir" ]] && open_basedir+="${cache_sock_dir}/"
+
             cat > "$pool_file" << POOLEOF
 ; VPS Manager - PHP-FPM pool cho $domain
 [$domain]
@@ -642,10 +673,11 @@ php_admin_value[post_max_size] = 128M
 php_admin_value[memory_limit] = 256M
 php_admin_value[max_execution_time] = 300
 php_admin_value[error_log] = /var/log/nginx/${domain}.php_error.log
-php_admin_value[open_basedir] = /var/www/$domain/:/tmp/
+php_admin_value[open_basedir] = ${open_basedir}
 POOLEOF
             systemctl restart "php${php_ver}-fpm" 2>/dev/null || true
             log_info "  ✓ PHP-FPM pool riêng: $pool_sock"
+            log_info "  ✓ open_basedir: ${open_basedir}"
 
             # Update Nginx vhost để dùng pool socket riêng (nếu vhost dùng socket chung)
             if [[ -f "$conf" ]] && grep -q "fastcgi_pass" "$conf"; then
