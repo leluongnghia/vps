@@ -1,21 +1,12 @@
 #!/bin/bash
 
-# core/menu.sh - Main Menu (Dynamic — Nginx or OpenLiteSpeed)
+# core/menu.sh - Main Menu (Standardized on Nginx)
 
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 ROOT_DIR="$(dirname "$DIR")"
 
 # Import utils
 source "$ROOT_DIR/core/utils.sh"
-
-# Import Dashboard
-if [[ -f "$ROOT_DIR/core/dashboard.sh" ]]; then
-    source "$ROOT_DIR/core/dashboard.sh"
-fi
-
-# ==============================================================================
-# Stack Detection (Removed OLS - Standardized on Nginx)
-# ==============================================================================
 
 # ==============================================================================
 # Shared Case Handler (items giống nhau ở cả 2 menu)
@@ -118,11 +109,6 @@ main_menu() {
     [[ -z "$vps_ip" ]] && vps_ip="Unknown"
 
     while true; do
-        # Hiển thị Real-time Dashboard trước menu
-        if type run_dashboard &>/dev/null; then
-            run_dashboard
-        fi
-
         _nginx_main_menu "$script_version" "$vps_ip"
     done
 }
