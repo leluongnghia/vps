@@ -144,26 +144,10 @@ update_self() {
 auto_install_stack() {
     clear
     echo -e "${YELLOW}=================================================${NC}"
-    echo -e "${GREEN}   AUTO INSTALL: Chọn Cấu Trúc Máy Chủ Web${NC}"
-    echo -e "${YELLOW}=================================================${NC}"
-    echo -e "Bạn muốn xây dựng máy chủ VPS này theo trường phái nào?"
-    echo -e "1. 🌐 Nginx (LEMP Stack truyền thống - ổn định, chịu tải cao)"
-    echo -e "2. ⚡ OpenLiteSpeed (LSCache + Valkey - Tốc độ ánh sáng cho WordPress) ${YELLOW}[HOT]${NC}"
-    echo -e ""
-    read -p "Chọn [1-2, mặc định 1]: " stack_choice
-
-    if [[ "$stack_choice" == "2" ]]; then
-        local web_server="OpenLiteSpeed"
-    else
-        local web_server="Nginx"
-    fi
-
-    clear
-    echo -e "${YELLOW}=================================================${NC}"
-    echo -e "${GREEN}   TIẾN TRÌNH CÀI ĐẶT: ${web_server} + MariaDB + PHP + Valkey${NC}"
+    echo -e "${GREEN}   TIẾN TRÌNH CÀI ĐẶT: Nginx + MariaDB + PHP + Valkey${NC}"
     echo -e "${YELLOW}=================================================${NC}"
     echo -e "- RAM ảo: ZRAM (Tự động nén thông minh)"
-    echo -e "- Web Server: ${web_server}"
+    echo -e "- Web Server: Nginx (LEMP Stack ổn định, chịu tải cao)"
     echo -e "- Database: MariaDB"
     echo -e "- Core: PHP 8.4"
     echo -e "- Caching: Valkey (Thay thế hoàn toàn Redis)"
@@ -176,20 +160,14 @@ auto_install_stack() {
         source modules/zram.sh
         zram_install "auto"
 
-        echo -e "${BLUE}[2/7] Đang cài đặt ${web_server} & MariaDB...${NC}"
+        echo -e "${BLUE}[2/7] Đang cài đặt Nginx & MariaDB...${NC}"
         source modules/lemp.sh
         install_mariadb
 
-        if [[ "$web_server" == "OpenLiteSpeed" ]]; then
-            source modules/ols.sh
-            # Cài OLS và tự động nhét lựa chọn 4 (LSPHP 8.4)
-            echo "4" | install_ols_stack
-        else
-            source modules/nginx.sh
-            install_nginx
-            echo -e "${BLUE}[3/7] Đang cài đặt PHP 8.4...${NC}"
-            install_php "8.4"
-        fi
+        source modules/nginx.sh
+        install_nginx
+        echo -e "${BLUE}[3/7] Đang cài đặt PHP 8.4...${NC}"
+        install_php "8.4"
 
         if [[ -f "modules/phpmyadmin.sh" ]]; then
              echo -e "${BLUE}[4/7] Đang cài đặt phpMyAdmin...${NC}"

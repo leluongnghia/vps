@@ -222,46 +222,6 @@ EOF
 }
 
 # ==============================================================================
-# Tính toán thông số OLS theo RAM (Auto-scaling)
-# ==============================================================================
-
-calc_ols_tuning_params() {
-    local total_ram_mb
-    total_ram_mb=$(free -m | awk '/^Mem:/{print $2}')
-    local cpu_cores
-    cpu_cores=$(grep -c ^processor /proc/cpuinfo 2>/dev/null || echo 2)
-
-    # Buffer size cho inMemBufSize (OLS in-RAM buffer)
-    local buffer_size mmap_cache_size ka_timeout ka_reqs max_client
-
-    if   [[ "$total_ram_mb" -le 1200 ]]; then
-        buffer_size="64M";  mmap_cache_size="20M";  ka_timeout=15;  ka_reqs=1000
-    elif [[ "$total_ram_mb" -le 2500 ]]; then
-        buffer_size="128M"; mmap_cache_size="40M";  ka_timeout=30;  ka_reqs=3000
-    elif [[ "$total_ram_mb" -le 4500 ]]; then
-        buffer_size="192M"; mmap_cache_size="80M";  ka_timeout=45;  ka_reqs=5000
-    elif [[ "$total_ram_mb" -le 8500 ]]; then
-        buffer_size="256M"; mmap_cache_size="80M";  ka_timeout=45;  ka_reqs=8000
-    else
-        buffer_size="384M"; mmap_cache_size="80M";  ka_timeout=60;  ka_reqs=10000
-    fi
-
-    max_client=$(( 1024 * cpu_cores * 2 ))
-    local max_client_max=$(( 1024 * cpu_cores * 3 ))
-    local lsphp_children=$(( cpu_cores * 2 ))
-
-    # Export để dùng trong _configure_ols_base_advanced
-    export OLS_BUFFER_SIZE="$buffer_size"
-    export OLS_MMAP_CACHE="$mmap_cache_size"
-    export OLS_KA_TIMEOUT="$ka_timeout"
-    export OLS_KA_REQS="$ka_reqs"
-    export OLS_MAX_CONN="$max_client_max"
-    export OLS_LSPHP_CHILDREN="$lsphp_children"
-    export OLS_CPU_CORES="$cpu_cores"
-    export OLS_RAM_MB="$total_ram_mb"
-}
-
-# ==============================================================================
 # Tính toán thông số MariaDB theo RAM
 # ==============================================================================
 

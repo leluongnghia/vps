@@ -1,13 +1,12 @@
-# VPS Manager Status Report — v1.4.3
+# VPS Manager Status Report — v1.6.0
+
+## ✅ Completed (v1.6.0) - Nginx Standardization & OLS Removal
+1. **Removed OpenLiteSpeed Completely**
+   - Deleted `install-ols.sh`, `modules/ols.sh`, and `modules/switch.sh`
+   - Cleaned up active stack detection across the entire codebase to standardize 100% on Nginx (LEMP)
+   - Simplified Main Menu and Optimization Submenu to show only Nginx options
 
 ## ✅ Completed (v1.4.0)
-1. **OpenLiteSpeed Module** (`modules/ols.sh`)
-   - Install OLS + LSPHP (8.1/8.2/8.3/8.4)
-   - Create/Delete WordPress OLS Virtual Host
-   - LSCache management (enable/disable/purge)
-   - LSPHP version switching per site
-   - WebAdmin panel info display
-
 2. **Security Module** (`modules/security.sh`)
    - 7G WAF Firewall (full ruleset)
    - 8G WAF Firewall (extends 7G)
@@ -20,32 +19,28 @@
    - FastCGI micro-caching, Brotli/Gzip
    - Object Cache: Valkey / Redis / Memcached
 
-4. **Dual Web Server Support**
-   - Nginx and OpenLiteSpeed both supported
-   - `detect_webserver()` guards features per server type
-
 ## ✅ Completed (v1.4.1) — Bugfixes
-5. **Bug Fix: 8G WAF typo** (`modules/security.sh`)
+4. **Bug Fix: 8G WAF typo** (`modules/security.sh`)
    - Fixed `clude /etc/nginx/...` → `include /etc/nginx/...`
-   - Fixed would cause Nginx to fail on reload
+   - Fixed Nginx reload failure issue
 
-6. **Cross-distro: phpMyAdmin** (`modules/phpmyadmin.sh`)
+5. **Cross-distro: phpMyAdmin** (`modules/phpmyadmin.sh`)
    - Replaced hardcoded `apt-get` with OS-aware detection
    - Uses `dnf` + `httpd-tools` on AlmaLinux/RHEL/Rocky
 
-7. **Error Handling: WordPress Install** (`modules/site.sh`)
+6. **Error Handling: WordPress Install** (`modules/site.sh`)
    - Added disk space check before download
    - Added timeout + error checking for `wget` download
    - Added error checking for `tar` extraction
 
 ## ✅ Completed (v1.4.3) — Hotfixes
-8. **Nginx WordPress Object Cache PHP resolver** (`modules/wordpress_performance.sh`)
+7. **Nginx WordPress Object Cache PHP resolver** (`modules/wordpress_performance.sh`)
    - Ensures WP-CLI uses the site PHP-FPM version when available
    - Auto-installs and enables `mysqli`, `pdo_mysql`, and `mysqlnd`
    - Verifies PHP MySQL extensions before installing Redis/Memcached Object Cache plugins
 
 ## 📋 All Modules — Syntax Status
-All 24 .sh files: **✅ PASS** (`bash -n` verified)
+All remaining .sh files: **✅ PASS** (`bash -n` verified)
 
 | Module | Status |
 |--------|--------|
@@ -59,7 +54,6 @@ All 24 .sh files: **✅ PASS** (`bash -n` verified)
 | modules/wordpress_tool.sh | ✅ |
 | modules/wordpress_performance.sh | ✅ |
 | modules/security.sh | ✅ |
-| modules/ols.sh | ✅ |
 | modules/phpmyadmin.sh | ✅ |
 | modules/backup.sh | ✅ |
 | modules/ssl.sh | ✅ |
@@ -78,7 +72,4 @@ All 24 .sh files: **✅ PASS** (`bash -n` verified)
 
 ## 🚀 Next Steps
 - Push to GitHub: `git push origin main`
-  - (Requires GitHub authentication — configure git credentials first)
-- Upload `vps-manager` folder to VPS
-- Run: `chmod +x install.sh && ./install.sh`
-- Command shortcut after install: `vps`
+- Run update on VPS: `vps` (then choose Update VPS Manager to version 1.6.0)
