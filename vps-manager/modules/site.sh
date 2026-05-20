@@ -623,11 +623,34 @@ _auto_configure_wp_site() {
     log_info "🔧 Tự động cấu hình WordPress site: $domain"
 
     # ── 1. Tạo PHP-FPM Pool riêng cho domain ──────────────
-    local php_ver
-    php_ver=$(ls /etc/php/ 2>/dev/null | sort -V | tail -n1)
+    local php_ver pool_file pool_sock
+
+    # Ưu tiên 1: Đọc từ vhost hiện tại → dùng đúng phiên bản Nginx đang gửi request
+    # Ví dụ: fastcgi_pass unix:/run/php/php8.1-fpm.sock → php_ver=8.1
+    if [[ -f "$conf" ]]; then
+        php_ver=$(grep -oP 'php\K[0-9]+\.[0-9]+(?=-fpm\.sock)' "$conf" 2>/dev/null | head -1)
+    fi
+
+    # Ưu tiên 2: Socket PHP-FPM đang chạy thực tế (tránh dùng version không active)
+    if [[ -z "$php_ver" ]]; then
+        local active_sock
+        active_sock=$(find /run/php -name "php*-fpm.sock" -not -name "*-fpm-*" 2>/dev/null | sort -V | tail -1)
+        if [[ -n "$active_sock" ]]; then
+            php_ver=$(basename "$active_sock" | grep -oP 'php\K[0-9]+\.[0-9]+')
+        fi
+    fi
+
+    # Ưu tiên 3 (fallback): Phiên bản cao nhất được cài trong /etc/php/
+    if [[ -z "$php_ver" ]]; then
+        php_ver=$(ls /etc/php/ 2>/dev/null | grep -E '^[0-9]+\.[0-9]+$' | sort -V | tail -n1)
+    fi
+
+    pool_file="/etc/php/${php_ver}/fpm/pool.d/${domain}.conf"
+    pool_sock="/run/php/php${php_ver}-fpm-${domain}.sock"
+
+    log_info "  → PHP version cho pool: ${php_ver}"
+
     if [[ -n "$php_ver" ]] && [[ -d "/etc/php/$php_ver/fpm/pool.d" ]]; then
-        local pool_file="/etc/php/$php_ver/fpm/pool.d/${domain}.conf"
-        local pool_sock="/run/php/php${php_ver}-fpm-${domain}.sock"
         if [[ ! -f "$pool_file" ]]; then
 
             # Xác định socket dir của cache (cần thêm vào open_basedir)
@@ -689,6 +712,8 @@ POOLEOF
                 fi
             fi
         fi
+    else
+        log_warn "  ⚠ Không tìm thấy PHP-FPM. Bỏ qua tạo pool riêng."
     fi
 
     # ── 2. Inject Security Headers + WP Security Locations ─
