@@ -83,16 +83,12 @@ detect_os() {
 detect_os
 
 # Web Server Detection
-# Returns: nginx | openlitespeed | none
+# Returns: nginx | none
 detect_webserver() {
     if systemctl is-active --quiet nginx 2>/dev/null; then
         export WEB_SERVER_TYPE="nginx"
-    elif systemctl is-active --quiet lshttpd 2>/dev/null; then
-        export WEB_SERVER_TYPE="openlitespeed"
     elif command -v nginx &>/dev/null && nginx -v &>/dev/null 2>&1; then
         export WEB_SERVER_TYPE="nginx"
-    elif [[ -f /usr/local/lsws/bin/lswsctrl ]]; then
-        export WEB_SERVER_TYPE="openlitespeed"
     else
         export WEB_SERVER_TYPE="none"
     fi
@@ -125,7 +121,7 @@ pkg_install() {
 
 pkg_update() {
     if [[ "$OS_FAMILY" == "debian" ]]; then
-        # Fix LiteSpeed GPG error if it exists before running apt-get update
+        # Fix stale LiteSpeed GPG key error if left-over repo file exists on this server
         if [[ -f /etc/apt/sources.list.d/lst_debian_repo.list ]]; then
             wget -qO /etc/apt/trusted.gpg.d/lst_debian_repo.gpg http://rpms.litespeedtech.com/debian/lst_debian_repo.gpg 2>/dev/null || true
             wget -qO - http://rpms.litespeedtech.com/debian/lst_repo.gpg 2>/dev/null | gpg --dearmor --yes -o /etc/apt/trusted.gpg.d/litespeed.gpg 2>/dev/null || true

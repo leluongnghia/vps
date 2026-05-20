@@ -52,11 +52,22 @@ list_databases() {
 add_database() {
     read -p "Nhập tên Database mới: " db_name
     read -p "Nhập tên User mới: " db_user
-    read -p "Nhập Mật khẩu: " db_pass
+    read -sp "Nhập Mật khẩu: " db_pass
+    echo ""
 
-    mysql -e "CREATE DATABASE ${db_name};"
+    # Basic input validation
+    if [[ -z "$db_name" || -z "$db_user" || -z "$db_pass" ]]; then
+        echo -e "${RED}Không được để trống các thông tin!${NC}"
+        pause; return
+    fi
+    if [[ ! "$db_name" =~ ^[a-zA-Z0-9_]+$ ]] || [[ ! "$db_user" =~ ^[a-zA-Z0-9_]+$ ]]; then
+        echo -e "${RED}Tên Database và User chỉ được chứa ký tự a-z, A-Z, 0-9, gạch dưới!${NC}"
+        pause; return
+    fi
+
+    mysql -e "CREATE DATABASE \`${db_name}\`;"
     mysql -e "CREATE USER '${db_user}'@'localhost' IDENTIFIED BY '${db_pass}';"
-    mysql -e "GRANT ALL PRIVILEGES ON ${db_name}.* TO '${db_user}'@'localhost';"
+    mysql -e "GRANT ALL PRIVILEGES ON \`${db_name}\`.* TO '${db_user}'@'localhost';"
     mysql -e "FLUSH PRIVILEGES;"
     
     log_info "Đã tạo Database $db_name và User $db_user."
@@ -65,9 +76,13 @@ add_database() {
 
 delete_database() {
     read -p "Nhập tên Database cần xóa: " db_name
+    if [[ -z "$db_name" ]] || [[ ! "$db_name" =~ ^[a-zA-Z0-9_]+$ ]]; then
+        echo -e "${RED}Tên Database không hợp lệ!${NC}"
+        pause; return
+    fi
     read -p "Xác nhận xóa $db_name? (y/n): " confirm
     if [[ "$confirm" == "y" ]]; then
-        mysql -e "DROP DATABASE ${db_name};"
+        mysql -e "DROP DATABASE \`${db_name}\`;"
         log_info "Đã xóa $db_name."
     fi
     pause

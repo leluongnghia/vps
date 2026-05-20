@@ -75,7 +75,8 @@ _monit_print_status() {
 }
 
 _monit_detect_webserver() {
-    if systemctl is-active --quiet lshttpd 2>/dev/null || [[ -f /usr/local/lsws/bin/lswsctrl ]]; then
+    # Since v1.6.0: standardized on Nginx. Detect just in case OLS is still somehow running.
+    if systemctl is-active --quiet lshttpd 2>/dev/null; then
         echo "openlitespeed"
     else
         echo "nginx"

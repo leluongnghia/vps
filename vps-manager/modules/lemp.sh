@@ -1,8 +1,7 @@
 #!/bin/bash
 
 # modules/lemp.sh - LEMP Stack Component Installers
-# Chú ý: Menu cài đặt đầy đủ được quản lý qua nginx.sh (install_nginx_stack_menu)
-#         và ols.sh (install_ols_stack). File này cung cấp các hàm component riêng lẻ.
+# Cung cấp các hàm cài đặt thành phần (Nginx, PHP, MariaDB) dùng trong install.sh và các module khác.
 
 install_nginx() {
     # Xử lý xung đột với OpenLiteSpeed

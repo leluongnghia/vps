@@ -21,7 +21,7 @@ security_menu() {
         echo -e "11. 🛡️  Kiểm tra & Vá lỗi Bảo mật (Nginx Rift - CVE-2026-42945)"
         echo -e "0.  Quay lại Menu chính"
         echo -e "${BLUE}=================================================${NC}"
-        read -p "Nhập lựa chọn [0-10]: " choice
+        read -p "Nhập lựa chọn [0-11]: " choice
 
         case $choice in
             1) setup_firewall ;;
@@ -46,17 +46,22 @@ secure_php() {
     log_info "Đang cấu hình disable_functions cho PHP..."
     
     # List of dangerous functions
-    funcs="exec,passthru,shell_exec,system,proc_open,popen,curl_exec,curl_multi_exec,parse_ini_file,show_source"
+    local funcs="exec,passthru,shell_exec,system,proc_open,popen,curl_exec,curl_multi_exec,parse_ini_file,show_source"
     
-    # Apply to all php.ini
+    # Apply to all php.ini versions
     for ver in 8.1 8.2 8.3 8.4; do
-        ini="/etc/php/$ver/fpm/php.ini"
+        local ini="/etc/php/$ver/fpm/php.ini"
         if [[ -f "$ini" ]]; then
-            # Check if already disabled or append
-            # Simplified regex replace
-            sed -i "s/^disable_functions.*/disable_functions = $funcs/" "$ini"
+            # Handle: uncommented line, commented line, or missing line
+            if grep -q "^disable_functions" "$ini"; then
+                sed -i "s|^disable_functions.*|disable_functions = $funcs|" "$ini"
+            elif grep -q "^;disable_functions" "$ini"; then
+                sed -i "s|^;disable_functions.*|disable_functions = $funcs|" "$ini"
+            else
+                echo "disable_functions = $funcs" >> "$ini"
+            fi
             log_info "Đã update disable_functions cho PHP $ver"
-            systemctl restart php$ver-fpm
+            systemctl restart php$ver-fpm 2>/dev/null || true
         fi
     done
     if [[ -z "$1" ]]; then pause; fi

@@ -228,7 +228,7 @@ main() {
         fi
         
         # Check if installed to skip auto-install prompt
-        if ! command -v nginx &> /dev/null && ! command -v lshttpd &> /dev/null; then
+        if ! command -v nginx &>/dev/null; then
             echo -e "${BLUE}=================================================${NC}"
             echo -e "Đây là lần đầu tiên chạy VPS Manager."
             echo -e "Bạn có muốn chạy Auto-Install toàn bộ hệ thống LEMP không?"
