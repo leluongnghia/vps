@@ -1,7 +1,11 @@
-# VPS Manager Status Report — v1.6.0
+# VPS Manager Status Report — v1.6.1
+
+## ✅ Completed (v1.6.1) - CLI Dashboard Removal
+1. **Removed Real-time CLI Dashboard**
+   - Xóa bỏ hoàn toàn màn hình real-time CLI dashboard (`core/dashboard.sh`) để khi khởi chạy script sẽ vào trực tiếp menu quản lý chính của Nginx.
 
 ## ✅ Completed (v1.6.0) - Nginx Standardization & OLS Removal
-1. **Removed OpenLiteSpeed Completely**
+2. **Removed OpenLiteSpeed Completely**
    - Deleted `install-ols.sh`, `modules/ols.sh`, and `modules/switch.sh`
    - Cleaned up active stack detection across the entire codebase to standardize 100% on Nginx (LEMP)
    - Simplified Main Menu and Optimization Submenu to show only Nginx options
@@ -72,4 +76,4 @@ All remaining .sh files: **✅ PASS** (`bash -n` verified)
 
 ## 🚀 Next Steps
 - Push to GitHub: `git push origin main`
-- Run update on VPS: `vps` (then choose Update VPS Manager to version 1.6.0)
+- Run update on VPS: `vps` (then choose Update VPS Manager to version 1.6.1)

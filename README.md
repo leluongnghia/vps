@@ -1,6 +1,6 @@
 # 🖥️ VPS Manager — Quản lý VPS Tự động (Premium Grade Nginx Stack)
 
-[![Version](https://img.shields.io/badge/Version-1.6.0-brightgreen.svg)](#)
+[![Version](https://img.shields.io/badge/Version-1.6.1-brightgreen.svg)](#)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Shell: Bash](https://img.shields.io/badge/Shell-Bash-blue.svg)](https://www.gnu.org/software/bash/)
 [![OS](https://img.shields.io/badge/OS-Ubuntu%20%7C%20Debian%20%7C%20AlmaLinux-orange.svg)](#)
@@ -70,7 +70,7 @@ bash <(curl -s https://raw.githubusercontent.com/leluongnghia/vps/main/vps-manag
 
 ---
 
-## 🗂️ Cấu trúc dự án v1.6.0
+## 🗂️ Cấu trúc dự án v1.6.1
 
 ```
 vps-manager/
@@ -101,7 +101,7 @@ VPS Manager is a professional, high-performance Bash script to automate and opti
 bash <(curl -s https://raw.githubusercontent.com/leluongnghia/vps/main/vps-manager/install-nginx.sh)
 ```
 
-### Key Features (v1.6.0)
+### Key Features (v1.6.1)
 - **100% Nginx Standardized:** Cleaned up and completely removed OpenLiteSpeed to focus purely on high-performance Nginx.
 - **Kernel & Network Tuning:** Auto-configures TCP BBR, disables THP, sets CPU governor to performance, and boosts file descriptor limits.
 - **2-Layer Cache Architecture:** Integrates L1 Nginx FastCGI micro-cache with L2 Valkey/Redis Object Cache over Unix Socket.
