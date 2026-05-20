@@ -716,22 +716,54 @@ POOLEOF
         nginx -t 2>/dev/null && systemctl reload nginx 2>/dev/null || log_warn "  ⚠ Nginx reload thất bại sau khi thêm snippets"
     fi
 
-    # ── 3. Inject WordPress Salts vào wp-config.php ────────
+    # ── 3. Inject WordPress Salts vào wp-config.php ────
     if [[ -f "$wp_config" ]] && ! grep -q "AUTH_KEY" "$wp_config"; then
         log_info "  Đang tải WordPress Salts từ API..."
         local salts
         salts=$(curl -fsSL --max-time 10 "https://api.wordpress.org/secret-key/1.1/salt/" 2>/dev/null || true)
         if [[ -n "$salts" ]] && echo "$salts" | grep -q "AUTH_KEY"; then
-            # Tạo temp file chứa salts
+            # Ghi salts vào temp file an toàn
             local tmp_salts
             tmp_salts=$(mktemp)
-            echo "$salts" > "$tmp_salts"
-            # Replace placeholder
-            sed -i "/put your unique phrase here/d" "$wp_config" 2>/dev/null || true
-            sed -i "/AUTH_KEY/d; /SECURE_AUTH_KEY/d; /LOGGED_IN_KEY/d; /NONCE_KEY/d; /AUTH_SALT/d; /SECURE_AUTH_SALT/d; /LOGGED_IN_SALT/d; /NONCE_SALT/d" "$wp_config" 2>/dev/null || true
-            sed -i "/table_prefix/i $(cat "$tmp_salts" | sed 's/\//\\\//g')" "$wp_config" 2>/dev/null || true
+            printf '%s' "$salts" > "$tmp_salts"
+
+            # Dùng python3 thay thế sed để tránh vấn đề escape ký tự đặc biệt trong salts
+            python3 - "$wp_config" "$tmp_salts" <<'PYEOF'
+import sys, re
+
+wp_config_path = sys.argv[1]
+salts_path     = sys.argv[2]
+
+with open(wp_config_path, 'r') as f:
+    content = f.read()
+
+with open(salts_path, 'r') as f:
+    salts = f.read().strip()
+
+# Remove existing placeholder or old salt lines
+content = re.sub(r"define\s*\(\s*['\"](?:AUTH|SECURE_AUTH|LOGGED_IN|NONCE)_(?:KEY|SALT)['\"].*?\);\n", "", content)
+content = re.sub(r".*put your unique phrase here.*\n", "", content)
+
+# Insert salts before $table_prefix
+content = re.sub(
+    r"(\$table_prefix\s*=)",
+    salts + "\n\n" + r"\1",
+    content,
+    count=1
+)
+
+with open(wp_config_path, 'w') as f:
+    f.write(content)
+
+print("  OK: WP Salts injected")
+PYEOF
+            local py_exit=$?
             rm -f "$tmp_salts"
-            log_info "  ✓ WordPress Salts đã được tạo tự động"
+            if [[ $py_exit -eq 0 ]]; then
+                log_info "  ✓ WordPress Salts đã được tạo tự động"
+            else
+                log_warn "  ⚠ Inject Salts thất bại (python3 error). Vui lòng điền thủ công tại: https://api.wordpress.org/secret-key/1.1/salt/"
+            fi
         else
             log_warn "  ⚠ Không thể lấy WP Salts từ WordPress.org (kiểm tra kết nối mạng)"
         fi
@@ -849,7 +881,6 @@ delete_site() {
         pause; return
     fi
 
-
     log_info "Đang xóa website $domain..."
 
     # Remove files
@@ -858,18 +889,32 @@ delete_site() {
     # Remove Nginx config
     rm -f "/etc/nginx/sites-available/$domain"
     rm -f "/etc/nginx/sites-enabled/$domain"
-    systemctl reload nginx
+    systemctl reload nginx 2>/dev/null || true
 
-    # Drop DB (Auto detect simple names)
-    # MUST MATCH creation logic: tr -d '.-' | cut -c1-16
-    local db_name=$(echo "$domain" | tr -d '.-' | cut -c1-16)
+    # Remove PHP-FPM pool riêng của site (nếu có)
+    for phpver in 8.4 8.3 8.2 8.1; do
+        local pool_file="/etc/php/${phpver}/fpm/pool.d/${domain}.conf"
+        if [[ -f "$pool_file" ]]; then
+            rm -f "$pool_file"
+            systemctl restart "php${phpver}-fpm" 2>/dev/null || true
+            log_info "  ✓ Đã xóa PHP-FPM pool: $pool_file"
+        fi
+    done
+
+    # Drop DB (tên DB được tạo theo logic: tr -d '.-' | cut -c1-16)
+    local db_name
+    db_name=$(echo "$domain" | tr -d '.-' | cut -c1-16)
     local db_user="${db_name}_u"
     
-    if command -v mysql &> /dev/null; then
-        mysql -e "DROP DATABASE IF EXISTS ${db_name};" 2>/dev/null
-        mysql -e "DROP USER IF EXISTS '${db_user}'@'localhost';" 2>/dev/null
-        mysql -e "FLUSH PRIVILEGES;" 2>/dev/null
+    if command -v mysql &>/dev/null; then
+        mysql -e "DROP DATABASE IF EXISTS \`${db_name}\`;" 2>/dev/null || true
+        mysql -e "DROP USER IF EXISTS '${db_user}'@'localhost';" 2>/dev/null || true
+        mysql -e "FLUSH PRIVILEGES;" 2>/dev/null || true
     fi
+
+    # Xóa khỏi sites_data.conf
+    local data_file="$HOME/.vps-manager/sites_data.conf"
+    [[ -f "$data_file" ]] && sed -i "/^${domain}|/d" "$data_file" 2>/dev/null || true
 
     log_info "Đã xóa hoàn toàn website $domain."
     pause

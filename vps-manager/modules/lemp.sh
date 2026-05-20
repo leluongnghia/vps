@@ -425,14 +425,18 @@ SOCKCONF
         return 1
     fi
 
-    # ── Systemd override: đảm bảo socket dir tồn tại trước khi service start ──
+    # ── Systemd override: fix socket permissions sau mỗi lần start (kể cả reboot) ──
+    # RuntimeDirectory bị systemd reset về default ownership mỗi lần start
+    # → Dùng ExecStartPost để chown lại SAU khi service tạo socket
     for s_name in "${service_candidates[@]}"; do
         local override_dir="/etc/systemd/system/${s_name}.service.d"
         mkdir -p "$override_dir"
-        cat > "${override_dir}/socket-dir.conf" <<SYSOVERRIDE
+        cat > "${override_dir}/vps-socket-perms.conf" <<SYSOVERRIDE
 [Service]
 RuntimeDirectory=${cache_type}
 RuntimeDirectoryMode=0755
+# Fix socket permissions sau khi start để www-data (PHP-FPM) có thể kết nối
+ExecStartPost=/bin/bash -c 'sleep 1; chown ${cache_type}:www-data ${socket_path} 2>/dev/null; chmod 660 ${socket_path} 2>/dev/null; chown ${cache_type}:www-data ${socket_dir} 2>/dev/null; chmod 750 ${socket_dir} 2>/dev/null; true'
 SYSOVERRIDE
     done
 
