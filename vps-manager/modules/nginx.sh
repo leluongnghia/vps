@@ -65,6 +65,10 @@ _nginx_full_install() {
         install_phpmyadmin
     fi
 
+    # Tự động hardened nginx.conf (Performance + Security)
+    log_info "[+] Tối ưu và bảo mật nginx.conf..."
+    _configure_nginx_global
+
     echo ""
     echo -e "${YELLOW}Bạn có muốn cài đặt Memory Cache (Valkey/Redis) không?${NC}"
     echo -e "1. Valkey (Khuyên dùng - thay thế hoàn toàn Redis)"

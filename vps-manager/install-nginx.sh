@@ -182,12 +182,33 @@ if [[ -f "$INSTALL_DIR/modules/monit.sh" ]]; then
     monit_install "auto"
 fi
 
-# ── Step 5: Done ───────────────────────────────────────────────────────────────
+# ── Step 5: Auto-harden nginx.conf (Performance + Security) ───────────────────
+echo -e "${CYAN}[5/5] Tự động tối ưu nginx.conf (Performance + Security)...${NC}"
+if type _configure_nginx_global &>/dev/null; then
+    _configure_nginx_global
+else
+    log_warn "_configure_nginx_global chưa được load. Bỏ qua bước này."
+fi
+
+# ── Done ──────────────────────────────────────────────────────────────────────
 echo ""
 echo -e "${GREEN}"
 echo "╔══════════════════════════════════════════════════════╗"
 echo "║  ✅  LEMP Stack (Nginx) đã cài đặt thành công!      ║"
 echo "╠══════════════════════════════════════════════════════╣"
+echo "║  🌐  Nginx đã được tối ưu & bảo mật tự động:        ║"
+echo "║    ✓ worker_processes auto, worker_connections 4096  ║"
+echo "║    ✓ Gzip toàn cầu bật                              ║"
+echo "║    ✓ server_tokens off (ẩn phiên bản)               ║"
+echo "║    ✓ FastCGI buffer tuning                          ║"
+echo "║    ✓ Security Headers snippet (X-Frame, HSTS...)     ║"
+echo "║    ✓ WordPress Security Locations snippet            ║"
+echo "║  📦  Khi thêm WordPress site sẽ tự động:            ║"
+echo "║    ✓ PHP-FPM pool riêng mỗi domain (open_basedir)   ║"
+echo "║    ✓ Inject Security Headers vào vhost              ║"
+echo "║    ✓ Inject WP Security Locations (chặn xmlrpc...)   ║"
+echo "║    ✓ Fetch WP Salts tự động từ WordPress.org         ║"
+echo "║    ✓ wp-config.php tối ưu (DISALLOW_FILE_EDIT, ...)  ║"
 echo "║  Gõ  vps  để mở Menu quản lý bất kỳ lúc nào        ║"
 echo "╚══════════════════════════════════════════════════════╝"
 echo -e "${NC}"

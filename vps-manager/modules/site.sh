@@ -592,8 +592,135 @@ install_wordpress() {
         sed -i "/table_prefix/i define( 'WP_CACHE_KEY_SALT', '$domain:' );" wp-config.php
     fi
 
+    # Auto-configure security, performance, PHP-FPM pool
+    _auto_configure_wp_site "$domain"
+
     # Fix permissions again
     chown -R www-data:www-data "/var/www/$domain/public_html"
+}
+
+# ==============================================================================
+# Tự động cấu hình toàn diện sau khi tạo/cài WordPress site
+# - PHP-FPM pool riêng cho domain
+# - Inject Security Headers + WP Security snippet vào vhost
+# - Inject 7G WAF nếu snippet tồn tại
+# - Fetch WordPress Salts tự động từ WordPress.org API
+# ==============================================================================
+_auto_configure_wp_site() {
+    local domain="$1"
+    local conf="/etc/nginx/sites-available/$domain"
+    local wp_config="/var/www/$domain/public_html/wp-config.php"
+
+    log_info "🔧 Tự động cấu hình WordPress site: $domain"
+
+    # ── 1. Tạo PHP-FPM Pool riêng cho domain ──────────────
+    local php_ver
+    php_ver=$(ls /etc/php/ 2>/dev/null | sort -V | tail -n1)
+    if [[ -n "$php_ver" ]] && [[ -d "/etc/php/$php_ver/fpm/pool.d" ]]; then
+        local pool_file="/etc/php/$php_ver/fpm/pool.d/${domain}.conf"
+        local pool_sock="/run/php/php${php_ver}-fpm-${domain}.sock"
+        if [[ ! -f "$pool_file" ]]; then
+            cat > "$pool_file" << POOLEOF
+; VPS Manager - PHP-FPM pool cho $domain
+[$domain]
+user = www-data
+group = www-data
+listen = $pool_sock
+listen.owner = www-data
+listen.group = www-data
+listen.mode = 0660
+
+pm = dynamic
+pm.max_children = 10
+pm.start_servers = 2
+pm.min_spare_servers = 1
+pm.max_spare_servers = 3
+pm.max_requests = 500
+
+php_admin_value[upload_max_filesize] = 128M
+php_admin_value[post_max_size] = 128M
+php_admin_value[memory_limit] = 256M
+php_admin_value[max_execution_time] = 300
+php_admin_value[error_log] = /var/log/nginx/${domain}.php_error.log
+php_admin_value[open_basedir] = /var/www/$domain/:/tmp/
+POOLEOF
+            systemctl restart "php${php_ver}-fpm" 2>/dev/null || true
+            log_info "  ✓ PHP-FPM pool riêng: $pool_sock"
+
+            # Update Nginx vhost để dùng pool socket riêng (nếu vhost dùng socket chung)
+            if [[ -f "$conf" ]] && grep -q "fastcgi_pass" "$conf"; then
+                local old_sock
+                old_sock=$(grep -oP "fastcgi_pass\s+\Kunix:.*\.sock" "$conf" | head -1)
+                if [[ -n "$old_sock" ]]; then
+                    sed -i "s|fastcgi_pass ${old_sock};|fastcgi_pass unix:${pool_sock};|g" "$conf"
+                    log_info "  ✓ Đã cập nhật vhost dùng pool socket riêng"
+                fi
+            fi
+        fi
+    fi
+
+    # ── 2. Inject Security Headers + WP Security Locations ─
+    if [[ -f "$conf" ]]; then
+        # Security headers
+        if [[ -f "/etc/nginx/snippets/security-headers.conf" ]] && ! grep -q "security-headers" "$conf"; then
+            sed -i "/server_name/a\\    include /etc/nginx/snippets/security-headers.conf;" "$conf"
+            log_info "  ✓ Đã thêm Security Headers snippet"
+        fi
+
+        # WordPress security locations
+        if [[ -f "/etc/nginx/snippets/wp-security.conf" ]] && ! grep -q "wp-security" "$conf"; then
+            # Insert before closing brace of server block
+            sed -i "$ s|}|}|; /^}$/i\\    include /etc/nginx/snippets/wp-security.conf;" "$conf" 2>/dev/null || \
+            sed -i "/location ~ \\/\\.ht/i\\    include /etc/nginx/snippets/wp-security.conf;" "$conf" 2>/dev/null || true
+            log_info "  ✓ Đã thêm WP Security Locations snippet"
+        fi
+
+        # 7G WAF nếu tồn tại
+        if [[ -f "/etc/nginx/snippets/7g.conf" ]] && ! grep -q "7g.conf\|8g.conf" "$conf"; then
+            sed -i "/server_name/a\\    include /etc/nginx/snippets/7g.conf;" "$conf"
+            log_info "  ✓ Đã thêm 7G WAF snippet"
+        fi
+
+        nginx -t 2>/dev/null && systemctl reload nginx 2>/dev/null || log_warn "  ⚠ Nginx reload thất bại sau khi thêm snippets"
+    fi
+
+    # ── 3. Inject WordPress Salts vào wp-config.php ────────
+    if [[ -f "$wp_config" ]] && ! grep -q "AUTH_KEY" "$wp_config"; then
+        log_info "  Đang tải WordPress Salts từ API..."
+        local salts
+        salts=$(curl -fsSL --max-time 10 "https://api.wordpress.org/secret-key/1.1/salt/" 2>/dev/null || true)
+        if [[ -n "$salts" ]] && echo "$salts" | grep -q "AUTH_KEY"; then
+            # Tạo temp file chứa salts
+            local tmp_salts
+            tmp_salts=$(mktemp)
+            echo "$salts" > "$tmp_salts"
+            # Replace placeholder
+            sed -i "/put your unique phrase here/d" "$wp_config" 2>/dev/null || true
+            sed -i "/AUTH_KEY/d; /SECURE_AUTH_KEY/d; /LOGGED_IN_KEY/d; /NONCE_KEY/d; /AUTH_SALT/d; /SECURE_AUTH_SALT/d; /LOGGED_IN_SALT/d; /NONCE_SALT/d" "$wp_config" 2>/dev/null || true
+            sed -i "/table_prefix/i $(cat "$tmp_salts" | sed 's/\//\\\//g')" "$wp_config" 2>/dev/null || true
+            rm -f "$tmp_salts"
+            log_info "  ✓ WordPress Salts đã được tạo tự động"
+        else
+            log_warn "  ⚠ Không thể lấy WP Salts từ WordPress.org (kiểm tra kết nối mạng)"
+        fi
+    fi
+
+    # ── 4. Thêm các cấu hình WordPress tối ưu vào wp-config ─
+    if [[ -f "$wp_config" ]] && ! grep -q "vps-manager-wp-config" "$wp_config"; then
+        sed -i "/table_prefix/i \\
+/* vps-manager-wp-config */\\
+define('WP_POST_REVISIONS', 5);           // Giới hạn revisions\\
+define('EMPTY_TRASH_DAYS', 7);             // Tự xóa thùng rác 7 ngày\\
+define('AUTOSAVE_INTERVAL', 120);          // Autosave mỗi 2 phút\\
+define('WP_CRON_LOCK_TIMEOUT', 60);        // WP-Cron timeout\\
+define('DISALLOW_FILE_EDIT', true);        // Tắt editor file trong admin (bảo mật)\\
+define('WP_MEMORY_LIMIT', '256M');         // PHP memory cho WP\\
+define('WP_MAX_MEMORY_LIMIT', '512M');     // PHP memory cho admin\\
+" "$wp_config" 2>/dev/null || true
+        log_info "  ✓ Đã thêm cấu hình WordPress tối ưu vào wp-config.php"
+    fi
+
+    log_info "✅ Hoàn tất cấu hình tự động cho $domain"
 }
 
 list_sites() {

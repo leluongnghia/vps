@@ -71,6 +71,122 @@ EOF
         systemctl start nginx
         log_info "Nginx (Mainline) installed successfully."
     fi
+
+    # Auto-harden nginx.conf sau khi cài (idempotent)
+    _configure_nginx_global
+}
+
+# ==============================================================================
+# Tự động cấu hình nginx.conf: Performance + Security (idempotent)
+# ==============================================================================
+_configure_nginx_global() {
+    local nginx_conf="/etc/nginx/nginx.conf"
+    [[ ! -f "$nginx_conf" ]] && return
+
+    log_info "Đang tối ưu hóa nginx.conf (Performance + Security)..."
+
+    # ── worker_processes auto ──────────────────────────────
+    sed -i 's/^worker_processes.*/worker_processes auto;/' "$nginx_conf" 2>/dev/null || true
+
+    # ── Thêm worker_rlimit_nofile & events nếu chưa có ────
+    if ! grep -q "worker_rlimit_nofile" "$nginx_conf"; then
+        sed -i '/^worker_processes/a worker_rlimit_nofile 65535;' "$nginx_conf" 2>/dev/null || true
+    fi
+    if grep -q "events {" "$nginx_conf" && ! grep -q "worker_connections" "$nginx_conf"; then
+        sed -i '/events {/a \    worker_connections 4096;\n    multi_accept on;\n    use epoll;' "$nginx_conf" 2>/dev/null || true
+    fi
+
+    # ── Gzip toàn cầu ─────────────────────────────────────
+    if ! grep -q "vps-manager-gzip" "$nginx_conf"; then
+        local gzip_block
+        gzip_block='
+    # vps-manager-gzip
+    gzip on;
+    gzip_vary on;
+    gzip_proxied any;
+    gzip_comp_level 6;
+    gzip_types text/plain text/css text/xml application/json application/javascript application/rss+xml application/atom+xml image/svg+xml;'
+        python3 -c "
+import re, sys
+content = open('$nginx_conf').read()
+block = '''$gzip_block'''
+# Insert inside http { block, after opening brace
+content = re.sub(r'(http\s*\{)', r'\1\n' + block, content, count=1)
+open('$nginx_conf', 'w').write(content)
+" 2>/dev/null || sed -i "/http {/a \\$gzip_block" "$nginx_conf" 2>/dev/null || true
+    fi
+
+    # ── Security: hide server version ─────────────────────
+    if ! grep -q "server_tokens" "$nginx_conf"; then
+        sed -i '/http {/a \    server_tokens off;' "$nginx_conf" 2>/dev/null || true
+    fi
+
+    # ── Security: Security Headers snippet ────────────────
+    local sec_conf="/etc/nginx/snippets/security-headers.conf"
+    mkdir -p /etc/nginx/snippets
+    if [[ ! -f "$sec_conf" ]]; then
+        cat > "$sec_conf" << 'SECEOF'
+# VPS Manager - Security Headers (include trong server block)
+add_header X-Content-Type-Options    "nosniff"       always;
+add_header X-Frame-Options           "SAMEORIGIN"    always;
+add_header X-XSS-Protection          "1; mode=block" always;
+add_header Referrer-Policy           "strict-origin-when-cross-origin" always;
+add_header Permissions-Policy        "camera=(), microphone=(), geolocation=()" always;
+add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+SECEOF
+        log_info "✓ Tạo security-headers.conf snippet"
+    fi
+
+    # ── WordPress Security Locations snippet ──────────────
+    local wp_sec_conf="/etc/nginx/snippets/wp-security.conf"
+    if [[ ! -f "$wp_sec_conf" ]]; then
+        cat > "$wp_sec_conf" << 'WPSEC'
+# VPS Manager - WordPress Security Locations
+# Chặn truy cập các file nhạy cảm
+location ~* /xmlrpc\.php$ {
+    deny all;
+    access_log off;
+    log_not_found off;
+}
+location ~* /wp-config\.php { deny all; }
+location ~* /\.git           { deny all; }
+location ~* /\.env           { deny all; }
+location ~* \.(bak|conf|dist|fla|inc|ini|log|sql|swp|tar|gz|zip)$ {
+    deny all;
+    access_log off;
+    log_not_found off;
+}
+# Chặn PHP trong uploads/ (ngăn web shell)
+location ~* /(?:uploads|files)/.*\.php$ { deny all; }
+# Bảo vệ wp-includes
+location ~* /wp-includes/.*\.php$ {
+    deny all;
+    allow /wp-includes/ms-files.php;
+}
+WPSEC
+        log_info "✓ Tạo wp-security.conf snippet"
+    fi
+
+    # ── FastCGI buffer toàn cục ────────────────────────────
+    local fastcgi_conf="/etc/nginx/conf.d/fastcgi-buffer.conf"
+    if [[ ! -f "$fastcgi_conf" ]]; then
+        cat > "$fastcgi_conf" << 'FCEOF'
+# VPS Manager - FastCGI buffer tuning
+fastcgi_buffer_size          128k;
+fastcgi_buffers              4 256k;
+fastcgi_busy_buffers_size    256k;
+fastcgi_temp_file_write_size 256k;
+FCEOF
+        log_info "✓ Tạo fastcgi-buffer.conf"
+    fi
+
+    # ── Kiểm tra & reload ─────────────────────────────────
+    if nginx -t 2>/dev/null; then
+        systemctl reload nginx 2>/dev/null || true
+        log_info "✓ nginx.conf đã được tối ưu và reload thành công"
+    else
+        log_warn "⚠ nginx.conf có lỗi sau khi chỉnh. Kiểm tra: nginx -t"
+    fi
 }
 
 install_mariadb() {
