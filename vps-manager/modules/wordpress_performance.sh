@@ -1180,17 +1180,22 @@ install_valkey() {
     # Configure Unix Socket for Object Cache
     local vconf="/etc/valkey/valkey.conf"
     if [[ ! -f "$vconf" ]]; then vconf="/etc/valkey/valkey-server.conf"; fi
-    if [[ -f "$vconf" ]] && ! grep -q "^unixsocket " "$vconf"; then
-        echo "unixsocket /var/run/valkey/valkey.sock" >> "$vconf"
-        echo "unixsocketperm 777" >> "$vconf"
+    if [[ -f "$vconf" ]]; then
+        if grep -q "^unixsocket " "$vconf"; then
+            sed -i "s|^unixsocket .*|unixsocket /var/run/valkey/valkey.sock|g" "$vconf"
+        else
+            echo "unixsocket /var/run/valkey/valkey.sock" >> "$vconf"
+        fi
+        if grep -q "^unixsocketperm " "$vconf"; then
+            sed -i "s|^unixsocketperm .*|unixsocketperm 777|g" "$vconf"
+        else
+            echo "unixsocketperm 777" >> "$vconf"
+        fi
         # Optional: memory optimization
         if ! grep -q "^maxmemory " "$vconf"; then
             echo "maxmemory 256mb" >> "$vconf"
             echo "maxmemory-policy allkeys-lru" >> "$vconf"
         fi
-    else
-        # Nếu đã có, ghi đè quyền 777 để chắc chắn Nginx (www-data) và OLS (nobody) đều đọc được
-        sed -i 's/^unixsocketperm.*/unixsocketperm 777/g' "$vconf" 2>/dev/null
     fi
     # Phân quyền user cho an toàn dự phòng
     usermod -aG valkey www-data 2>/dev/null || true
@@ -1235,15 +1240,21 @@ install_redis() {
         
         # Configure Unix Socket for Object Cache
         local rconf="/etc/redis/redis.conf"
-        if [[ -f "$rconf" ]] && ! grep -q "^unixsocket " "$rconf"; then
-            echo "unixsocket /var/run/redis/redis.sock" >> "$rconf"
-            echo "unixsocketperm 777" >> "$rconf"
+        if [[ -f "$rconf" ]]; then
+            if grep -q "^unixsocket " "$rconf"; then
+                sed -i "s|^unixsocket .*|unixsocket /var/run/redis/redis.sock|g" "$rconf"
+            else
+                echo "unixsocket /var/run/redis/redis.sock" >> "$rconf"
+            fi
+            if grep -q "^unixsocketperm " "$rconf"; then
+                sed -i "s|^unixsocketperm .*|unixsocketperm 777|g" "$rconf"
+            else
+                echo "unixsocketperm 777" >> "$rconf"
+            fi
             if ! grep -q "^maxmemory " "$rconf"; then
                 echo "maxmemory 256mb" >> "$rconf"
                 echo "maxmemory-policy allkeys-lru" >> "$rconf"
             fi
-        else
-            sed -i 's/^unixsocketperm.*/unixsocketperm 777/g' "$rconf" 2>/dev/null
         fi
         usermod -aG redis www-data 2>/dev/null || true
         usermod -aG redis nobody 2>/dev/null || true

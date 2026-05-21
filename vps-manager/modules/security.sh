@@ -45,8 +45,8 @@ security_menu() {
 secure_php() {
     log_info "Đang cấu hình disable_functions cho PHP..."
     
-    # List of dangerous functions
-    local funcs="exec,passthru,shell_exec,system,proc_open,popen,curl_exec,curl_multi_exec,parse_ini_file,show_source"
+    # List of dangerous functions (excluding curl_exec, curl_multi_exec, parse_ini_file to prevent breaking WordPress)
+    local funcs="exec,passthru,shell_exec,system,proc_open,popen,show_source"
     
     # Apply to all php.ini versions
     for ver in 8.1 8.2 8.3 8.4; do

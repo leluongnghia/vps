@@ -129,8 +129,8 @@ change_site_php() {
     local config_file="/etc/nginx/sites-available/$domain"
     
     # Replace fastcgi_pass line
-    # Using sed with regex to match any php version in the socket path
-    sed -i "s|unix:/run/php/php[0-9.]*-fpm.sock|unix:/run/php/php$new_ver-fpm.sock|g" "$config_file"
+    # Using sed with extended regex to match both versioned (php8.4-fpm) and legacy (php-fpm) sockets
+    sed -i -E "s|unix:/run/php/php([0-9.]+)?-fpm\.sock|unix:/run/php/php$new_ver-fpm.sock|g" "$config_file"
     
     nginx -t && systemctl reload nginx
     log_info "Đã chuyển đổi $domain sang PHP $new_ver."

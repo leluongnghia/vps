@@ -131,13 +131,24 @@ MEMCONF
     sed -i 's/rdbcompression yes/rdbcompression no/g' "$conf_file"
     sed -i 's/rdbchecksum yes/rdbchecksum no/g'    "$conf_file"
 
-    # Chưa có unix socket thì thêm
-    if ! grep -q "^unixsocket " "$conf_file"; then
+    # Ensure unixsocket path is correctly configured
+    if grep -q "^unixsocket " "$conf_file"; then
+        sed -i "s|^unixsocket .*|unixsocket ${socket_path}|g" "$conf_file"
+    else
+        echo "unixsocket ${socket_path}" >> "$conf_file"
+    fi
+    
+    if grep -q "^unixsocketperm " "$conf_file"; then
+        sed -i "s|^unixsocketperm .*|unixsocketperm 777|g" "$conf_file"
+    else
+        echo "unixsocketperm 777" >> "$conf_file"
+    fi
+
+    # Set optimal memory policies if not present
+    if ! grep -q "^maxmemory " "$conf_file"; then
         cat >> "$conf_file" <<CACHECONF
 
 # vps-manager object cache config
-unixsocket ${socket_path}
-unixsocketperm 777
 maxmemory 128mb
 maxmemory-policy allkeys-lfu
 save ""
