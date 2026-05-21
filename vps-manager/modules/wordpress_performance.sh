@@ -60,14 +60,9 @@ _wp_enable_php_mysql_extension() {
     [[ -z "$ver" ]] && return 1
 
     log_info "[Auto-Fix] PHP $ver thieu MySQL extension. Dang tu dong tai va cai dat/bat extension..."
-    if command -v apt-get >/dev/null 2>&1; then
-        # Fix LiteSpeed GPG key issue that causes apt-get update to fail on Ubuntu 24.04
-        if [[ -f /etc/apt/sources.list.d/lst_debian_repo.list ]]; then
-            wget -qO /etc/apt/trusted.gpg.d/lst_debian_repo.gpg http://rpms.litespeedtech.com/debian/lst_debian_repo.gpg || true
-            wget -qO - http://rpms.litespeedtech.com/debian/lst_repo.gpg | gpg --dearmor --yes -o /etc/apt/trusted.gpg.d/litespeed.gpg 2>/dev/null || true
-        fi
-        apt-get update >/dev/null 2>&1 || true
-        DEBIAN_FRONTEND=noninteractive apt-get install -y "php${ver}-mysql" >/dev/null 2>&1 || true
+    if command -v apt-get > /dev/null 2>&1; then
+        apt-get update > /dev/null 2>&1 || true
+        DEBIAN_FRONTEND=noninteractive apt-get install -y "php${ver}-mysql" > /dev/null 2>&1 || true
     elif command -v dnf >/dev/null 2>&1; then
         dnf install -y "php${ver}-mysqlnd" >/dev/null 2>&1 || true
     fi
@@ -79,15 +74,11 @@ _wp_enable_php_mysql_extension() {
 
     if _wp_php_has_mysql "$php_bin"; then
         log_info "[Auto-Fix] PHP $ver da bat mysqli/pdo_mysql."
-        # Reload FPM so web server picks up the new extension
+        # Reload PHP-FPM so Nginx picks up the new extension
         if systemctl list-units --type=service --state=running 2>/dev/null | grep -q "php${ver}-fpm"; then
-            systemctl reload "php${ver}-fpm" >/dev/null 2>&1 || true
+            systemctl reload "php${ver}-fpm" > /dev/null 2>&1 || true
         elif systemctl list-units --type=service --state=running 2>/dev/null | grep -q "php-fpm"; then
-            systemctl reload php-fpm >/dev/null 2>&1 || true
-        fi
-        # Reload OLS if present
-        if systemctl is-active --quiet lshttpd 2>/dev/null; then
-            systemctl reload lshttpd >/dev/null 2>&1 || /usr/local/lsws/bin/lswsctrl restart >/dev/null 2>&1 || true
+            systemctl reload php-fpm > /dev/null 2>&1 || true
         fi
         return 0
     fi
@@ -118,15 +109,7 @@ _wp_resolve_php_bin_for_site() {
     local v bin
     for v in 8.4 8.3 8.5 8.2 8.1 8.0 7.4; do
         bin="php$v"
-        if command -v "$bin" >/dev/null 2>&1 && _wp_php_has_mysql "$bin"; then
-            printf -v "$outvar" '%s' "$bin"
-            return 0
-        fi
-    done
-
-    for v in 84 83 85 82 81 80 74; do
-        bin="/usr/local/lsws/lsphp$v/bin/php"
-        if [[ -x "$bin" ]] && _wp_php_has_mysql "$bin"; then
+        if command -v "$bin" > /dev/null 2>&1 && _wp_php_has_mysql "$bin"; then
             printf -v "$outvar" '%s' "$bin"
             return 0
         fi
@@ -196,273 +179,42 @@ wp_performance_menu() {
 }
 
 
-setup_lscache_premium() {
-    source "$(dirname "${BASH_SOURCE[0]}")/wordpress_tool.sh"
-    select_wp_site || return
-    local domain=$SELECTED_DOMAIN
-    local site_root="/var/www/$domain/public_html"
-    
-    if [[ ! -f "$site_root/wp-config.php" ]]; then
-        log_error "Khong tim thay WordPress tai $site_root"
-        pause; return
-    fi
-    
-    log_info "Bat dau toi uu LSCache TOAN DIEN (PageSpeed Fix) cho $domain..."
-    
-    # 1. Reset .htaccess chuan WordPress
-    log_info "1. Khoi phuc .htaccess chuan goc WP..."
-    cat << 'HTEOF' > "$site_root/.htaccess"
-# BEGIN WordPress
-<IfModule mod_rewrite.c>
-RewriteEngine On
-RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
-RewriteBase /
-RewriteRule ^index\.php$ - [L]
-RewriteCond %{REQUEST_FILENAME} !-f
-RewriteCond %{REQUEST_FILENAME} !-d
-RewriteRule . /index.php [L]
-</IfModule>
-# END WordPress
-HTEOF
-    chmod 644 "$site_root/.htaccess"
-    
-    if command -v wp &>/dev/null; then
-        # --- CAI / KICH HOAT PLUGIN ---
-        if ! wp plugin is-installed litespeed-cache --path="$site_root" --allow-root 2>/dev/null; then
-            log_info "2. Tu dong cai dat plugin LiteSpeed Cache..."
-            wp plugin install litespeed-cache --activate --path="$site_root" --allow-root 2>/dev/null
-        else
-            log_info "2. Dang kich hoat LiteSpeed Cache..."
-            wp plugin activate litespeed-cache --path="$site_root" --allow-root 2>/dev/null
-        fi
-        
-        # --- BAT PAGE CACHE (LCP: 16.7s -> <2s) ---
-        log_info "3. Bat Full-Page Cache & Tat Guest Mode..."
-        wp litespeed-option set cache-page true          --path="$site_root" --allow-root >/dev/null 2>&1 && echo "  v Page Cache: BAT"
-        wp litespeed-option set cache-page_ttl 604800    --path="$site_root" --allow-root >/dev/null 2>&1 && echo "  v Page TTL: 7 ngay"
-        wp litespeed-option set cache-priv true          --path="$site_root" --allow-root >/dev/null 2>&1
-        # Tat Guest Mode vi thuong gay loi load ca dummy-css lan file goc lam LCP tang vot
-        wp litespeed-option set guest false              --path="$site_root" --allow-root >/dev/null 2>&1 && echo "  v Guest Mode: TAT (Fix loi LCP)"
-        wp litespeed-option set guest_op false           --path="$site_root" --allow-root >/dev/null 2>&1
-
-        # --- FIX RENDER-BLOCKING: Delay JS (manh hon Defer) ---
-        log_info "4. Fix Render-Blocking: Delay JS (load sau user interaction)..."
-        wp litespeed-option set optm-js_defer true        --path="$site_root" --allow-root >/dev/null 2>&1 && echo "  v Defer JS: BAT"
-        wp litespeed-option set optm-js_delay true        --path="$site_root" --allow-root >/dev/null 2>&1 && echo "  v Delay JS: BAT (manh hon Defer)"
-        wp litespeed-option set optm-js_delay_exc '["jquery.min.js","jquery-migrate.min.js","wc-cart-fragments"]' \
-            --path="$site_root" --allow-root >/dev/null 2>&1
-        wp litespeed-option set optm-js_defer_exc '["jquery.min.js","jquery-migrate.min.js","smush-detector","smush.min.js"]' \
-            --path="$site_root" --allow-root >/dev/null 2>&1
-        wp litespeed-option set optm-js_min true          --path="$site_root" --allow-root >/dev/null 2>&1 && echo "  v Minify JS: BAT"
-        wp litespeed-option set optm-js_comb true         --path="$site_root" --allow-root >/dev/null 2>&1 && echo "  v Combine JS: BAT"
-        wp litespeed-option set optm-js_inline_min true   --path="$site_root" --allow-root >/dev/null 2>&1
-
-        # --- MINIFY + COMBINE CSS + CRITICAL CSS ---
-        log_info "5. Minify, Combine CSS va Critical CSS..."
-        wp litespeed-option set optm-css_min true         --path="$site_root" --allow-root >/dev/null 2>&1 && echo "  v Minify CSS: BAT"
-        wp litespeed-option set optm-css_comb true        --path="$site_root" --allow-root >/dev/null 2>&1 && echo "  v Combine CSS: BAT"
-        wp litespeed-option set optm-css_inline_min true  --path="$site_root" --allow-root >/dev/null 2>&1
-        wp litespeed-option set optm-qs_rm true           --path="$site_root" --allow-root >/dev/null 2>&1
-        wp litespeed-option set optm-ccss_gen true        --path="$site_root" --allow-root >/dev/null 2>&1 && echo "  v Critical CSS: BAT"
-        wp litespeed-option set optm-css_async true       --path="$site_root" --allow-root >/dev/null 2>&1 && echo "  v Async non-critical CSS: BAT"
-
-        # --- FIX FONT DISPLAY 120ms -> 0 ---
-        log_info "6. Fix Font Display swap..."
-        wp litespeed-option set optm-font-display 1       --path="$site_root" --allow-root >/dev/null 2>&1 && echo "  v Font Display Swap: BAT"
-        wp litespeed-option set optm-gfonts_async true    --path="$site_root" --allow-root >/dev/null 2>&1 && echo "  v Google Fonts Async: BAT"
-
-        # --- LAZY LOAD IMAGES ---
-        log_info "7. Lazy Load Anh va iFrame..."
-        wp litespeed-option set media-lazy true           --path="$site_root" --allow-root >/dev/null 2>&1 && echo "  v Lazy Load anh: BAT"
-        wp litespeed-option set media-iframe_lazy true    --path="$site_root" --allow-root >/dev/null 2>&1 && echo "  v Lazy Load iFrame: BAT"
-        wp litespeed-option set media-lazy_placeholder true --path="$site_root" --allow-root >/dev/null 2>&1
-
-        # --- BROWSER CACHE (fix 612 KiB miss) ---
-        log_info "8. Bat Browser Cache..."
-        wp litespeed-option set cache-browser true        --path="$site_root" --allow-root >/dev/null 2>&1 && echo "  v Browser Cache: BAT"
-        wp litespeed-option set cache-browser_ttl 2592000 --path="$site_root" --allow-root >/dev/null 2>&1 && echo "  v Browser TTL: 30 ngay"
-
-        # --- DNS PREFETCH + PRECONNECT ---
-        log_info "9. DNS Prefetch va Preconnect..."
-        wp litespeed-option set optm-dns_prefetch \
-            '["//fonts.googleapis.com","//fonts.gstatic.com","//www.google-analytics.com","//kit.fontawesome.com"]' \
-            --path="$site_root" --allow-root >/dev/null 2>&1 && echo "  v DNS Prefetch: BAT"
-        wp litespeed-option set optm-dns_prefetch_con \
-            '["https://fonts.googleapis.com","https://fonts.gstatic.com"]' \
-            --path="$site_root" --allow-root >/dev/null 2>&1 && echo "  v Preconnect: BAT"
-
-        # --- OBJECT CACHE ---
-        if systemctl is-active --quiet valkey 2>/dev/null || systemctl is-active --quiet redis-server 2>/dev/null; then
-            log_info "10. Ket noi Object Cache (Redis/Valkey)..."
-            wp litespeed-option set object true --path="$site_root" --allow-root >/dev/null 2>&1 && echo "  v Object Cache: BAT"
-            if [[ -e "/var/run/valkey/valkey.sock" ]]; then
-                wp litespeed-option set object-host "/var/run/valkey/valkey.sock" --path="$site_root" --allow-root >/dev/null 2>&1
-                wp litespeed-option set object-port 0 --path="$site_root" --allow-root >/dev/null 2>&1
-            elif [[ -e "/var/run/redis/redis.sock" ]]; then
-                wp litespeed-option set object-host "/var/run/redis/redis.sock" --path="$site_root" --allow-root >/dev/null 2>&1
-                wp litespeed-option set object-port 0 --path="$site_root" --allow-root >/dev/null 2>&1
-            else
-                wp litespeed-option set object-host "127.0.0.1" --path="$site_root" --allow-root >/dev/null 2>&1
-                wp litespeed-option set object-port 6379 --path="$site_root" --allow-root >/dev/null 2>&1
-            fi
-            wp litespeed-option set object-kind 1 --path="$site_root" --allow-root >/dev/null 2>&1
-        else
-            log_warn "10. Redis/Valkey khong chay -- bo qua Object Cache."
-        fi
-
-        # --- MINIFY HTML ---
-        log_info "11. Minify HTML..."
-        wp litespeed-option set optm-html_min true        --path="$site_root" --allow-root >/dev/null 2>&1 && echo "  v Minify HTML: BAT"
-        wp litespeed-option set optm-html_min_lvl 1       --path="$site_root" --allow-root >/dev/null 2>&1
-
-        # --- FLUSH ---
-        log_info "12. Lam moi Permalink va Purge Cache cu..."
-        wp rewrite flush            --path="$site_root" --allow-root >/dev/null 2>&1
-        wp litespeed-purge all      --path="$site_root" --allow-root >/dev/null 2>&1 && echo "  v Cache cu da purge"
-    else
-        log_warn "WP-CLI khong co -- hay cai WP-CLI truoc!"
-    fi
-
-    # --- EXPIRE HEADERS trong OLS vhost (fix browser cache 612 KiB) ---
-    local vhconf="/usr/local/lsws/conf/vhosts/${domain}/vhconf.conf"
-    if [[ -f "$vhconf" ]] && ! grep -q "expiresByType" "$vhconf" 2>/dev/null; then
-        log_info "13. Them Expire Headers vao OLS vhost..."
-        cat >> "$vhconf" << 'VHEOF'
-
-expires {
-  enableExpires       1
-  expiresByType       text/css=A2592000
-  expiresByType       application/javascript=A2592000
-  expiresByType       image/jpeg=A2592000
-  expiresByType       image/png=A2592000
-  expiresByType       image/gif=A2592000
-  expiresByType       image/webp=A2592000
-  expiresByType       image/svg+xml=A2592000
-  expiresByType       image/x-icon=A31536000
-  expiresByType       font/woff=A31536000
-  expiresByType       font/woff2=A31536000
-  expiresByType       application/font-woff=A31536000
-  expiresByType       application/font-woff2=A31536000
-}
-VHEOF
-        echo "  v Expire Headers OLS: DA THEM"
-    fi
-
-    # --- RELOAD OLS ---
-    if systemctl is-active --quiet lshttpd 2>/dev/null; then
-        log_info "14. Khoi dong lai OpenLiteSpeed..."
-        /usr/local/lsws/bin/lswsctrl restart &>/dev/null || systemctl reload lshttpd
-        echo "  v OLS: Da reload"
-    fi
-    
-    echo ""
-    echo -e "${GREEN}=================================================${NC}"
-    echo -e "${GREEN} v Toi uu LSCache TOAN DIEN hoan tat!${NC}"
-    echo -e "${GREEN}=================================================${NC}"
-    echo -e "${CYAN}Da fix cac loi PageSpeed:${NC}"
-    echo -e "  v Render-blocking 5,120ms  -> Defer JS bat"
-    echo -e "  v LCP 16.7s               -> Full-Page Cache bat"
-    echo -e "  v Font display 120ms       -> font-display swap"
-    echo -e "  v Browser cache 612 KiB   -> Expire headers 30 ngay"
-    echo -e "  v Lazy load anh            -> Bat"
-    echo -e "  v Minify CSS/JS/HTML       -> Bat"
-    echo ""
-    echo -e "${YELLOW}LUU Y: Test lai sau 2-3 phut (cache can warm-up)${NC}"
-    echo -e "${YELLOW}Neu layout vo sau combine CSS/JS -> WP Admin${NC}"
-    echo -e "${YELLOW}LiteSpeed Cache -> Page Optimization -> tat Combine CSS/JS${NC}"
-    echo -e "${YELLOW}LUU Y 2: Vao WP Admin -> Smush -> TẮT Lazy Load (vi da dung LSCache Lazy Load roi)${NC}"
-    echo -e "${CYAN}Tip: Chay them Option 17 neu TBT van cao (ElementsKit/jNews)${NC}"
-    pause
-}
-
-# 17. Fix TBT Nang Cao - Nham vao ElementsKit, jNews, FontAwesome, Smush
+# 17. Fix TBT/Render-Blocking Nâng Cao - Nginx-native (không dùng LiteSpeed/OLS)
+# Áp dụng: MU Plugin PHP + Nginx headers + WP-CLI
 fix_tbt_advanced() {
     clear
     echo -e "${BLUE}=================================================${NC}"
-    echo -e "${GREEN}    ⚡ Fix TBT/Render-Blocking Nâng Cao${NC}"
+    echo -e "${GREEN}    ⚡ Fix TBT/Render-Blocking Nâng Cao (Nginx)${NC}"
     echo -e "${BLUE}=================================================${NC}"
-    echo -e "Fix chuyen sau cho: ElementsKit, jNews, FontAwesome, WP Smush"
-    echo -e "Muc tieu: TBT 720ms -> <200ms"
+    echo -e "Fix chuyên sâu cho: ElementsKit, jNews, FontAwesome, WP Smush"
+    echo -e "Mục tiêu: TBT 720ms → <200ms | Nginx LEMP native"
     echo ""
 
     source "$(dirname "${BASH_SOURCE[0]}")/wordpress_tool.sh" 2>/dev/null || true
     select_wp_site || return
     local domain=$SELECTED_DOMAIN
     local site_root="/var/www/$domain/public_html"
+    local nginx_conf="/etc/nginx/sites-available/$domain"
 
     if [[ ! -f "$site_root/wp-config.php" ]]; then
-        log_error "Khong tim thay WordPress tai $site_root"
+        log_error "Không tìm thấy WordPress tại $site_root"
         pause; return
     fi
 
-    if ! command -v wp &>/dev/null; then
-        log_error "WP-CLI khong co. Hay cai WP-CLI truoc!"
-        pause; return
-    fi
-
-    # --- 1. Delay JS voi danh sach loai tru chinh xac ---
-    log_info "1. Cau hinh Delay JS cho $domain..."
-    wp litespeed-option set optm-js_delay true \
-        --path="$site_root" --allow-root > /dev/null 2>&1 && echo "  v Delay JS: BAT"
-    # Loai tru cac script KHONG the delay (se gay loi layout)
-    wp litespeed-option set optm-js_delay_exc \
-        '["jquery.min.js","jquery-migrate.min.js","jquery-core.js","wc-cart-fragments","js_composer","revslider"]' \
-        --path="$site_root" --allow-root > /dev/null 2>&1 && echo "  v JS delay exclusions: CAU HINH"
-
-    # --- 2. Loai tru smush-detector khoi defer (no tu add reflow) ---
-    log_info "2. Loai tru smush-detector khoi defer JS..."
-    local current_exc
-    current_exc=$(wp litespeed-option get optm-js_defer_exc \
-        --path="$site_root" --allow-root 2>/dev/null | tr -d '\n')
-    # Them smush-detector vao danh sach loai tru neu chua co
-    if [[ "$current_exc" != *"smush"* ]]; then
-        wp litespeed-option set optm-js_defer_exc \
-            '["jquery.min.js","jquery-migrate.min.js","smush-detector","smush.min.js"]' \
-            --path="$site_root" --allow-root > /dev/null 2>&1 && echo "  v smush-detector: LOAI TRU"
-    else
-        echo "  v smush-detector: Da loai tru san"
-    fi
-
-    # --- 3. Critical CSS cho ElementsKit/jNews ---
-    log_info "3. Bat Critical CSS (inline above-the-fold CSS)..."
-    wp litespeed-option set optm-ccss_gen true \
-        --path="$site_root" --allow-root > /dev/null 2>&1 && echo "  v Critical CSS Gen: BAT"
-    wp litespeed-option set optm-css_async true \
-        --path="$site_root" --allow-root > /dev/null 2>&1 && echo "  v Non-critical CSS Async: BAT"
-    # Loai tru CSS quan trong khoi async
-    wp litespeed-option set optm-css_async_exc \
-        '["dashicons.min.css","admin-bar.min.css"]' \
-        --path="$site_root" --allow-root > /dev/null 2>&1
-
-    # --- 4. FontAwesome: load async thay vi render-blocking ---
-    log_info "4. Chuyen FontAwesome sang async..."
-    # Them vhconf de load FA async qua OLS
-    local vhconf="/usr/local/lsws/conf/vhosts/${domain}/vhconf.conf"
-    if [[ -f "$vhconf" ]] && ! grep -q "font-awesome.*preload\|fa-async" "$vhconf" 2>/dev/null; then
-        cat >> "$vhconf" << 'FAEOF'
-
-# FontAwesome async loading
-rewrite {
-  enable 1
-}
-FAEOF
-        echo "  v OLS: FontAwesome rewrite them"
-    fi
-
-    # --- 5. Them preload LCP image vao header ---
-    log_info "5. Them Preload hints vao header..."
-    # Kiem tra xem da co MU plugin chua
+    # ── 1. MU Plugin: Resource Hints + FontAwesome Async + Delay JS ──────────
+    log_info "1. Tạo MU Plugin 'vps-performance-hints.php'..."
     local mu_dir="$site_root/wp-content/mu-plugins"
     mkdir -p "$mu_dir"
     cat > "$mu_dir/vps-performance-hints.php" << 'PHPEOF'
 <?php
 /**
- * Plugin Name: VPS Performance Hints
- * Description: Preconnect + Resource Hints de giam TBT/LCP
- * Version: 1.0
+ * Plugin Name: VPS Performance Hints (Nginx)
+ * Description: Resource Hints, Async CSS/JS, Preconnect để giảm TBT/LCP trên Nginx LEMP
+ * Version: 2.0
  */
 if ( ! defined( 'ABSPATH' ) ) exit;
 
+// --- Preconnect & DNS-Prefetch ---
 add_action( 'wp_head', 'vps_add_resource_hints', 1 );
 function vps_add_resource_hints() {
     echo "<link rel='preconnect' href='https://fonts.googleapis.com' crossorigin>\n";
@@ -471,17 +223,12 @@ function vps_add_resource_hints() {
     echo "<link rel='dns-prefetch' href='//kit.fontawesome.com'>\n";
 }
 
-// Giam priority cua Font Awesome CSS (khong render-blocking)
-add_filter( 'style_loader_tag', 'vps_fa_css_preload', 10, 4 );
-function vps_fa_css_preload( $tag, $handle, $href, $media ) {
-    // Cac CSS render-blocking lon tu ElementsKit va FontAwesome
+// --- FontAwesome & ElementsKit CSS: async (không render-blocking) ---
+add_filter( 'style_loader_tag', 'vps_async_render_blocking_css', 10, 4 );
+function vps_async_render_blocking_css( $tag, $handle, $href, $media ) {
     $async_handles = [
-        'font-awesome',
-        'font-awesome-5',
-        'elementor-icons',
-        'elementor-frontend',
-        'fontawesome-all',
-        'fa-free',
+        'font-awesome', 'font-awesome-5', 'fontawesome-all', 'fa-free',
+        'elementor-icons', 'elementor-frontend',
     ];
     if ( in_array( $handle, $async_handles, true ) ) {
         $tag = str_replace(
@@ -489,44 +236,105 @@ function vps_fa_css_preload( $tag, $handle, $href, $media ) {
             "rel='preload' as='style' onload=\"this.onload=null;this.rel='stylesheet'\"",
             $tag
         );
-        // Fallback cho no-JS
         $tag .= "<noscript><link rel='stylesheet' href='" . esc_url( $href ) . "'></noscript>\n";
     }
     return $tag;
 }
+
+// --- Defer JS (trừ jQuery và wc-cart-fragments) ---
+add_filter( 'script_loader_tag', 'vps_defer_js_except_critical', 10, 3 );
+function vps_defer_js_except_critical( $tag, $handle, $src ) {
+    $no_defer = [
+        'jquery-core', 'jquery', 'jquery-migrate',
+        'wc-cart-fragments', 'js_composer', 'revslider',
+    ];
+    if ( in_array( $handle, $no_defer, true ) ) {
+        return $tag;
+    }
+    if ( strpos( $tag, 'defer' ) === false ) {
+        $tag = str_replace( ' src=', ' defer src=', $tag );
+    }
+    return $tag;
+}
+
+// --- font-display: swap cho Google Fonts ---
+add_filter( 'style_loader_src', 'vps_gfonts_display_swap' );
+function vps_gfonts_display_swap( $href ) {
+    if ( strpos( $href, 'fonts.googleapis.com' ) !== false && strpos( $href, 'display=' ) === false ) {
+        $href = add_query_arg( 'display', 'swap', $href );
+    }
+    return $href;
+}
 PHPEOF
-    echo "  v MU Plugin 'vps-performance-hints.php': TAO XONG"
+    echo -e "  ${GREEN}✓${NC} MU Plugin tạo xong: $mu_dir/vps-performance-hints.php"
 
-    # --- 6. Purge toan bo cache sau khi thay doi ---
-    log_info "6. Purge cache sau khi ap dung..."
-    wp litespeed-purge all --path="$site_root" --allow-root > /dev/null 2>&1 && echo "  v Cache purge: XONG"
+    # ── 2. Nginx: Thêm Preload & performance snippet cho vhost ──────────────────
+    log_info "2. Thêm Nginx performance snippet cho $domain..."
+    local snippet_file="/etc/nginx/snippets/vps-tbt-${domain}.conf"
+    if [[ -f "$nginx_conf" ]]; then
+        # Tạo snippet file với các headers cần thiết
+        mkdir -p /etc/nginx/snippets
+        cat > "$snippet_file" << 'SNIPEOF'
+# vps-manager-tbt: Performance Headers (Nginx-native)
+add_header Link "<https://fonts.googleapis.com>; rel=preconnect" always;
+add_header Link "<https://fonts.gstatic.com>; rel=preconnect; crossorigin=anonymous" always;
+add_header X-Content-Type-Options "nosniff" always;
+SNIPEOF
+        echo -e "  ${GREEN}✓${NC} Snippet tạo xong: $snippet_file"
 
-    # --- 7. Reload OLS ---
-    if systemctl is-active --quiet lshttpd 2>/dev/null; then
-        /usr/local/lsws/bin/lswsctrl graceful &>/dev/null || true
-        echo "  v OLS: Graceful restart"
+        # Include snippet vào site config nếu chưa có
+        if ! grep -q "vps-tbt-${domain}" "$nginx_conf"; then
+            sed -i "/server_name/a\\    include /etc/nginx/snippets/vps-tbt-${domain}.conf;" "$nginx_conf" 2>/dev/null || true
+            echo -e "  ${GREEN}✓${NC} Nginx include snippet đã thêm"
+        else
+            echo -e "  ${YELLOW}→${NC} Snippet đã được include, bỏ qua"
+        fi
+
+        nginx -t > /dev/null 2>&1 && systemctl reload nginx > /dev/null 2>&1 && \
+            echo -e "  ${GREEN}✓${NC} Nginx reload thành công" || \
+            echo -e "  ${RED}✗${NC} Nginx config lỗi – kiểm tra lại: nginx -t"
+    else
+        log_warn "Không tìm thấy Nginx config: $nginx_conf"
+    fi
+
+    # ── 3. WP-CLI: Flush permalink & cache ────────────────────────────────────
+    if command -v wp > /dev/null 2>&1; then
+        log_info "3. Flush permalink và transient cache..."
+        wp rewrite flush --path="$site_root" --allow-root > /dev/null 2>&1 && \
+            echo -e "  ${GREEN}✓${NC} Permalink flush xong"
+        wp transient delete --all --path="$site_root" --allow-root > /dev/null 2>&1 && \
+            echo -e "  ${GREEN}✓${NC} Transient cache đã xóa"
+        # Xóa cache nếu dùng W3 Total Cache, WP Super Cache hoặc WP Fastest Cache
+        wp w3-total-cache flush all --path="$site_root" --allow-root > /dev/null 2>&1 || true
+        wp cache flush --path="$site_root" --allow-root > /dev/null 2>&1 && \
+            echo -e "  ${GREEN}✓${NC} Object cache flush xong"
+    else
+        log_warn "WP-CLI không có – bỏ qua bước flush cache."
     fi
 
     echo ""
     echo -e "${GREEN}=================================================${NC}"
-    echo -e "${GREEN} v Fix TBT Nang Cao hoan tat cho $domain!${NC}"
+    echo -e "${GREEN} ✓ Fix TBT Nâng Cao (Nginx) hoàn tất cho $domain!${NC}"
     echo -e "${GREEN}=================================================${NC}"
-    echo -e "  v Delay JS: BAT (load sau user click)"
-    echo -e "  v smush-detector: LOAI TRU khoi defer"
-    echo -e "  v Critical CSS: TU DONG TAO above-the-fold CSS"
-    echo -e "  v FontAwesome: ASYNC (khong render-blocking)"
-    echo -e "  v Preconnect hints: THEM vao <head>"
+    echo -e "  ${GREEN}✓${NC} MU Plugin async CSS/JS: ĐÃ TẠO"
+    echo -e "  ${GREEN}✓${NC} FontAwesome + ElementsKit: ASYNC (không render-blocking)"
+    echo -e "  ${GREEN}✓${NC} Defer JS (trừ jQuery, WC fragments): ĐÃ BẬT"
+    echo -e "  ${GREEN}✓${NC} Google Fonts display=swap: ĐÃ BẬT"
+    echo -e "  ${GREEN}✓${NC} Preconnect hints: ĐÃ THÊM vào <head>"
+    echo -e "  ${GREEN}✓${NC} Nginx reload: XONG"
     echo ""
-    echo -e "${YELLOW}Du kien ket qua:${NC}"
-    echo -e "  TBT: 720ms -> <200ms"
-    echo -e "  LCP: 1.5s  -> <1.2s"
+    echo -e "${YELLOW}Dự kiến kết quả:${NC}"
+    echo -e "  TBT: 720ms → <200ms"
+    echo -e "  LCP: 1.5s  → <1.2s"
     echo ""
-    echo -e "${YELLOW}LUU Y:${NC}"
-    echo -e "  - Test lai tren PageSpeed sau 3-5 phut"
-    echo -e "  - Neu layout bi vo: WP Admin -> LSCache -> CSS -> tat 'Async CSS'"
-    echo -e "  - Neu nút bấm mat tac dung: them handle JS vao delay exclusions"
+    echo -e "${YELLOW}Lưu ý:${NC}"
+    echo -e "  - Test lại trên PageSpeed sau 3-5 phút"
+    echo -e "  - Nếu layout bị vỡ: xóa file $mu_dir/vps-performance-hints.php"
+    echo -e "  - Nếu nút bấm mất tác dụng: thêm handle JS vào mảng \$no_defer trong MU plugin"
     pause
 }
+
+
 # 12. Optimize System Kernel - toan dien
 optimize_system_kernel() {
     log_info "Dang toi uu hoa he thong (Kernel & Network - Toan dien)..."
