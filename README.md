@@ -1,6 +1,6 @@
 # 🖥️ VPS Manager — Quản lý VPS Tự động (Premium Grade Nginx Stack)
 
-[![Version](https://img.shields.io/badge/Version-1.6.1-brightgreen.svg)](#)
+[![Version](https://img.shields.io/badge/Version-1.6.7-brightgreen.svg)](#)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Shell: Bash](https://img.shields.io/badge/Shell-Bash-blue.svg)](https://www.gnu.org/software/bash/)
 [![OS](https://img.shields.io/badge/OS-Ubuntu%20%7C%20Debian%20%7C%20AlmaLinux-orange.svg)](#)
@@ -70,23 +70,26 @@ bash <(curl -s https://raw.githubusercontent.com/leluongnghia/vps/main/vps-manag
 
 ---
 
-## 🗂️ Cấu trúc dự án v1.6.1
+## 🗂️ Cấu trúc dự án v1.6.7
 
 ```
 vps-manager/
 ├── install-nginx.sh        # Lệnh cài đặt nhanh Nginx Stack từ xa
 ├── install.sh              # File thực thi cài đặt & Menu khởi tạo
-├── core/
+├── VERSION                 # Tệp lưu trữ phiên bản hiện tại (v1.6.7)
+├── core/                   # Thư mục các hàm nhân lõi của hệ thống
 │   ├── kernel_tuning.sh    # Tối ưu hóa thông số nhân Kernel TCP
-│   ├── system_helpers.sh   # Tiện ích hệ thống
-│   └── menu.sh             # Menu quản lý vps tập trung
-├── modules/
-│   ├── nginx.sh            # Quản lý cấu hình Nginx
-│   ├── lemp.sh             # Cài đặt PHP, MariaDB, phpMyAdmin
+│   ├── menu.sh             # Menu quản lý vps tập trung
+│   └── ...
+├── modules/                # Thư mục chứa các mô-đun chức năng chính
 │   ├── wordpress_performance.sh # Tối ưu hóa hiệu năng WordPress chuyên sâu
 │   ├── security.sh         # Cấu hình WAF 7G/8G, tường lửa
 │   └── ...
+└── plugins/                # Thư mục lưu trữ tài liệu cấu trúc dự án
+    └── project_structure.md # Bản mô tả chi tiết chức năng toàn bộ tệp tin
 ```
+
+> 💡 Chi tiết chức năng của từng file trong bộ mã nguồn được tài liệu hóa cụ thể tại [project_structure.md](vps-manager/plugins/project_structure.md).
 
 ---
 
@@ -101,7 +104,7 @@ VPS Manager is a professional, high-performance Bash script to automate and opti
 bash <(curl -s https://raw.githubusercontent.com/leluongnghia/vps/main/vps-manager/install-nginx.sh)
 ```
 
-### Key Features (v1.6.1)
+### Key Features (v1.6.7)
 - **100% Nginx Standardized:** Cleaned up and completely removed OpenLiteSpeed to focus purely on high-performance Nginx.
 - **Kernel & Network Tuning:** Auto-configures TCP BBR, disables THP, sets CPU governor to performance, and boosts file descriptor limits.
 - **2-Layer Cache Architecture:** Integrates L1 Nginx FastCGI micro-cache with L2 Valkey/Redis Object Cache over Unix Socket.
@@ -110,3 +113,4 @@ bash <(curl -s https://raw.githubusercontent.com/leluongnghia/vps/main/vps-manag
 
 ---
 > **Copyright**: © 2024-2026 leluongnghia. Optimized to Premium Grade Standards.
+
