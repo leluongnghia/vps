@@ -431,7 +431,11 @@ restore_site_manual_upload() {
 
     # Detect files
     local code_file=$(find "$search_dir" -maxdepth 1 \( -name "*.zip" -o -name "*.tar.gz" -o -name "*.tar.zst" \) -type f | head -n 1)
-    local db_file=$(find "$search_dir" -maxdepth 1 \( -name "*.sql" -o -name "*.sql.gz" -o -name "*.sql.zst" -o -name "*.zst" \) -type f | head -n 1)
+    local db_file=$(find "$search_dir" -maxdepth 1 \( -name "*.sql" -o -name "*.sql.gz" -o -name "*.sql.zst" -o \( -name "*.zst" ! -name "*.tar.zst" \) \) -type f | head -n 1)
+    
+    if [[ "$db_file" == "$code_file" ]]; then
+        db_file=""
+    fi
     
     if [[ -z "$code_file" ]] && [[ -z "$db_file" ]]; then 
         echo -e "${RED}Lỗi: Không tìm thấy file .zip hoặc .sql trong public_html${NC}"
