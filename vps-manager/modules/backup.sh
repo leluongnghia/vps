@@ -358,6 +358,11 @@ perform_smart_restore() {
     # 3. Restore DB
     if [[ -n "$db_sql" ]] && [[ -f "$db_sql" ]]; then
         log_info "Import Database..."
+        # Recreate database to avoid table collisions
+        mysql -e "DROP DATABASE IF EXISTS ${target_db_name}; CREATE DATABASE ${target_db_name} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" 2>/dev/null
+        mysql -e "GRANT ALL PRIVILEGES ON ${target_db_name}.* TO '${target_db_user}'@'localhost';" 2>/dev/null
+        mysql -e "FLUSH PRIVILEGES;" 2>/dev/null
+
         if [[ "$db_sql" == *.gz ]]; then
             zcat "$db_sql" | mysql "$target_db_name"
         elif [[ "$db_sql" == *.zst ]]; then
