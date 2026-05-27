@@ -290,6 +290,7 @@ perform_smart_restore() {
     local target_domain=$1
     local code_zip=$2
     local db_sql=$3
+    local new_prefix="wp_"
     
     log_info "Bắt đầu Smart Restore cho: $target_domain"
     
@@ -375,7 +376,7 @@ perform_smart_restore() {
         # Table Prefix Fix
         local detected_table=$(mysql -N -B -e "SHOW TABLES LIKE '%_users'" "$target_db_name" | head -n 1)
         if [[ -n "$detected_table" ]]; then
-            local new_prefix=${detected_table%users}
+            new_prefix=${detected_table%users}
             if [[ -n "$new_prefix" ]]; then
                 sed -i "s/\\\$table_prefix\s*=\s*'.*';/\\\$table_prefix = '$new_prefix';/" "/var/www/$target_domain/public_html/wp-config.php"
             fi
@@ -392,7 +393,11 @@ perform_smart_restore() {
 
     if command -v wp &> /dev/null; then
         cd "/var/www/$target_domain/public_html"
-        local old_url=$(wp option get siteurl --allow-root 2>/dev/null)
+        # Query old URL directly from database to avoid Redis/object cache pollution
+        local old_url=$(mysql -N -B -e "SELECT option_value FROM ${target_db_name}.${new_prefix}options WHERE option_name='siteurl'" 2>/dev/null)
+        if [[ -z "$old_url" ]]; then
+            old_url=$(wp option get siteurl --allow-root 2>/dev/null)
+        fi
         local source_domain=$(echo "$old_url" | sed -e 's|^[^/]*//||' -e 's|/.*$||')
         
         if [[ -n "$source_domain" ]] && [[ "$source_domain" != "$target_domain" ]]; then
@@ -410,7 +415,15 @@ perform_smart_restore() {
             $wp_cmd search-replace "http://$source_domain" "http://$target_domain" --allow-root --quiet
             $wp_cmd search-replace "https://$source_domain" "https://$target_domain" --allow-root --quiet
             $wp_cmd search-replace "$source_domain" "$target_domain" --allow-root --quiet
+            
+            # Flush object cache after migration
+            $wp_cmd cache flush --allow-root &>/dev/null
         fi
+    fi
+
+    # Flush Redis directly to be absolutely sure cache is clean
+    if command -v redis-cli &>/dev/null; then
+        redis-cli flushall &>/dev/null
     fi
 
     # 5. Permission & Cleanup
