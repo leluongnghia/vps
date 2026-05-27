@@ -251,6 +251,9 @@ install_phpmyadmin() {
         printf '        location ~ ^/phpmyadmin/(.+\\.php)$ {\n'
         printf '            try_files $uri =404;\n'
         printf '            fastcgi_pass %s;\n' "$PHP_SOCK"
+        printf '            fastcgi_buffer_size 128k;\n'
+        printf '            fastcgi_buffers 4 256k;\n'
+        printf '            fastcgi_busy_buffers_size 256k;\n'
         printf '            fastcgi_index index.php;\n'
         printf '            fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;\n'
         printf '            fastcgi_param PHP_VALUE "upload_max_filesize=500M \\n post_max_size=500M \\n max_execution_time=3600 \\n max_input_time=3600";\n'
@@ -268,6 +271,9 @@ install_phpmyadmin() {
         printf '    location ~ \\.php$ {\n'
         printf '        include snippets/fastcgi-php.conf;\n'
         printf '        fastcgi_pass %s;\n' "$PHP_SOCK"
+        printf '        fastcgi_buffer_size 128k;\n'
+        printf '        fastcgi_buffers 4 256k;\n'
+        printf '        fastcgi_busy_buffers_size 256k;\n'
         printf '        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;\n'
         printf '        include fastcgi_params;\n'
         printf '    }\n'

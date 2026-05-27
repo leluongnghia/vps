@@ -472,6 +472,9 @@ server {
     location ~ \.php$ {
         include snippets/fastcgi-php.conf;
         fastcgi_pass $php_sock;
+        fastcgi_buffer_size 128k;
+        fastcgi_buffers 4 256k;
+        fastcgi_busy_buffers_size 256k;
         fastcgi_read_timeout 300;
         fastcgi_send_timeout 300;
         fastcgi_connect_timeout 300;
