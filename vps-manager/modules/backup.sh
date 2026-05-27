@@ -429,8 +429,8 @@ perform_smart_restore() {
     # 5. Permission & Cleanup
     log_info "Phân quyền & Dọn dẹp..."
     chown -R www-data:www-data "/var/www/$target_domain/public_html"
-    find "/var/www/$target_domain/public_html" -type d -exec chmod 755 {} \;
-    find "/var/www/$target_domain/public_html" -type f -exec chmod 644 {} \;
+    find "/var/www/$target_domain/public_html" -type d -exec chmod 755 {} +
+    find "/var/www/$target_domain/public_html" -type f -exec chmod 644 {} +
     
     # Remove bad configs
     find "/var/www/$target_domain/public_html" -name ".user.ini" -delete
