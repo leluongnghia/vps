@@ -170,7 +170,68 @@ CACHECONF
     chmod 600 /etc/vps-manager/cache.conf
 
     log_info "✓ $object_cache đã cài đặt với Unix Socket: $socket_path"
-    echo -e "${YELLOW}Ghi chú: Thay socket path này vào wp-config.php (WP_REDIS_PATH)${NC}"
+
+    # Thêm www-data vào group của cache service để có quyền đọc/ghi socket
+    usermod -aG "$object_cache" www-data 2>/dev/null
+    chmod 777 "$socket_path" 2>/dev/null
+
+    echo -e "${YELLOW}Bạn có muốn tự động cấu hình Unix Socket vào wp-config.php của các website không?${NC}"
+    echo -e "  1. Áp dụng cho TẤT CẢ website WordPress"
+    echo -e "  2. Chọn website cụ thể"
+    echo -e "  0. Không (Tôi tự cấu hình thủ công)"
+    read -p "Chọn [0-2]: " apply_choice
+
+    _is_real_site() {
+        local d="$1"
+        [[ "$d" == "default" || "$d" == "html" ]] && return 1
+        [[ "$d" == 000-* ]] && return 1
+        [[ "$d" == *.bak* || "$d" == *.old || "$d" == *.disabled || "$d" == *.bak_* ]] && return 1
+        [ -d "/var/www/$d/public_html" ] || return 1
+        return 0
+    }
+
+    apply_cache_wp_config() {
+        local domain=$1
+        local wp_config="/var/www/$domain/public_html/wp-config.php"
+        if [[ -f "$wp_config" ]]; then
+            # Clean old configs
+            sed -i "/WP_REDIS_SCHEME/d" "$wp_config"
+            sed -i "/WP_REDIS_PATH/d" "$wp_config"
+            sed -i "/WP_REDIS_HOST/d" "$wp_config"
+            sed -i "/WP_REDIS_PORT/d" "$wp_config"
+            sed -i "/WP_REDIS_DATABASE/d" "$wp_config"
+            sed -i "/WP_REDIS_DISABLED/d" "$wp_config"
+
+            # Insert new configs before table_prefix
+            sed -i "/table_prefix/i define( 'WP_REDIS_DISABLED', false );" "$wp_config"
+            sed -i "/table_prefix/i define( 'WP_REDIS_SCHEME', 'unix' );" "$wp_config"
+            sed -i "/table_prefix/i define( 'WP_REDIS_PATH', '$socket_path' );" "$wp_config"
+
+            # Ensure WP_CACHE_KEY_SALT exists
+            if ! grep -q "WP_CACHE_KEY_SALT" "$wp_config"; then
+                local salt="${domain}_$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 8)_"
+                sed -i "/table_prefix/i define( 'WP_CACHE_KEY_SALT', '$salt' );" "$wp_config"
+            fi
+            
+            wp cache flush --path="/var/www/$domain/public_html" --allow-root 2>/dev/null || true
+            log_info "✓ Đã cấu hình và flush cache cho $domain"
+        fi
+    }
+
+    if [[ "$apply_choice" == "1" ]]; then
+        for conf in /etc/nginx/sites-available/*; do
+            d=$(basename "$conf")
+            if _is_real_site "$d"; then
+                apply_cache_wp_config "$d"
+            fi
+        done
+        log_info "Hoàn tất cấu hình Object Cache cho tất cả website."
+    elif [[ "$apply_choice" == "2" ]]; then
+        source "$(dirname "${BASH_SOURCE[0]}")/site.sh"
+        select_site || { pause; return; }
+        apply_cache_wp_config "$SELECTED_DOMAIN"
+        log_info "Hoàn tất cấu hình Object Cache cho $SELECTED_DOMAIN."
+    fi
     pause
 }
 
