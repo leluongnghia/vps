@@ -162,9 +162,9 @@ install_phpmyadmin() {
         SECRET=$(openssl rand -base64 32 | tr -dc 'a-zA-Z0-9' | head -c 32)
         # Use perl -pi -e for correct in-place substitution
         if command -v perl &>/dev/null; then
-            perl -pi -e "s|\\\$cfg\\['blowfish_secret'\\] = '';|\$cfg['blowfish_secret'] = '${SECRET}';|" "$PMA_DIR/config.inc.php"
+            perl -pi -e "s|(\\\$cfg\['blowfish_secret'\] = )'';|\${1}'${SECRET}';|" "$PMA_DIR/config.inc.php"
         else
-            sed -i "s/\\\$cfg\\['blowfish_secret'\\] = '';/\$cfg['blowfish_secret'] = '${SECRET}';/" "$PMA_DIR/config.inc.php"
+            sed -i "s/\(\\\$cfg\\['blowfish_secret'\\] = \)'';/\\1'${SECRET}';/" "$PMA_DIR/config.inc.php"
         fi
         _pma_log "Config tạo thành công."
     else

@@ -775,9 +775,9 @@ optimize_opcache() {
     local jit_setting="1255"
     local jit_buffer="128M"
     
-    # Phát hiện PHP >= 8.4 để cấu hình JIT an toàn (Tránh bug cạn bộ nhớ do lệch bytecode khi JIT + validate_timestamps=0)
-    if [[ "$php_ver" == "8.4" || "$php_ver" == 8.[5-9]* || "$php_ver" == [9-9]* ]]; then
-        log_warn "Phát hiện PHP $php_ver (>= 8.4). Tự động tắt JIT để tránh lỗi cạn bộ nhớ (Allowed memory size exhausted) khi chạy Web!"
+    # Phát hiện PHP >= 8.3 để cấu hình JIT an toàn (Tránh bug cạn bộ nhớ do lệch bytecode khi JIT + validate_timestamps=0)
+    if [[ "$php_ver" == "8.3" || "$php_ver" == "8.4" || "$php_ver" == 8.[5-9]* || "$php_ver" == [9-9]* ]]; then
+        log_warn "Phát hiện PHP $php_ver (>= 8.3). Tự động tắt JIT để tránh lỗi cạn bộ nhớ (Allowed memory size exhausted) khi chạy Web!"
         jit_setting="off"
         jit_buffer="0"
     fi
