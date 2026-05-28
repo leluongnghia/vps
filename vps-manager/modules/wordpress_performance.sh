@@ -1,4 +1,4 @@
-#!/bin/bash
+﻿#!/bin/bash
 
 # modules/wordpress_performance.sh - WordPress Performance Optimization
 
@@ -1706,19 +1706,61 @@ enable_php_preload() {
 <?php
 /**
  * PHP Preload Script cho: ${domain}
- * T\u1ef1 đ\u1ed9ng n\u1ea1p tr\u01b0\u1edbc c\u00e1c file PHP c\u1ed1t l\u00f5i c\u1ee7a WordPress v\u00e0o OPcache.
- * T\u1ee9c l\u00e0: Khi PHP-FPM kh\u1eedi đ\u1ed9ng, c\u00e1c file n\u00e0y đ\u00e3 s\u1eb5n s\u00e0ng trong b\u1ed9 nh\u1edb.
+ * Tá»± Ä‘á»™ng náº¡p trÆ°á»›c cÃ¡c file PHP cá»‘t lÃµi cá»§a WordPress vÃ o OPcache.
+ * Loáº¡i trá»« cÃ¡c file dÃ¹ng require (thay vÃ¬ require_once) Ä‘á»ƒ trÃ¡nh lá»—i Redeclare (nhÆ° load-styles/scripts.php)
  */
 
-// WP-Includes (c\u00f4t l\u00f5i - quan tr\u1ecd nh\u1ea5t)
 \$wp_includes = '${site_root}/wp-includes';
 if (is_dir(\$wp_includes)) {
+    // Danh sÃ¡ch file loáº¡i trá»« Ä‘á»ƒ trÃ¡nh lá»—i redeclare hoáº·c crash admin
+    \$exclusions = [
+        'l10n.php',
+        'general-template.php',
+        'link-template.php',
+        'version.php',
+        'script-loader.php',
+        'compat.php',
+        'class-wp-dependencies.php',
+        'class-wp-scripts.php',
+        'class-wp-styles.php',
+        'functions.php',
+        'formatting.php',
+        'meta.php',
+        'class-wp-meta-query.php',
+        'class-wp-matchesmapregex.php',
+        'class-wp.php',
+        'class-wp-error.php',
+        'capabilities.php',
+        'theme.php',
+        'class-wp-theme.php',
+        'user.php',
+        'class-wp-user.php',
+        'class-wp-roles.php',
+        'class-wp-role.php',
+        'load-styles.php',
+        'load-scripts.php',
+        'ms-files.php',
+        'rss.php'
+    ];
+
     \$it = new RecursiveIteratorIterator(
         new RecursiveDirectoryIterator(\$wp_includes, RecursiveDirectoryIterator::SKIP_DOTS)
     );
     foreach (\$it as \$file) {
         if (\$file->isFile() && \$file->getExtension() === 'php') {
-            opcache_compile_file(\$file->getPathname());
+            \$filename = \$file->getFilename();
+            // Bá» qua cÃ¡c file trong danh sÃ¡ch loáº¡i trá»«
+            if (in_array(\$filename, \$exclusions)) {
+                continue;
+            }
+            
+            // Bá» qua thÆ° má»¥c pomo (chá»©a thÆ° viá»‡n dá»‹ch thuáº­t cÃ³ thá»ƒ gÃ¢y lá»—i)
+            \$path = \$file->getPathname();
+            if (strpos(\$path, '/wp-includes/pomo/') !== false) {
+                continue;
+            }
+
+            @opcache_compile_file(\$path);
         }
     }
 }
