@@ -808,6 +808,7 @@ define('WP_CRON_LOCK_TIMEOUT', 60);        // WP-Cron timeout\\
 define('DISALLOW_FILE_EDIT', true);        // Tắt editor file trong admin (bảo mật)\\
 define('WP_MEMORY_LIMIT', '256M');         // PHP memory cho WP\\
 define('WP_MAX_MEMORY_LIMIT', '512M');     // PHP memory cho admin\\
+define('RT_WP_NGINX_HELPER_CACHE_PATH', '/var/cache/nginx/fastcgi'); // Đường dẫn cache cho Nginx Helper\\
 " "$wp_config" 2>/dev/null || true
         log_info "  ✓ Đã thêm cấu hình WordPress tối ưu vào wp-config.php"
     fi
