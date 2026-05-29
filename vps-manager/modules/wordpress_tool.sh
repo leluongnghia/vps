@@ -13,9 +13,10 @@ wp_tool_menu() {
     echo -e "4. Cấu hình Nginx & Cache (Yoast, RankMath, WebP)"
     echo -e "5. Công cụ Databases (Optimize, Delete Revisions)"
     echo -e "6. Cron & Debug (WP-Cron, Debug Mode)"
+    echo -e "7. Cài đặt ExifTool (GeoTag Local SEO hình ảnh)"
     echo -e "0. Quay lại Menu chính"
     echo -e "${BLUE}=================================================${NC}"
-    read -p "Nhập lựa chọn [0-6]: " choice
+    read -p "Nhập lựa chọn [0-7]: " choice
 
     case $choice in
         1) wp_core_plugin_menu ;;
@@ -24,6 +25,7 @@ wp_tool_menu() {
         4) wp_nginx_config_menu ;;
         5) wp_db_tool_menu ;;
         6) wp_config_tool_menu ;;
+        7) install_exiftool ;;
         0) return ;;
         *) echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause ;;
     esac
@@ -507,4 +509,42 @@ wp_config_tool_menu() {
             *) echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause ;;
         esac
     done
+}
+
+install_exiftool() {
+    echo -e "\n${BLUE}=================================================${NC}"
+    echo -e "${GREEN}   Cài đặt ExifTool (GeoTag Local SEO hình ảnh)${NC}"
+    echo -e "${BLUE}=================================================${NC}"
+    echo -e "Công cụ cần thiết để ghi siêu dữ liệu GPS (vĩ độ, kinh độ),"
+    echo -e "tiêu đề, từ khóa trực tiếp vào hình ảnh WordPress."
+    echo -e "${BLUE}=================================================${NC}"
+    
+    echo -e "\n${YELLOW}Đang kiểm tra trạng thái ExifTool trên hệ thống...${NC}"
+    if command -v exiftool &> /dev/null; then
+        echo -e "${GREEN}✓ ExifTool đã được cài đặt trên hệ thống!${NC}"
+        echo -e "Đường dẫn: ${CYAN}$(which exiftool)${NC}"
+        echo -n "Phiên bản hiện tại: "
+        exiftool -ver
+    else
+        echo -e "${YELLOW}ExifTool chưa được cài đặt. Tiến hành cài đặt tự động...${NC}"
+        if [[ "$OS_FAMILY" == "debian" ]]; then
+            pkg_update
+            pkg_install exiftool
+        elif [[ "$OS_FAMILY" == "rhel" ]]; then
+            pkg_install epel-release
+            pkg_install perl-Image-ExifTool
+        else
+            echo -e "${RED}Hệ điều hành không hỗ trợ tự động cài đặt. Vui lòng cài đặt thủ công ExifTool.${NC}"
+        fi
+        
+        if command -v exiftool &> /dev/null; then
+            echo -e "${GREEN}✓ Cài đặt ExifTool thành công!${NC}"
+            echo -e "Đường dẫn: ${CYAN}$(which exiftool)${NC}"
+            echo -n "Phiên bản: "
+            exiftool -ver
+        else
+            echo -e "${RED}✗ Cài đặt ExifTool thất bại. Vui lòng kiểm tra kết nối mạng hoặc cài đặt thủ công.${NC}"
+        fi
+    fi
+    pause
 }
