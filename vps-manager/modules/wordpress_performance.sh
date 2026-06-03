@@ -95,7 +95,7 @@ _wp_resolve_php_bin_for_site() {
     local site_php_ver
 
     if [[ -f "$site_conf" ]]; then
-        site_php_ver=$(grep -shoP 'unix:/run/php/php\K[0-9.]+(?=-fpm)' "$site_conf" | head -n 1)
+        site_php_ver=$(grep -v '^[[:space:]]*#' "$site_conf" 2>/dev/null | grep 'fastcgi_pass' | grep -oP 'php\K[0-9.]+(?=-fpm)' | head -n 1)
         if [[ -n "$site_php_ver" ]] && command -v "php$site_php_ver" >/dev/null 2>&1; then
             preferred="php$site_php_ver"
         fi

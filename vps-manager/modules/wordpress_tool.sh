@@ -62,7 +62,7 @@ select_wp_site() {
     WP_PHP_BIN="php"
     SITE_CONF="/etc/nginx/sites-available/$SELECTED_DOMAIN"
     if [[ -f "$SITE_CONF" ]]; then
-        SITE_PHP_VER=$(grep -shoP 'unix:/run/php/php\K[0-9.]+(?=-fpm)' "$SITE_CONF" | head -n 1)
+        SITE_PHP_VER=$(grep -v '^[[:space:]]*#' "$SITE_CONF" 2>/dev/null | grep 'fastcgi_pass' | grep -oP 'php\K[0-9.]+(?=-fpm)' | head -n 1)
         if [[ -n "$SITE_PHP_VER" ]] && command -v "php$SITE_PHP_VER" >/dev/null 2>&1; then
             WP_PHP_BIN="php$SITE_PHP_VER"
         fi

@@ -631,7 +631,7 @@ _auto_configure_wp_site() {
     # Ưu tiên 1: Đọc từ vhost hiện tại → dùng đúng phiên bản Nginx đang gửi request
     # Ví dụ: fastcgi_pass unix:/run/php/php8.1-fpm.sock → php_ver=8.1
     if [[ -f "$conf" ]]; then
-        php_ver=$(grep -oP 'php\K[0-9.]+(?=-fpm)' "$conf" 2>/dev/null | head -1)
+        php_ver=$(grep -v '^[[:space:]]*#' "$conf" 2>/dev/null | grep 'fastcgi_pass' | grep -oP 'php\K[0-9.]+(?=-fpm)' | head -n 1)
     fi
 
     # Ưu tiên 2: Socket PHP-FPM đang chạy thực tế (tránh dùng version không active)
@@ -706,13 +706,9 @@ POOLEOF
             log_info "  ✓ open_basedir: ${open_basedir}"
 
             # Update Nginx vhost để dùng pool socket riêng (nếu vhost dùng socket chung)
-            if [[ -f "$conf" ]] && grep -q "fastcgi_pass" "$conf"; then
-                local old_sock
-                old_sock=$(grep -oP "fastcgi_pass\s+\Kunix:.*\.sock" "$conf" | head -1)
-                if [[ -n "$old_sock" ]]; then
-                    sed -i "s|fastcgi_pass ${old_sock};|fastcgi_pass unix:${pool_sock};|g" "$conf"
-                    log_info "  ✓ Đã cập nhật vhost dùng pool socket riêng"
-                fi
+            if [[ -f "$conf" ]] && grep -v '^[[:space:]]*#' "$conf" | grep -q "fastcgi_pass"; then
+                sed -i "/^[[:space:]]*#/!s|fastcgi_pass.*;|fastcgi_pass unix:${pool_sock};|g" "$conf"
+                log_info "  ✓ Đã cập nhật vhost dùng pool socket riêng"
             fi
         fi
     else
@@ -836,7 +832,7 @@ list_sites() {
             fi
 
             # Detect PHP version
-            php_ver=$(grep -oP 'php\K[0-9.]+(?=-fpm)' "$conf" 2>/dev/null | head -n 1)
+            php_ver=$(grep -v '^[[:space:]]*#' "$conf" 2>/dev/null | grep 'fastcgi_pass' | grep -oP 'php\K[0-9.]+(?=-fpm)' | head -n 1)
             [ -z "$php_ver" ] && php_ver="?"
 
             # Detect FastCGI Cache
@@ -1261,7 +1257,7 @@ change_site_php() {
     
     # Tìm kiếm version PHP hiện hành trong file config
     local current_php
-    current_php=$(grep -oP 'unix:/run/php/php\K[0-9.]+(?=-fpm)' "$conf" | head -n 1)
+    current_php=$(grep -v '^[[:space:]]*#' "$conf" 2>/dev/null | grep 'fastcgi_pass' | grep -oP 'php\K[0-9.]+(?=-fpm)' | head -n 1)
     
     if [[ -n "$current_php" ]]; then
         echo -e "${CYAN}Phiên bản PHP hiện tại của web: PHP $current_php${NC}"
@@ -1288,15 +1284,26 @@ change_site_php() {
         *) return ;;
     esac
     
-    # Kiểm tra xem phiên bản PHP mới đã được cài đặt chưa
+    # Kiểm tra xem phiên bản PHP mới đã được cài đặt chưa, nếu chưa thì tự động cài đặt
+    local php_installed=true
     if [[ "$OS_FAMILY" == "rhel" ]]; then
         if ! is_installed "php${ver//./}-php-fpm"; then
-            echo -e "${RED}PHP $ver chưa được cài đặt. Vui lòng cài đặt trước trong menu PHP Management.${NC}"
-            pause; return
+            php_installed=false
         fi
     else
         if ! is_installed "php$ver-fpm"; then
-            echo -e "${RED}PHP $ver chưa được cài đặt. Vui lòng cài đặt trước trong menu PHP Management.${NC}"
+            php_installed=false
+        fi
+    fi
+
+    if [[ "$php_installed" == "false" ]]; then
+        echo -e "${YELLOW}PHP $ver chưa được cài đặt trên hệ thống.${NC}"
+        read -p "Bạn có muốn tự động cài đặt PHP $ver ngay bây giờ không? [y/N]: " confirm_inst
+        if [[ "$confirm_inst" =~ ^[yY]([eE][sS])?$ ]]; then
+            source "$(dirname "${BASH_SOURCE[0]}")/php.sh"
+            install_additional_php "$ver"
+        else
+            echo -e "${RED}Đã hủy quá trình đổi phiên bản PHP do chưa cài đặt PHP $ver.${NC}"
             pause; return
         fi
     fi
@@ -1326,10 +1333,10 @@ change_site_php() {
         
         # Cập nhật Nginx sử dụng pool socket mới
         local new_sock="/run/php/php${ver}-fpm-${domain}.sock"
-        sed -i "s|fastcgi_pass.*unix:.*|fastcgi_pass unix:${new_sock};|" "$conf"
+        sed -i "/^[[:space:]]*#/!s|fastcgi_pass.*;|fastcgi_pass unix:${new_sock};|" "$conf"
     else
         # Nếu không dùng pool riêng hoặc không tìm thấy pool cũ, chỉ đổi socket global
-        sed -i "s|fastcgi_pass.*unix:.*|fastcgi_pass unix:/run/php/php$ver-fpm.sock;|" "$conf"
+        sed -i "/^[[:space:]]*#/!s|fastcgi_pass.*;|fastcgi_pass unix:/run/php/php$ver-fpm.sock;|" "$conf"
         systemctl restart "php${ver}-fpm" 2>/dev/null || true
     fi
     

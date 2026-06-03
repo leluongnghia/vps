@@ -27,24 +27,27 @@ php_menu() {
 }
 
 install_additional_php() {
-    echo -e "Chọn phiên bản PHP muốn cài đặt:"
-    echo -e "1) PHP 7.4 (Cũ - Cho code legacy)"
-    echo -e "2) PHP 8.0"
-    echo -e "3) PHP 8.1"
-    echo -e "4) PHP 8.2"
-    echo -e "5) PHP 8.3"
-    echo -e "6) PHP 8.4 (Mới nhất)"
-    read -p "Nhập lựa chọn [1-6]: " ver_choice
+    local ver="$1"
+    if [[ -z "$ver" ]]; then
+        echo -e "Chọn phiên bản PHP muốn cài đặt:"
+        echo -e "1) PHP 7.4 (Cũ - Cho code legacy)"
+        echo -e "2) PHP 8.0"
+        echo -e "3) PHP 8.1"
+        echo -e "4) PHP 8.2"
+        echo -e "5) PHP 8.3"
+        echo -e "6) PHP 8.4 (Mới nhất)"
+        read -p "Nhập lựa chọn [1-6]: " ver_choice
 
-    case $ver_choice in
-        1) ver="7.4" ;;
-        2) ver="8.0" ;;
-        3) ver="8.1" ;;
-        4) ver="8.2" ;;
-        5) ver="8.3" ;;
-        6) ver="8.4" ;;
-        *) echo -e "${RED}Phiên bản không hợp lệ!${NC}"; return ;;
-    esac
+        case $ver_choice in
+            1) ver="7.4" ;;
+            2) ver="8.0" ;;
+            3) ver="8.1" ;;
+            4) ver="8.2" ;;
+            5) ver="8.3" ;;
+            6) ver="8.4" ;;
+            *) echo -e "${RED}Phiên bản không hợp lệ!${NC}"; return ;;
+        esac
+    fi
 
     if [[ "$OS_FAMILY" == "rhel" ]]; then
         local rhel_pkg="php${ver//./}-php-fpm"
