@@ -631,7 +631,7 @@ _auto_configure_wp_site() {
     # Ưu tiên 1: Đọc từ vhost hiện tại → dùng đúng phiên bản Nginx đang gửi request
     # Ví dụ: fastcgi_pass unix:/run/php/php8.1-fpm.sock → php_ver=8.1
     if [[ -f "$conf" ]]; then
-        php_ver=$(grep -oP 'php\K[0-9]+\.[0-9]+(?=-fpm\.sock)' "$conf" 2>/dev/null | head -1)
+        php_ver=$(grep -oP 'php\K[0-9.]+(?=-fpm)' "$conf" 2>/dev/null | head -1)
     fi
 
     # Ưu tiên 2: Socket PHP-FPM đang chạy thực tế (tránh dùng version không active)
@@ -836,7 +836,7 @@ list_sites() {
             fi
 
             # Detect PHP version
-            php_ver=$(grep -oP 'php\K[0-9.]+(?=-fpm.sock)' "$conf" 2>/dev/null | head -n 1)
+            php_ver=$(grep -oP 'php\K[0-9.]+(?=-fpm)' "$conf" 2>/dev/null | head -n 1)
             [ -z "$php_ver" ] && php_ver="?"
 
             # Detect FastCGI Cache
@@ -921,7 +921,7 @@ delete_site() {
     systemctl reload nginx 2>/dev/null || true
 
     # Remove PHP-FPM pool riêng của site (nếu có)
-    for phpver in 8.4 8.3 8.2 8.1; do
+    for phpver in 8.4 8.3 8.2 8.1 8.0 7.4; do
         local pool_file="/etc/php/${phpver}/fpm/pool.d/${domain}.conf"
         if [[ -f "$pool_file" ]]; then
             rm -f "$pool_file"
@@ -1261,7 +1261,7 @@ change_site_php() {
     
     # Tìm kiếm version PHP hiện hành trong file config
     local current_php
-    current_php=$(grep -oP 'unix:/run/php/php\K[0-9.]+(?=-fpm.sock)' "$conf" | head -n 1)
+    current_php=$(grep -oP 'unix:/run/php/php\K[0-9.]+(?=-fpm)' "$conf" | head -n 1)
     
     if [[ -n "$current_php" ]]; then
         echo -e "${CYAN}Phiên bản PHP hiện tại của web: PHP $current_php${NC}"
@@ -1271,21 +1271,67 @@ change_site_php() {
     echo ""
 
     echo -e "Chọn phiên bản PHP muốn ĐỔI SANG:"
-    echo "1. PHP 8.1"
-    echo "2. PHP 8.2"
-    echo "3. PHP 8.3"
-    echo "4. PHP 8.4"
-    read -p "Chọn [1-4]: " v
+    echo "1. PHP 7.4"
+    echo "2. PHP 8.0"
+    echo "3. PHP 8.1"
+    echo "4. PHP 8.2"
+    echo "5. PHP 8.3"
+    echo "6. PHP 8.4"
+    read -p "Chọn [1-6]: " v
     case $v in
-        1) ver="8.1" ;;
-        2) ver="8.2" ;;
-        3) ver="8.3" ;;
-        4) ver="8.4" ;;
+        1) ver="7.4" ;;
+        2) ver="8.0" ;;
+        3) ver="8.1" ;;
+        4) ver="8.2" ;;
+        5) ver="8.3" ;;
+        6) ver="8.4" ;;
         *) return ;;
     esac
     
-    # Replace fastcgi_pass line
-    sed -i "s|fastcgi_pass.*unix:.*|fastcgi_pass unix:/run/php/php$ver-fpm.sock;|" "$conf"
+    # Kiểm tra xem phiên bản PHP mới đã được cài đặt chưa
+    if [[ "$OS_FAMILY" == "rhel" ]]; then
+        if ! is_installed "php${ver//./}-php-fpm"; then
+            echo -e "${RED}PHP $ver chưa được cài đặt. Vui lòng cài đặt trước trong menu PHP Management.${NC}"
+            pause; return
+        fi
+    else
+        if ! is_installed "php$ver-fpm"; then
+            echo -e "${RED}PHP $ver chưa được cài đặt. Vui lòng cài đặt trước trong menu PHP Management.${NC}"
+            pause; return
+        fi
+    fi
+    
+    # Kiểm tra xem có sử dụng pool riêng không bằng cách kiểm tra file pool.d
+    local old_pool=""
+    if [[ -n "$current_php" ]]; then
+        old_pool="/etc/php/${current_php}/fpm/pool.d/${domain}.conf"
+    fi
+    local new_pool="/etc/php/${ver}/fpm/pool.d/${domain}.conf"
+    
+    log_info "Đang cập nhật cấu hình PHP cho $domain sang PHP $ver..."
+    
+    if [[ -n "$current_php" ]] && [[ -f "$old_pool" ]]; then
+        log_info "Phát hiện PHP pool riêng cho tên miền. Đang di chuyển cấu hình pool..."
+        mkdir -p "/etc/php/${ver}/fpm/pool.d"
+        cp "$old_pool" "$new_pool"
+        # Cập nhật đường dẫn socket trong file pool mới
+        sed -i "s|php${current_php}-fpm-${domain}.sock|php${ver}-fpm-${domain}.sock|g" "$new_pool"
+        # Cập nhật open_basedir hoặc log file path nếu chúng có chứa php version cũ
+        sed -i "s|/etc/php/${current_php}/|/etc/php/${ver}/|g" "$new_pool"
+        
+        # Xóa pool cũ và restart FPM cũ
+        rm -f "$old_pool"
+        systemctl restart "php${current_php}-fpm" 2>/dev/null || true
+        systemctl restart "php${ver}-fpm" 2>/dev/null || true
+        
+        # Cập nhật Nginx sử dụng pool socket mới
+        local new_sock="/run/php/php${ver}-fpm-${domain}.sock"
+        sed -i "s|fastcgi_pass.*unix:.*|fastcgi_pass unix:${new_sock};|" "$conf"
+    else
+        # Nếu không dùng pool riêng hoặc không tìm thấy pool cũ, chỉ đổi socket global
+        sed -i "s|fastcgi_pass.*unix:.*|fastcgi_pass unix:/run/php/php$ver-fpm.sock;|" "$conf"
+        systemctl restart "php${ver}-fpm" 2>/dev/null || true
+    fi
     
     nginx -t && systemctl reload nginx
     log_info "Đã chuyển $domain sang PHP $ver"

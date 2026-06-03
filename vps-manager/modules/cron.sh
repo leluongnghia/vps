@@ -278,7 +278,7 @@ _setup_wp_cron_wget() {
         local site_conf="/etc/nginx/sites-available/$domain"
         if [[ -f "$site_conf" ]]; then
             local php_ver
-            php_ver=$(grep -shoP 'php\K[0-9.]+(?=-fpm.sock)' "$site_conf" | head -n 1)
+            php_ver=$(grep -shoP 'php\K[0-9.]+(?=-fpm)' "$site_conf" | head -n 1)
             if [[ -n "$php_ver" ]] && command -v "php$php_ver" &>/dev/null; then
                 php_bin="php$php_ver"
             fi
@@ -340,7 +340,7 @@ _setup_wp_cron_wpcli() {
         local site_conf="/etc/nginx/sites-available/$domain"
         if [[ -f "$site_conf" ]]; then
             local php_ver
-            php_ver=$(grep -shoP 'php\K[0-9.]+(?=-fpm.sock)' "$site_conf" | head -n 1)
+            php_ver=$(grep -shoP 'php\K[0-9.]+(?=-fpm)' "$site_conf" | head -n 1)
             if [[ -n "$php_ver" ]] && command -v "php$php_ver" &>/dev/null; then
                 php_bin="php$php_ver"
             fi
@@ -549,7 +549,7 @@ setup_aprg_cron() {
         local site_conf="/etc/nginx/sites-available/$domain"
         if [[ -f "$site_conf" ]]; then
             local php_ver
-            php_ver=$(grep -shoP 'php\K[0-9.]+(?=-fpm.sock)' "$site_conf" | head -n 1)
+            php_ver=$(grep -shoP 'php\K[0-9.]+(?=-fpm)' "$site_conf" | head -n 1)
             if [[ -n "$php_ver" ]] && command -v "php$php_ver" &>/dev/null; then
                 php_bin="php$php_ver"
             fi
@@ -693,7 +693,7 @@ test_aprg_cron() {
     local site_conf="/etc/nginx/sites-available/$domain"
     if [[ -f "$site_conf" ]]; then
         local php_ver
-        php_ver=$(grep -shoP 'php\K[0-9.]+(?=-fpm.sock)' "$site_conf" | head -n 1)
+        php_ver=$(grep -shoP 'php\K[0-9.]+(?=-fpm)' "$site_conf" | head -n 1)
         if [[ -n "$php_ver" ]] && command -v "php$php_ver" &>/dev/null; then
             php_bin="php$php_ver"
         fi

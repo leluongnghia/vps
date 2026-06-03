@@ -16,7 +16,10 @@ php_menu() {
 
     case $choice in
         1) install_additional_php ;;
-        2) change_site_php ;;
+        2) 
+            source "$(dirname "${BASH_SOURCE[0]}")/site.sh"
+            change_site_php 
+            ;;
         3) list_php_versions ;;
         0) return ;;
         *) echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause ;;
@@ -75,65 +78,6 @@ install_additional_php() {
         systemctl start php$ver-fpm
     fi
     log_info "Cài đặt PHP $ver thành công."
-    pause
-}
-
-change_site_php() {
-    # Select site from list
-    source "$(dirname "${BASH_SOURCE[0]}")/site.sh"
-    select_site || return
-    domain=$SELECTED_DOMAIN
-
-    if [[ ! -f "/etc/nginx/sites-available/$domain" ]]; then
-        echo -e "${RED}Website $domain không tồn tại config Nginx!${NC}"
-        pause
-        return
-    fi
-
-    echo -e "Chọn phiên bản PHP mới cho $domain:"
-    echo -e "1) PHP 7.4"
-    echo -e "2) PHP 8.0"
-    echo -e "3) PHP 8.1"
-    echo -e "4) PHP 8.2"
-    echo -e "5) PHP 8.3"
-    echo -e "6) PHP 8.4 (Mới nhất)"
-    read -p "Nhập lựa chọn [1-6]: " ver_choice
-
-    case $ver_choice in
-        1) new_ver="7.4" ;;
-        2) new_ver="8.0" ;;
-        3) new_ver="8.1" ;;
-        4) new_ver="8.2" ;;
-        5) new_ver="8.3" ;;
-        6) new_ver="8.4" ;;
-        *) echo -e "${RED}Phiên bản không hợp lệ!${NC}"; return ;;
-    esac
-
-    # Check if selected PHP version is installed
-    if [[ "$OS_FAMILY" == "rhel" ]]; then
-        if ! is_installed "php${new_ver//./}-php-fpm"; then
-            echo -e "${RED}PHP $new_ver chưa được cài đặt. Vui lòng cài đặt trước trong menu PHP Management.${NC}"
-            pause
-            return
-        fi
-    else
-        if ! is_installed "php$new_ver-fpm"; then
-            echo -e "${RED}PHP $new_ver chưa được cài đặt. Vui lòng cài đặt trước trong menu PHP Management.${NC}"
-            pause
-            return
-        fi
-    fi
-
-    log_info "Đang cập nhật cấu hình Nginx cho $domain sang PHP $new_ver..."
-    
-    local config_file="/etc/nginx/sites-available/$domain"
-    
-    # Replace fastcgi_pass line
-    # Using sed with extended regex to match both versioned (php8.4-fpm) and legacy (php-fpm) sockets
-    sed -i -E "s|unix:/run/php/php([0-9.]+)?-fpm\.sock|unix:/run/php/php$new_ver-fpm.sock|g" "$config_file"
-    
-    nginx -t && systemctl reload nginx
-    log_info "Đã chuyển đổi $domain sang PHP $new_ver."
     pause
 }
 
