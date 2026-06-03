@@ -1448,6 +1448,13 @@ fix_permissions() {
     find "$target" -type d -exec chmod 755 {} \;
     find "$target" -type f -exec chmod 644 {} \;
     
+    # Khôi phục quyền thực thi cho Node.js node_modules (.bin và esbuild) để tránh lỗi EACCES/Permission denied
+    if find "$target" -path "*/node_modules" -type d -print -quit 2>/dev/null | grep -q .; then
+        log_info "Phát hiện Node.js project. Khôi phục quyền thực thi cho các file trong node_modules..."
+        find "$target" -path "*/node_modules/.bin/*" -exec chmod +x {} \; 2>/dev/null
+        find "$target" -name "esbuild" -type f -path "*/node_modules/*" -exec chmod +x {} \; 2>/dev/null
+    fi
+    
     log_info "Hoàn tất phân quyền."
     pause
 }
