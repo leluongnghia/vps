@@ -1444,7 +1444,31 @@ fix_permissions() {
     find "$target" -name ".user.ini" -delete 2>/dev/null
     find "$target" -name ".htaccess" -delete 2>/dev/null
     
-    chown -R www-data:www-data "$target"
+    # Phân quyền thông minh: Lấy owner thực tế của thư mục để tránh làm hỏng các web chạy user riêng
+    if [[ "$c" == "1" ]]; then
+        local current_owner
+        if [[ -d "$target/public_html" ]]; then
+            current_owner=$(stat -c '%U:%G' "$target/public_html")
+        else
+            current_owner=$(stat -c '%U:%G' "$target")
+        fi
+        chown -R "$current_owner" "$target"
+    else
+        # Nếu fix tất cả, lặp qua từng site để lấy owner riêng của site đó
+        for site_dir in "$target"/*; do
+            if [[ -d "$site_dir" ]]; then
+                local current_owner
+                if [[ -d "$site_dir/public_html" ]]; then
+                    current_owner=$(stat -c '%U:%G' "$site_dir/public_html")
+                else
+                    current_owner=$(stat -c '%U:%G' "$site_dir")
+                fi
+                chown -R "$current_owner" "$site_dir"
+            fi
+        done
+        chown www-data:www-data "$target"
+    fi
+    
     find "$target" -type d -exec chmod 755 {} \;
     find "$target" -type f -exec chmod 644 {} \;
     
