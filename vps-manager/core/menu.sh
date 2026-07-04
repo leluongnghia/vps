@@ -35,6 +35,7 @@ _handle_common_choice() {
         20) source "$ROOT_DIR/modules/backup.sh";            auto_backup_menu      ;;
         21) source "$ROOT_DIR/modules/zram.sh";              zram_menu             ;;
         22) source "$ROOT_DIR/modules/monit.sh";             monit_menu            ;;
+        23) source "$ROOT_DIR/modules/antigravity.sh";       antigravity_menu      ;;
         0)  echo -e "${GREEN}Exiting... Goodbye!${NC}"; exit 0 ;;
         *)  echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause ;;
     esac
@@ -76,9 +77,10 @@ _nginx_main_menu() {
     echo -e "20. ⏰ Backup Tự động (Auto Backup Cron)"
     echo -e "21. ⚡ ZRAM Swap (Swap nén trên RAM - Nhanh x1000)"
     echo -e "22. 🛡️  Watchdog Giám sát Dịch vụ (Monit)"
+    echo -e "23. 🚀 Cài đặt Antigravity"
     echo -e "0.  🚪 Thoát"
     echo -e "${BLUE}=================================================${NC}"
-    read -p "Nhập lựa chọn [0-22]: " choice
+    read -p "Nhập lựa chọn [0-23]: " choice
 
     case $choice in
         1)  # Nginx Stack menu
