@@ -22,12 +22,17 @@ antigravity_menu() {
 }
 
 install_antigravity() {
-    echo -e "${YELLOW}Đang tiến hành cài đặt Antigravity...${NC}"
-    # Add actual installation commands here
-    # Example:
-    # apt-get install -y python3-pip
-    # pip3 install antigravity
-    echo -e "${GREEN}Cài đặt Antigravity hoàn tất!${NC}"
+    echo -e "${YELLOW}Đang tiến hành cài đặt Antigravity CLI...${NC}"
+    
+    # Lệnh cài đặt chính thức từ Google
+    curl -fsSL https://antigravity.google/cli/install.sh | bash
+    
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}Cài đặt Antigravity CLI hoàn tất!${NC}"
+        echo -e "${CYAN}Cách sử dụng: Bạn hãy thoát menu quản lý và gõ lệnh 'agy' trên terminal để bắt đầu.${NC}"
+    else
+        echo -e "${RED}Quá trình cài đặt gặp lỗi! Vui lòng kiểm tra lại kết nối mạng.${NC}"
+    fi
     pause
 }
 
@@ -42,11 +47,11 @@ uninstall_antigravity() {
     rm -f /usr/lib/systemd/system/antigravity.service
     systemctl daemon-reload
 
-    # 2. Xóa các file thực thi và package (ví dụ qua pip hoặc apt)
+    # 2. Xóa các file thực thi và cấu hình của Antigravity CLI
     echo -e "${CYAN}[2/6] Gỡ cài đặt package và file thực thi...${NC}"
-    pip3 uninstall -y antigravity 2>/dev/null || true
-    rm -f /usr/local/bin/antigravity
-    rm -f /usr/bin/antigravity
+    rm -f ~/.local/bin/agy
+    rm -f /usr/local/bin/agy
+    rm -f /usr/bin/agy
 
     # 3. Xóa thư mục cấu hình
     echo -e "${CYAN}[3/6] Xóa toàn bộ file cấu hình...${NC}"
