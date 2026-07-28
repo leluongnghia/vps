@@ -534,31 +534,25 @@ install_php() {
         dnf module reset php -y >/dev/null 2>&1
     else
         log_info "Adding PHP repository (ondrej/php)..."
-        # Clean up any existing broken PPA files from previous attempts
         rm -f /etc/apt/sources.list.d/*ondrej*php* 2>/dev/null || true
 
         pkg_install software-properties-common curl gnupg2 ca-certificates lsb-release > /dev/null 2>&1
 
-        # Get distro codename - fallback to 'noble' if ondrej PPA doesn't support it yet
         local codename
         codename=$(lsb_release -cs 2>/dev/null || echo "noble")
 
-        # Check if PPA has a release file for this codename
         local ppa_check
         ppa_check=$(curl -s -o /dev/null -w "%{http_code}" \
             "https://ppa.launchpadcontent.net/ondrej/php/ubuntu/dists/${codename}/Release" \
             --max-time 5)
 
-        if [[ "$ppa_check" != "200" ]]; then
-            log_info "PPA does not support '${codename}', falling back to 'noble'..."
-            codename="noble"
+        if [[ "$ppa_check" == "200" ]]; then
+            local ppa_list="/etc/apt/sources.list.d/ondrej-ubuntu-php.list"
+            echo "deb [trusted=yes] https://ppa.launchpadcontent.net/ondrej/php/ubuntu ${codename} main" > "$ppa_list"
+            pkg_update > /dev/null 2>&1
+        else
+            log_warn "PPA ondrej/php không hỗ trợ '${codename}'. Sử dụng PHP gốc của Ubuntu..."
         fi
-
-        # Add PPA source directly with trusted=yes to bypass apt GPG algorithm block on Ubuntu 26.04+
-        local ppa_list="/etc/apt/sources.list.d/ondrej-ubuntu-php.list"
-        echo "deb [trusted=yes] https://ppa.launchpadcontent.net/ondrej/php/ubuntu ${codename} main" > "$ppa_list"
-
-        pkg_update > /dev/null 2>&1
     fi
 
     local primary_ver="8.3"
@@ -623,10 +617,19 @@ _install_single_php() {
     else
         pkg_install php$ver php$ver-fpm php$ver-mysql php$ver-common php$ver-cli \
             php$ver-curl php$ver-xml php$ver-mbstring php$ver-zip php$ver-bcmath \
-            php$ver-intl php$ver-gd php$ver-imagick
+            php$ver-intl php$ver-gd php$ver-imagick 2>/dev/null || \
+        pkg_install php-fpm php-mysql php-common php-cli \
+            php-curl php-xml php-mbstring php-zip php-bcmath \
+            php-intl php-gd php-imagick
+
+        local actual_ver="$ver"
+        if [[ ! -d "/etc/php/$ver" ]]; then
+            actual_ver=$(ls -d /etc/php/* 2>/dev/null | grep -oE '[0-9]+\.[0-9]+' | head -n 1)
+        fi
+        [ -z "$actual_ver" ] && actual_ver="$ver"
 
         # Configure PHP Upload Limits
-        local php_ini="/etc/php/$ver/fpm/php.ini"
+        local php_ini="/etc/php/$actual_ver/fpm/php.ini"
         if [[ -f "$php_ini" ]]; then
             sed -i -E "s/^[; ]*upload_max_filesize.*/upload_max_filesize = 128M/" "$php_ini"
             sed -i -E "s/^[; ]*post_max_size.*/post_max_size = 128M/" "$php_ini"
@@ -635,11 +638,11 @@ _install_single_php() {
             sed -i -E "s/^[; ]*max_input_vars.*/max_input_vars = 3000/" "$php_ini"
         fi
 
-        systemctl enable php$ver-fpm >/dev/null 2>&1
-        systemctl start php$ver-fpm >/dev/null 2>&1
+        systemctl enable php$actual_ver-fpm >/dev/null 2>&1 || systemctl enable php-fpm >/dev/null 2>&1
+        systemctl start php$actual_ver-fpm >/dev/null 2>&1 || systemctl start php-fpm >/dev/null 2>&1
 
         # Verify & auto-fix DOM/XML symlinks cho cả FPM và CLI
-        _fix_php_ext_symlinks "$ver"
+        _fix_php_ext_symlinks "$actual_ver"
     fi
 
     log_info "PHP $ver installed successfully."
