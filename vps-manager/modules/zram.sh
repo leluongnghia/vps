@@ -216,30 +216,17 @@ EOF
     sysctl -p /etc/sysctl.d/99-vps-manager-zram.conf &>/dev/null
     log_info "  ✓ Kernel params đã áp dụng"
 
-    # ── Bước 4: Dọn swap cũ ──
-    log_info "  Đang dọn swap file cũ trên ổ đĩa..."
-    swapoff -a 2>/dev/null || true
-    for old_swap in /swapfile /swap.img /var/swap.1; do
-        if [[ -f "$old_swap" ]]; then
-            swapoff "$old_swap" 2>/dev/null || true
-            rm -f "$old_swap"
-            log_info "    ✓ Đã xoá $old_swap"
-        fi
-    done
-    # Xoá entry trong fstab
-    sed -i -e '/swap.1/d' -e '/swapfile/d' -e '/swap.img/d' /etc/fstab
-    sed -i 's|^\(.*\s\+swap\s.*\)$|#\1|' /etc/fstab 2>/dev/null || true
-
-    # ── Bước 5: Khởi động dịch vụ ──
+    # ── Bước 4: Khởi động dịch vụ ZRAM trước ──
     systemctl daemon-reload
+    local rc=0
     if [[ "$ZRAM_OS" == "debian" ]]; then
         systemctl enable zramswap &>/dev/null
         systemctl restart zramswap
-        local rc=$?
+        rc=$?
     else
         systemctl daemon-reload
         systemctl start dev-zram0.swap
-        local rc=$?
+        rc=$?
     fi
 
     if [[ $rc -ne 0 ]]; then
@@ -247,6 +234,23 @@ EOF
     else
         log_info "  ✓ ZRAM đang hoạt động"
     fi
+
+    # ── Bước 5: Dọn swap cũ trên ổ đĩa (ZRAM đã bật nên swapoff sẽ nén vào ZRAM an toàn) ──
+    log_info "  Đang dọn swap file cũ trên ổ đĩa..."
+    for old_swap in /swapfile /swap.img /var/swap.1; do
+        if [[ -f "$old_swap" ]]; then
+            swapoff "$old_swap" 2>/dev/null || true
+            chattr -i "$old_swap" 2>/dev/null || true
+            if rm -f "$old_swap" 2>/dev/null; then
+                log_info "    ✓ Đã xoá $old_swap"
+            else
+                log_warn "    Không thể xoá $old_swap (file đang bận hoặc bị khoá). Sẽ xoá sau khi reboot."
+            fi
+        fi
+    done
+    # Xoá entry trong fstab
+    sed -i -e '/swap.1/d' -e '/swapfile/d' -e '/swap.img/d' /etc/fstab 2>/dev/null || true
+    sed -i 's|^\(.*\s\+swap\s.*\)$|#\1|' /etc/fstab 2>/dev/null || true
 
     echo ""
     echo -e "${GREEN}=================================================${NC}"
