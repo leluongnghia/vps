@@ -269,10 +269,11 @@ install_phpmyadmin() {
         printf '        }\n'
         printf '    }\n\n'
 
-        printf '    # PHP handler for root (NOTE: fastcgi-php.conf already has try_files)\n'
+        printf '    # PHP handler for root\n'
         printf '    location ~ \\.php$ {\n'
-        printf '        include snippets/fastcgi-php.conf;\n'
+        printf '        try_files $uri =404;\n'
         printf '        fastcgi_pass %s;\n' "$PHP_SOCK"
+        printf '        fastcgi_index index.php;\n'
         printf '        fastcgi_buffer_size 128k;\n'
         printf '        fastcgi_buffers 4 256k;\n'
         printf '        fastcgi_busy_buffers_size 256k;\n'
