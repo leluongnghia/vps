@@ -554,12 +554,9 @@ install_php() {
             codename="noble"
         fi
 
-        # Use add-apt-repository with explicit codename override
-        add-apt-repository -y -c "$codename" ppa:ondrej/php > /dev/null 2>&1 || {
-            mkdir -p /etc/apt/trusted.gpg.d
-            gpg --no-default-keyring --keyring /etc/apt/trusted.gpg.d/ondrej-php.gpg --keyserver keyserver.ubuntu.com --recv-keys 4F4EA0AAE5267A6C 2>/dev/null || true
-            echo "deb [signed-by=/etc/apt/trusted.gpg.d/ondrej-php.gpg] https://ppa.launchpadcontent.net/ondrej/php/ubuntu ${codename} main" > /etc/apt/sources.list.d/ondrej-ubuntu-php.list
-        }
+        # Add PPA source directly with trusted=yes to bypass apt GPG algorithm block on Ubuntu 26.04+
+        local ppa_list="/etc/apt/sources.list.d/ondrej-ubuntu-php.list"
+        echo "deb [trusted=yes] https://ppa.launchpadcontent.net/ondrej/php/ubuntu ${codename} main" > "$ppa_list"
 
         pkg_update > /dev/null 2>&1
     fi
