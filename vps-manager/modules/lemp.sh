@@ -554,13 +554,12 @@ install_php() {
             codename="noble"
         fi
 
-        # Add PPA manually with correct codename (no add-apt-repository call to avoid broken auto-detected sources)
-        mkdir -p /etc/apt/trusted.gpg.d
-        curl -fsSL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x14AA40EC0831756756D7F66C4F4EA0AAE5267A6C" \
-            | gpg --dearmor -o /etc/apt/trusted.gpg.d/ondrej-php.gpg 2>/dev/null || true
-
-        local ppa_list="/etc/apt/sources.list.d/ondrej-ubuntu-php.list"
-        echo "deb https://ppa.launchpadcontent.net/ondrej/php/ubuntu ${codename} main" > "$ppa_list"
+        # Use add-apt-repository with explicit codename override
+        add-apt-repository -y -c "$codename" ppa:ondrej/php > /dev/null 2>&1 || {
+            mkdir -p /etc/apt/trusted.gpg.d
+            gpg --no-default-keyring --keyring /etc/apt/trusted.gpg.d/ondrej-php.gpg --keyserver keyserver.ubuntu.com --recv-keys 4F4EA0AAE5267A6C 2>/dev/null || true
+            echo "deb [signed-by=/etc/apt/trusted.gpg.d/ondrej-php.gpg] https://ppa.launchpadcontent.net/ondrej/php/ubuntu ${codename} main" > /etc/apt/sources.list.d/ondrej-ubuntu-php.list
+        }
 
         pkg_update > /dev/null 2>&1
     fi
