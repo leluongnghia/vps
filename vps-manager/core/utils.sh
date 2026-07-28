@@ -126,7 +126,7 @@ pkg_update() {
             wget -qO /etc/apt/trusted.gpg.d/lst_debian_repo.gpg http://rpms.litespeedtech.com/debian/lst_debian_repo.gpg 2>/dev/null || true
             wget -qO - http://rpms.litespeedtech.com/debian/lst_repo.gpg 2>/dev/null | gpg --dearmor --yes -o /etc/apt/trusted.gpg.d/litespeed.gpg 2>/dev/null || true
         fi
-        apt-get update -qq
+        apt-get update -qq || true
     elif [[ "$OS_FAMILY" == "rhel" ]]; then
         dnf makecache
     fi

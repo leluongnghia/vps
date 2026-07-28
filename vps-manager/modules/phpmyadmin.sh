@@ -85,7 +85,7 @@ install_phpmyadmin() {
         source /etc/os-release
     fi
     if [[ "${ID:-}" == "ubuntu" || "${ID:-}" == "debian" ]]; then
-        apt-get update -qq 2>/dev/null
+        apt-get update -qq 2>/dev/null || true
         apt-get install -y php-mbstring php-zip php-gd php-curl php-xml apache2-utils wget unzip 2>/dev/null || true
     elif [[ "${ID:-}" == "almalinux" || "${ID:-}" == "rocky" || "${ID:-}" == "rhel" || "${ID:-}" == "centos" ]]; then
         dnf install -y php-mbstring php-zip php-gd php-curl php-xml httpd-tools wget unzip 2>/dev/null || true
