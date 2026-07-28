@@ -628,7 +628,7 @@ _install_single_php() {
         fi
         [ -z "$actual_ver" ] && actual_ver="$ver"
 
-        # Configure PHP Upload Limits
+        # Configure PHP Upload Limits & Socket Permissions
         local php_ini="/etc/php/$actual_ver/fpm/php.ini"
         if [[ -f "$php_ini" ]]; then
             sed -i -E "s/^[; ]*upload_max_filesize.*/upload_max_filesize = 128M/" "$php_ini"
@@ -636,6 +636,15 @@ _install_single_php() {
             sed -i -E "s/^[; ]*memory_limit.*/memory_limit = 256M/" "$php_ini"
             sed -i -E "s/^[; ]*max_execution_time.*/max_execution_time = 300/" "$php_ini"
             sed -i -E "s/^[; ]*max_input_vars.*/max_input_vars = 3000/" "$php_ini"
+        fi
+
+        # Fix 502 Bad Gateway: Ensure nginx user can access PHP-FPM unix socket
+        usermod -aG www-data nginx 2>/dev/null || true
+        usermod -aG nginx www-data 2>/dev/null || true
+        chmod 755 /run/php 2>/dev/null || true
+        local pool_conf="/etc/php/$actual_ver/fpm/pool.d/www.conf"
+        if [[ -f "$pool_conf" ]]; then
+            sed -i -E "s/^[; ]*listen\.mode.*/listen.mode = 0666/" "$pool_conf"
         fi
 
         systemctl enable php$actual_ver-fpm >/dev/null 2>&1 || systemctl enable php-fpm >/dev/null 2>&1
