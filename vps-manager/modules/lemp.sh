@@ -638,13 +638,26 @@ _install_single_php() {
             sed -i -E "s/^[; ]*max_input_vars.*/max_input_vars = 3000/" "$php_ini"
         fi
 
-        # Fix 502 Bad Gateway: Ensure nginx user can access PHP-FPM unix socket
+        # Fix 502 Bad Gateway & Auto-tune PHP-FPM pool for 524 Timeout prevention
         usermod -aG www-data nginx 2>/dev/null || true
         usermod -aG nginx www-data 2>/dev/null || true
         chmod 755 /run/php 2>/dev/null || true
+        
+        local total_ram_mb calc_children
+        total_ram_mb=$(free -m | awk '/^Mem:/{print $2}')
+        [ -z "$total_ram_mb" ] && total_ram_mb=1024
+        calc_children=$(( total_ram_mb / 50 ))
+        [ "$calc_children" -lt 10 ] && calc_children=10
+        [ "$calc_children" -gt 100 ] && calc_children=100
+
         local pool_conf="/etc/php/$actual_ver/fpm/pool.d/www.conf"
         if [[ -f "$pool_conf" ]]; then
             sed -i -E "s/^[; ]*listen\.mode.*/listen.mode = 0666/" "$pool_conf"
+            sed -i -E "s/^[; ]*pm\.max_children.*/pm.max_children = $calc_children/" "$pool_conf"
+            sed -i -E "s/^[; ]*pm\.start_servers.*/pm.start_servers = $(( calc_children / 4 ))/" "$pool_conf"
+            sed -i -E "s/^[; ]*pm\.min_spare_servers.*/pm.min_spare_servers = $(( calc_children / 6 ))/" "$pool_conf"
+            sed -i -E "s/^[; ]*pm\.max_spare_servers.*/pm.max_spare_servers = $(( calc_children / 2 ))/" "$pool_conf"
+            sed -i -E "s/^[; ]*pm\.max_requests.*/pm.max_requests = 1000/" "$pool_conf"
         fi
 
         systemctl enable php$actual_ver-fpm >/dev/null 2>&1 || systemctl enable php-fpm >/dev/null 2>&1
