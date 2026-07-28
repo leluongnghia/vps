@@ -159,8 +159,8 @@ else
     for site_dir in /var/www/*; do
         domain=\$(basename "\$site_dir")
         [[ "\$domain" == "html" ]] && continue
-        find "\$BACKUP_ROOT/\$domain" -name "\${domain}_*.tar.zst" -o -name "\${domain}_*.zip" -mtime +\$KEEP_DAYS -delete
-        find "\$BACKUP_ROOT/\$domain" -name "db_*.sql.zst" -o -name "db_*.sql.gz" -mtime +\$KEEP_DAYS -delete
+        find "\$BACKUP_ROOT/\$domain" -name "\${domain}_*.tar.gz" -o -name "\${domain}_*.zip" -mtime +\$KEEP_DAYS -delete
+        find "\$BACKUP_ROOT/\$domain" -name "db_*.sql.gz" -o -name "db_*.sql" -mtime +\$KEEP_DAYS -delete
     done
 fi
 
@@ -196,9 +196,9 @@ BACKUPSCRIPT
 
 # Helper: Ensure backup tools installed
 ensure_backup_tools() {
-    if ! command -v zip &> /dev/null || ! command -v zstd &> /dev/null; then
-        echo "Installing backup tools (zip, zstd)..."
-        if command -v apt-get &> /dev/null; then apt-get install -y zip zstd; elif command -v yum &> /dev/null; then yum install -y zip zstd; fi
+    if ! command -v zip &> /dev/null || ! command -v gzip &> /dev/null; then
+        echo "Installing backup tools (zip, gzip)..."
+        if command -v apt-get &> /dev/null; then apt-get install -y zip gzip; elif command -v yum &> /dev/null; then yum install -y zip gzip; fi
     fi
 }
 
@@ -225,15 +225,15 @@ backup_all_sites() {
         
         if [[ -d "$site_dir/public_html" ]]; then
             cd "$site_dir/public_html" || continue
-            ionice -c 3 nice -n 19 tar -c --exclude="*.log" . | ionice -c 3 nice -n 19 zstd -3 -o "$backup_dir/${domain}_${timestamp}.tar.zst"
+            zip -q -r "$backup_dir/${domain}_${timestamp}.zip" . -x "*.log" -x "*.tmp"
             cd - > /dev/null
-            echo -e "  ✅ Code: $(du -sh "$backup_dir/${domain}_${timestamp}.tar.zst" | cut -f1)"
+            echo -e "  ✅ Code: $(du -sh "$backup_dir/${domain}_${timestamp}.zip" | cut -f1)"
         fi
 
         db_name=$(echo "$domain" | tr -d '.-' | cut -c1-16)
         if mysql -e "USE $db_name" 2>/dev/null; then
-            ionice -c 3 nice -n 19 mysqldump "$db_name" --single-transaction --max_allowed_packet=1G | ionice -c 3 nice -n 19 zstd > "$backup_dir/db_${timestamp}.sql.zst"
-            echo -e "  ✅ DB: $(du -sh "$backup_dir/db_${timestamp}.sql.zst" | cut -f1)"
+            mysqldump "$db_name" --single-transaction --max_allowed_packet=1G | gzip > "$backup_dir/db_${timestamp}.sql.gz"
+            echo -e "  ✅ DB: $(du -sh "$backup_dir/db_${timestamp}.sql.gz" | cut -f1)"
         fi
         
         flock -u 200
@@ -334,8 +334,6 @@ perform_smart_restore() {
             unzip -o -q "$code_zip" -d "$tmp_extract"
         elif [[ "$code_zip" == *.tar.gz ]]; then
             tar -xzf "$code_zip" -C "$tmp_extract"
-        elif [[ "$code_zip" == *.tar.zst ]]; then
-            tar -I zstd -xf "$code_zip" -C "$tmp_extract"
         fi
         
         # Move content
@@ -366,8 +364,6 @@ perform_smart_restore() {
 
         if [[ "$db_sql" == *.gz ]]; then
             zcat "$db_sql" | mysql "$target_db_name"
-        elif [[ "$db_sql" == *.zst ]]; then
-            zstdcat "$db_sql" | mysql "$target_db_name"
         else
             mysql "$target_db_name" < "$db_sql"
         fi
@@ -448,8 +444,8 @@ restore_site_manual_upload() {
     local search_dir="/var/www/$target_domain/public_html"
 
     # Detect files
-    local code_file=$(find "$search_dir" -maxdepth 1 \( -name "*.zip" -o -name "*.tar.gz" -o -name "*.tar.zst" \) -type f | head -n 1)
-    local db_file=$(find "$search_dir" -maxdepth 1 \( -name "*.sql" -o -name "*.sql.gz" -o -name "*.sql.zst" -o \( -name "*.zst" ! -name "*.tar.zst" \) \) -type f | head -n 1)
+    local code_file=$(find "$search_dir" -maxdepth 1 \( -name "*.zip" -o -name "*.tar.gz" \) -type f | head -n 1)
+    local db_file=$(find "$search_dir" -maxdepth 1 \( -name "*.sql" -o -name "*.sql.gz" \) -type f | head -n 1)
     
     if [[ "$db_file" == "$code_file" ]]; then
         db_file=""
@@ -612,15 +608,15 @@ backup_site_local() {
         pause; return
     fi
     
-    log_info "Backing up Code (ZSTD)..."
+    log_info "Backing up Code (Zip)..."
     cd "/var/www/$domain/public_html" || return
-    ionice -c 3 nice -n 19 tar -c --exclude="*.log" . | ionice -c 3 nice -n 19 zstd -3 -o "$backup_dir/${domain}_$timestamp.tar.zst"
+    zip -q -r "$backup_dir/${domain}_$timestamp.zip" . -x "*.log" -x "*.tmp"
     cd - > /dev/null
     
     db_name=$(echo "$domain" | tr -d '.-' | cut -c1-16)
-    log_info "Backing up DB (ZSTD)..."
+    log_info "Backing up DB (Gzip)..."
     if mysql -e "USE $db_name" 2>/dev/null; then
-        ionice -c 3 nice -n 19 mysqldump "$db_name" --single-transaction --max_allowed_packet=1G | ionice -c 3 nice -n 19 zstd > "$backup_dir/db_$timestamp.sql.zst"
+        mysqldump "$db_name" --single-transaction --max_allowed_packet=1G | gzip > "$backup_dir/db_$timestamp.sql.gz"
     else
         log_warn "Database $db_name không tồn tại."
     fi
@@ -642,8 +638,8 @@ perform_gdrive_backup() {
     echo -e "\n${CYAN}>>> Đang xử lý: $domain${NC}"
     mkdir -p "$backup_dir"
     
-    local zip_file="$backup_dir/${domain}_$timestamp.tar.zst"
-    local db_file="$backup_dir/db_$timestamp.sql.zst"
+    local zip_file="$backup_dir/${domain}_$timestamp.zip"
+    local db_file="$backup_dir/db_$timestamp.sql.gz"
     
     exec 200>"/tmp/vps_backup_${domain}.lock"
     if ! flock -n 200; then
@@ -653,9 +649,9 @@ perform_gdrive_backup() {
     
     # 1. Backup Code
     if [[ -d "/var/www/$domain/public_html" ]]; then
-        log_info "Đang nén mã nguồn (Code ZSTD)..."
+        log_info "Đang nén mã nguồn (Code Zip)..."
         cd "/var/www/$domain/public_html" || return
-        ionice -c 3 nice -n 19 tar -c --exclude="*.log" --exclude="*.tmp" . | ionice -c 3 nice -n 19 zstd -3 -o "$zip_file"
+        zip -q -r "$zip_file" . -x "*.log" -x "*.tmp"
         cd - > /dev/null
     else
         log_warn "Không tìm thấy thư mục public_html cho $domain"
@@ -664,8 +660,8 @@ perform_gdrive_backup() {
     # 2. Backup DB
     local db_name=$(echo "$domain" | tr -d '.-' | cut -c1-16)
     if mysql -e "USE $db_name" 2>/dev/null; then
-        log_info "Đang dump Database (ZSTD)..."
-        ionice -c 3 nice -n 19 mysqldump "$db_name" --single-transaction --max_allowed_packet=1G | ionice -c 3 nice -n 19 zstd > "$db_file"
+        log_info "Đang dump Database (Gzip)..."
+        mysqldump "$db_name" --single-transaction --max_allowed_packet=1G | gzip > "$db_file"
     else
         log_warn "Database $db_name không tồn tại."
     fi
@@ -824,7 +820,7 @@ restore_site_local() {
             echo -e "$k. $fname ($(du -h "$file" | cut -f1))"
             ((k++))
         fi
-    done < <(find "$backup_dir" -maxdepth 1 \( -name "*.zip" -o -name "*.tar.zst" \) -type f | sort -r)
+    done < <(find "$backup_dir" -maxdepth 1 \( -name "*.zip" -o -name "*.tar.gz" \) -type f | sort -r)
     
     read -p "Chọn file Code [1-${#code_files[@]}] (Enter để bỏ qua): " c_sel
     code_file=""
@@ -893,15 +889,31 @@ restore_site_local() {
     # RESTORE CODE
     if [[ -n "$code_file" ]]; then
         log_info "Đang giải nén Code..."
-        unzip -o "$backup_dir/$code_file" -d "/var/www/$target_domain/"
+        local tmp_extract="/root/restore_tmp_${target_domain}"
+        rm -rf "$tmp_extract"; mkdir -p "$tmp_extract"
+        
+        if [[ "$code_file" == *.zip ]]; then
+            unzip -o -q "$backup_dir/$code_file" -d "$tmp_extract"
+        elif [[ "$code_file" == *.tar.gz ]]; then
+            tar -xzf "$backup_dir/$code_file" -C "$tmp_extract"
+        fi
+        
+        # Move content vào đúng public_html
+        local wp_root=$(find "$tmp_extract" -name "wp-config.php" -exec dirname {} \; | head -n 1)
+        if [[ -n "$wp_root" ]]; then
+            cp -a "$wp_root/." "/var/www/$target_domain/public_html/"
+        else
+            cp -a "$tmp_extract/." "/var/www/$target_domain/public_html/"
+        fi
+        rm -rf "$tmp_extract"
         chown -R www-data:www-data "/var/www/$target_domain/public_html"
         
         # Update wp-config with TARGET DB info (if we found it)
         if [[ -n "$target_db_pass" ]]; then
             log_info "Cập nhật wp-config.php theo Database đích..."
-            sed -i "s/DB_NAME', '.*'/DB_NAME', '$target_db_name'/" "/var/www/$target_domain/public_html/wp-config.php"
-            sed -i "s/DB_USER', '.*'/DB_USER', '$target_db_user'/" "/var/www/$target_domain/public_html/wp-config.php"
-            sed -i "s/DB_PASSWORD', '.*'/DB_PASSWORD', '$target_db_pass'/" "/var/www/$target_domain/public_html/wp-config.php"
+            sed -i "s|define([ ]*['\"]DB_NAME['\"],.*)|define( 'DB_NAME', '$target_db_name' );|" "/var/www/$target_domain/public_html/wp-config.php"
+            sed -i "s|define([ ]*['\"]DB_USER['\"],.*)|define( 'DB_USER', '$target_db_user' );|" "/var/www/$target_domain/public_html/wp-config.php"
+            sed -i "s|define([ ]*['\"]DB_PASSWORD['\"],.*)|define( 'DB_PASSWORD', '$target_db_pass' );|" "/var/www/$target_domain/public_html/wp-config.php"
         fi
     fi
     
@@ -936,61 +948,38 @@ restore_site_local() {
         
         # Install wp-cli if needed
         if ! command -v wp &> /dev/null; then
-             curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+             curl -sO https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
              chmod +x wp-cli.phar
              mv wp-cli.phar /usr/local/bin/wp
         fi
         
-        cd "/var/www/$target_domain/public_html"
-        # Run search-replace allow-root
-         if command -v wp &>/dev/null; then
-        local wp_php="php"
-        for bin in php8.4 php8.3 php8.2 php8.1 php8.0 php7.4 php; do
-            if command -v $bin &>/dev/null && $bin -m 2>/dev/null | grep -qi mysqli; then
-                wp_php=$bin
-                break
-            fi
-        done
-        local wp_cmd="$wp_php $(which wp)"
-        
-        $wp_cmd search-replace "http://$source_domain" "http://$target_domain" --allow-root
-        $wp_cmd search-replace "https://$source_domain" "https://$target_domain" --allow-root
-        $wp_cmd search-replace "$source_domain" "$target_domain" --allow-root
-    fi    
+        if command -v wp &>/dev/null; then
+            cd "/var/www/$target_domain/public_html"
+            local wp_php="php"
+            for bin in php8.4 php8.3 php8.2 php8.1 php8.0 php7.4 php; do
+                if command -v $bin &>/dev/null && $bin -m 2>/dev/null | grep -qi mysqli; then
+                    wp_php=$bin
+                    break
+                fi
+            done
+            local wp_cmd="$wp_php $(which wp)"
+            
+            $wp_cmd search-replace "http://$source_domain" "http://$target_domain" --allow-root --quiet
+            $wp_cmd search-replace "https://$source_domain" "https://$target_domain" --allow-root --quiet
+            $wp_cmd search-replace "$source_domain" "$target_domain" --allow-root --quiet
+            $wp_cmd cache flush --allow-root &>/dev/null
+        fi
         log_info "Đã thay thế URL xong."
     fi
     
-    log_info "Restore hoàn tất!"
-    pause
-}
-
-restore_site_gdrive() {
-    # Select site from list
-    source "$(dirname "${BASH_SOURCE[0]}")/site.sh"
-    select_site || return
-    domain=$SELECTED_DOMAIN
-    read -p "Remote name (gdrive): " remote
-    remote=${remote:-gdrive}
+    # Flush Redis
+    if command -v redis-cli &>/dev/null; then redis-cli flushall &>/dev/null; fi
     
-    log_info "Files on Cloud:"
-    rclone lsl "$remote:$GDRIVE_DIR/$domain/" | tail -n 10
+    # Fix permissions
+    find "/var/www/$target_domain/public_html" -type d -exec chmod 755 {} +
+    find "/var/www/$target_domain/public_html" -type f -exec chmod 644 {} +
     
-    read -p "Cloud Code filename: " cloud_code
-    read -p "Cloud DB filename: " cloud_db
-    
-    tmp_dir="/root/backups/$domain/restore_tmp"
-    mkdir -p "$tmp_dir"
-    
-    log_info "Downloading..."
-    rclone copy "$remote:$GDRIVE_DIR/$domain/$cloud_code" "$tmp_dir/"
-    rclone copy "$remote:$GDRIVE_DIR/$domain/$cloud_db" "$tmp_dir/"
-    
-    log_info "Restoring..."
-    unzip -o "$tmp_dir/$cloud_code" -d "/var/www/$domain/"
-    zcat "$tmp_dir/$cloud_db" | mysql $(echo "$domain" | tr -d '.')
-    
-    rm -rf "$tmp_dir"
-    log_info "Done."
+    log_info "✅ Restore hoàn tất!"
     pause
 }
 
