@@ -470,8 +470,11 @@ server {
     }
 
     location ~ \.php$ {
-        include snippets/fastcgi-php.conf;
+        try_files \$uri =404;
         fastcgi_pass $php_sock;
+        fastcgi_index index.php;
+        fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
+        include fastcgi_params;
         fastcgi_buffer_size 128k;
         fastcgi_buffers 4 256k;
         fastcgi_busy_buffers_size 256k;
