@@ -36,7 +36,9 @@ echo -e "${CYAN}[1/5] Kiểm tra và cài đặt các gói phụ thuộc cơ b�
 if [[ -f /etc/redhat-release ]]; then
     dnf install -y curl wget git unzip tar socat cronie &>/dev/null
 else
-    apt-get update -qq
+    # Clean up broken PPA files from previous attempts if any
+    rm -f /etc/apt/sources.list.d/*ondrej*php* 2>/dev/null || true
+    apt-get update -qq || true
     apt-get install -y curl wget git unzip tar socat cron lsb-release &>/dev/null
 fi
 echo -e "${GREEN}  ✓ Xong${NC}"

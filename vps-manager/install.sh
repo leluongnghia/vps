@@ -50,7 +50,8 @@ install_dependencies() {
         if [[ -f /etc/redhat-release ]]; then
             dnf install -y curl wget git unzip tar socat cronie
         else
-            apt-get update -qq
+            rm -f /etc/apt/sources.list.d/*ondrej*php* 2>/dev/null || true
+            apt-get update -qq || true
             apt-get install -y curl wget git unzip tar socat cron lsb-release
         fi
     fi

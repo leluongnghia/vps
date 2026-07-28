@@ -534,6 +534,9 @@ install_php() {
         dnf module reset php -y >/dev/null 2>&1
     else
         log_info "Adding PHP repository (ondrej/php)..."
+        # Clean up any existing broken PPA files from previous attempts
+        rm -f /etc/apt/sources.list.d/*ondrej*php* 2>/dev/null || true
+
         pkg_install software-properties-common curl gnupg2 ca-certificates lsb-release > /dev/null 2>&1
 
         # Get distro codename - fallback to 'noble' if ondrej PPA doesn't support it yet
@@ -551,11 +554,12 @@ install_php() {
             codename="noble"
         fi
 
-        # Add PPA manually with correct codename
-        local ppa_list="/etc/apt/sources.list.d/ondrej-ubuntu-php.list"
+        # Add PPA manually with correct codename (no add-apt-repository call to avoid broken auto-detected sources)
+        mkdir -p /etc/apt/trusted.gpg.d
         curl -fsSL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x14AA40EC0831756756D7F66C4F4EA0AAE5267A6C" \
-            | gpg --dearmor -o /etc/apt/trusted.gpg.d/ondrej-php.gpg 2>/dev/null || \
-            add-apt-repository -y ppa:ondrej/php > /dev/null 2>&1
+            | gpg --dearmor -o /etc/apt/trusted.gpg.d/ondrej-php.gpg 2>/dev/null || true
+
+        local ppa_list="/etc/apt/sources.list.d/ondrej-ubuntu-php.list"
         echo "deb https://ppa.launchpadcontent.net/ondrej/php/ubuntu ${codename} main" > "$ppa_list"
 
         pkg_update > /dev/null 2>&1
