@@ -135,6 +135,8 @@ install_phpmyadmin() {
     # ── Step 4: Install ────────────────────────────────────────
     _pma_log "Step 4/7: Cài đặt vào ${PMA_DIR}..."
     rm -rf "$PMA_DIR"
+    # Ensure parent directory exists (may not exist on Nginx-only setup)
+    mkdir -p "$(dirname "$PMA_DIR")"
     # Find extracted folder (handle version mismatch in folder name)
     local extracted_dir
     extracted_dir=$(find "$TEMP_DIR" -maxdepth 1 -type d -name "phpMyAdmin-*" | head -1)
