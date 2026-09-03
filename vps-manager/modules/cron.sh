@@ -223,11 +223,14 @@ setup_wp_cron_menu() {
     echo -e "     ${CYAN}→ wp cron event run --due-now${NC}"
     echo -e "     ${YELLOW}✔ Không chiếm FPM worker, tự động pick up events mới${NC}"
     echo ""
-    read -p "Chọn phương thức [1-2]: " wpcron_method
+    echo -e "  0. Quay lại"
+    echo ""
+    read -p "Chọn phương thức [0-2]: " wpcron_method
 
     case $wpcron_method in
         1) _setup_wp_cron_wget ;;
         2) _setup_wp_cron_wpcli ;;
+        0) return ;;
         *) echo -e "${RED}Lựa chọn không hợp lệ.${NC}"; pause ;;
     esac
 }

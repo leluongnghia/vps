@@ -4,32 +4,34 @@
 # Hỗ trợ: Ubuntu/Debian và AlmaLinux/RHEL/Rocky
 
 zram_menu() {
-    clear
-    echo -e "${BLUE}=================================================${NC}"
-    echo -e "${GREEN}       Quản lý ZRAM Swap (Swap nén trên RAM)${NC}"
-    echo -e "${BLUE}=================================================${NC}"
-    echo -e ""
+    while true; do
+        clear
+        echo -e "${BLUE}=================================================${NC}"
+        echo -e "${GREEN}       Quản lý ZRAM Swap (Swap nén trên RAM)${NC}"
+        echo -e "${BLUE}=================================================${NC}"
+        echo -e ""
 
-    # Hiển thị trạng thái hiện tại
-    _zram_detect_state
-    _zram_print_status
+        # Hiển thị trạng thái hiện tại
+        _zram_detect_state
+        _zram_print_status
 
-    echo -e ""
-    echo -e "${BLUE}=================================================${NC}"
-    echo -e "1. Bật ZRAM (Cài đặt + Kích hoạt)"
-    echo -e "2. Tắt ZRAM (Gỡ bỏ + Khôi phục Swap đĩa)"
-    echo -e "3. Xem thông tin chi tiết ZRAM"
-    echo -e "0. Quay lại"
-    echo -e "${BLUE}=================================================${NC}"
-    read -p "Nhập lựa chọn [0-3]: " choice
+        echo -e ""
+        echo -e "${BLUE}=================================================${NC}"
+        echo -e "1. Bật ZRAM (Cài đặt + Kích hoạt)"
+        echo -e "2. Tắt ZRAM (Gỡ bỏ + Khôi phục Swap đĩa)"
+        echo -e "3. Xem thông tin chi tiết ZRAM"
+        echo -e "0. Quay lại"
+        echo -e "${BLUE}=================================================${NC}"
+        read -p "Nhập lựa chọn [0-3]: " choice
 
-    case $choice in
-        1) zram_install ;;
-        2) zram_uninstall ;;
-        3) zram_info; pause ;;
-        0) return ;;
-        *) echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause ;;
-    esac
+        case $choice in
+            1) zram_install ;;
+            2) zram_uninstall ;;
+            3) zram_info; pause ;;
+            0) return ;;
+            *) echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause ;;
+        esac
+    done
 }
 
 # ────────────────────────────────────────────────────────────

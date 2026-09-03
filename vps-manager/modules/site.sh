@@ -3,50 +3,52 @@
 # modules/site.sh - Site & Domain Management
 
 manage_sites_menu() {
-    clear
-    echo -e "${BLUE}=================================================${NC}"
-    echo -e "${GREEN}          Quản lý Website & Tên miền${NC}"
-    echo -e "${BLUE}=================================================${NC}"
-    echo -e "1. Danh sách Tên miền"
-    echo -e "2. Thêm Tên miền mới"
-    echo -e "3. Xóa Tên miền"
-    echo -e "4. Thay đổi Tên miền (Rename Domain)"
-    echo -e "5. Cấu hình lại Nginx (Rewrite Vhost)"
-    echo -e "6. Parked/Alias Domain"
-    echo -e "7. Redirect Domain"
-    echo -e "8. Đổi phiên bản PHP cho Website"
-    echo -e "9. Clone/Nhân bản Website"
-    echo -e "10. Đổi thông tin Database (wp-config)"
-    echo -e "11. Đặt mật khẩu bảo vệ thư mục"
-    echo -e "12. Fix Permissions"
-    echo -e "13. Kiểm tra/Sửa lỗi WordPress Core"
-    echo -e "14. Bật/Tắt FastCGI Cache (Dev Mode)"
-    echo -e "0. Quay lại Menu chính"
-    echo -e "${BLUE}=================================================${NC}"
-    read -p "Nhập lựa chọn [0-14]: " choice
+    while true; do
+        clear
+        echo -e "${BLUE}=================================================${NC}"
+        echo -e "${GREEN}          Quản lý Website & Tên miền${NC}"
+        echo -e "${BLUE}=================================================${NC}"
+        echo -e "1. Danh sách Tên miền"
+        echo -e "2. Thêm Tên miền mới"
+        echo -e "3. Xóa Tên miền"
+        echo -e "4. Thay đổi Tên miền (Rename Domain)"
+        echo -e "5. Cấu hình lại Nginx (Rewrite Vhost)"
+        echo -e "6. Parked/Alias Domain"
+        echo -e "7. Redirect Domain"
+        echo -e "8. Đổi phiên bản PHP cho Website"
+        echo -e "9. Clone/Nhân bản Website"
+        echo -e "10. Đổi thông tin Database (wp-config)"
+        echo -e "11. Đặt mật khẩu bảo vệ thư mục"
+        echo -e "12. Fix Permissions"
+        echo -e "13. Kiểm tra/Sửa lỗi WordPress Core"
+        echo -e "14. Bật/Tắt FastCGI Cache (Dev Mode)"
+        echo -e "0. Quay lại Menu chính"
+        echo -e "${BLUE}=================================================${NC}"
+        read -p "Nhập lựa chọn [0-14]: " choice
 
-    case $choice in
-        1) list_sites ;;
-        2) 
-            echo -e "1. WordPress\n2. PHP Thuần\n3. Node.js (Host + PM2)\n4. Docker Proxy"
-            read -p "Chọn loại [1-4]: " t
-            if [[ "$t" == "1" ]]; then add_new_site "wordpress"; elif [[ "$t" == "2" ]]; then add_new_site "php"; elif [[ "$t" == "3" ]]; then add_new_site "nodejs"; elif [[ "$t" == "4" ]]; then add_new_site "docker_proxy"; else echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause; manage_sites_menu; fi
-            ;;
-        3) delete_site ;;
-        4) rename_site ;;
-        5) rewrite_vhost_config ;;
-        6) manage_parked_domains ;;
-        7) manage_redirects ;;
-        8) change_site_php ;;
-        9) clone_site ;;
-        10) update_site_db_info ;;
-        11) protect_folder ;;
-        12) fix_permissions ;;
-        13) check_wp_core ;;
-        14) toggle_site_cache ;;
-        0) return ;;
-        *) echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause ;;
-    esac
+        case $choice in
+            1) list_sites ;;
+            2) 
+                echo -e "1. WordPress\n2. PHP Thuần\n3. Node.js (Host + PM2)\n4. Docker Proxy\n0. Quay lại"
+                read -p "Chọn loại [0-4]: " t
+                if [[ "$t" == "1" ]]; then add_new_site "wordpress"; elif [[ "$t" == "2" ]]; then add_new_site "php"; elif [[ "$t" == "3" ]]; then add_new_site "nodejs"; elif [[ "$t" == "4" ]]; then add_new_site "docker_proxy"; elif [[ "$t" == "0" ]]; then continue; else echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause; fi
+                ;;
+            3) delete_site ;;
+            4) rename_site ;;
+            5) rewrite_vhost_config ;;
+            6) manage_parked_domains ;;
+            7) manage_redirects ;;
+            8) change_site_php ;;
+            9) clone_site ;;
+            10) update_site_db_info ;;
+            11) protect_folder ;;
+            12) fix_permissions ;;
+            13) check_wp_core ;;
+            14) toggle_site_cache ;;
+            0) return ;;
+            *) echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause ;;
+        esac
+    done
 }
 
 add_new_site() {

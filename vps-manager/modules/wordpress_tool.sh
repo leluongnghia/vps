@@ -3,32 +3,34 @@
 # modules/wordpress_tool.sh - Advanced WordPress Management
 
 wp_tool_menu() {
-    clear
-    echo -e "${BLUE}=================================================${NC}"
-    echo -e "${GREEN}          Quản lý WordPress Nâng cao${NC}"
-    echo -e "${BLUE}=================================================${NC}"
-    echo -e "1. Quản lý Core & Plugins (Update, Install, Delete)"
-    echo -e "2. Quản lý Users (List, Reset Password)"
-    echo -e "3. Bảo mật (Lockdown, Disable XMLRPC, Edit File)"
-    echo -e "4. Cấu hình Nginx & Cache (Yoast, RankMath, WebP)"
-    echo -e "5. Công cụ Databases (Optimize, Delete Revisions)"
-    echo -e "6. Cron & Debug (WP-Cron, Debug Mode)"
-    echo -e "7. Cài đặt ExifTool (GeoTag Local SEO hình ảnh)"
-    echo -e "0. Quay lại Menu chính"
-    echo -e "${BLUE}=================================================${NC}"
-    read -p "Nhập lựa chọn [0-7]: " choice
+    while true; do
+        clear
+        echo -e "${BLUE}=================================================${NC}"
+        echo -e "${GREEN}          Quản lý WordPress Nâng cao${NC}"
+        echo -e "${BLUE}=================================================${NC}"
+        echo -e "1. Quản lý Core & Plugins (Update, Install, Delete)"
+        echo -e "2. Quản lý Users (List, Reset Password)"
+        echo -e "3. Bảo mật (Lockdown, Disable XMLRPC, Edit File)"
+        echo -e "4. Cấu hình Nginx & Cache (Yoast, RankMath, WebP)"
+        echo -e "5. Công cụ Databases (Optimize, Delete Revisions)"
+        echo -e "6. Cron & Debug (WP-Cron, Debug Mode)"
+        echo -e "7. Cài đặt ExifTool (GeoTag Local SEO hình ảnh)"
+        echo -e "0. Quay lại Menu chính"
+        echo -e "${BLUE}=================================================${NC}"
+        read -p "Nhập lựa chọn [0-7]: " choice
 
-    case $choice in
-        1) wp_core_plugin_menu ;;
-        2) wp_user_menu ;;
-        3) wp_security_menu ;;
-        4) wp_nginx_config_menu ;;
-        5) wp_db_tool_menu ;;
-        6) wp_config_tool_menu ;;
-        7) install_exiftool ;;
-        0) return ;;
-        *) echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause ;;
-    esac
+        case $choice in
+            1) wp_core_plugin_menu ;;
+            2) wp_user_menu ;;
+            3) wp_security_menu ;;
+            4) wp_nginx_config_menu ;;
+            5) wp_db_tool_menu ;;
+            6) wp_config_tool_menu ;;
+            7) install_exiftool ;;
+            0) return ;;
+            *) echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause ;;
+        esac
+    done
 }
 
 # --- Helpers ---
@@ -248,27 +250,32 @@ wp_security_menu() {
 wp_nginx_config_menu() {
     select_wp_site || return
     
-    echo -e "\n${YELLOW}Nginx SEO Configs - $SELECTED_DOMAIN${NC}"
-    echo "1. Apply Yoast SEO Nginx Rules (Standard + Premium)"
-    echo "2. Apply Rank Math SEO Nginx Rules (with XSL style support)"
-    echo "3. Apply WebP Express Rules"
-    echo "4. Block User Enumeration API (Security)"
-    echo "5. Apply Advanced Security Hardening (Block Backups, sensitive files, PHP in Cache)"
-    echo "0. Back"
-    read -p "Select: " c
-    
     # Use sites-available config
-    conf="/etc/nginx/sites-available/$SELECTED_DOMAIN"
-    
+    local conf="/etc/nginx/sites-available/$SELECTED_DOMAIN"
     if [[ ! -f "$conf" ]]; then
         echo -e "${RED}Không tìm thấy file cấu hình Nginx cho $SELECTED_DOMAIN${NC}"
         pause; return
     fi
     
-    snippet_dir="/etc/nginx/snippets"
+    local snippet_dir="/etc/nginx/snippets"
     mkdir -p "$snippet_dir"
 
-    case $c in
+    while true; do
+        clear
+        echo -e "${BLUE}=================================================${NC}"
+        echo -e "${GREEN}   ⚙️  Nginx SEO & Security Configs - $SELECTED_DOMAIN${NC}"
+        echo -e "${BLUE}=================================================${NC}"
+        echo "1. Apply Yoast SEO Nginx Rules (Standard + Premium)"
+        echo "2. Apply Rank Math SEO Nginx Rules (with XSL style support)"
+        echo "3. Apply WebP Express Rules"
+        echo "4. Block User Enumeration API (Security)"
+        echo "5. Apply Advanced Security Hardening (Block Backups, sensitive files, PHP in Cache)"
+        echo "0. Quay lại"
+        echo -e "${BLUE}=================================================${NC}"
+        read -p "Chọn [0-5]: " c
+
+        case $c in
+            0) return ;;
         1) # Yoast
             snippet="$snippet_dir/yoast-$SELECTED_DOMAIN.conf"
             log_info "Tạo cấu hình Yoast SEO (Premium)..."
@@ -386,9 +393,11 @@ EOF
             fi
             nginx -t && systemctl reload nginx
             log_info "Đã áp dụng Security Hardening Rules thành công."
+            pause
             ;;
-    esac
-    pause
+            *) echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause ;;
+        esac
+    done
 }
 
 # --- 5. DB Tools ---
@@ -396,23 +405,31 @@ wp_db_tool_menu() {
     select_wp_site || return
     ensure_wp_cli
     
-    echo -e "\n${YELLOW}Database Tools - $SELECTED_DOMAIN${NC}"
-    echo "1. Optimize Database"
-    echo "2. Delete Post Revisions"
-    echo "3. Delete Spam Comments"
-    echo "0. Back"
-    read -p "Select: " c
-    
-    case $c in
-        1) $WP_CMD db optimize; pause ;;
-        2) 
-            log_info "Deleting revisions..."
-            $WP_CMD post delete $($WP_CMD post list --post_type='revision' --format=ids) --force 2>/dev/null
-            log_info "Done."
-            pause 
-            ;;
-        3) $WP_CMD comment delete $($WP_CMD comment list --status=spam --format=ids) --force 2>/dev/null; pause ;;
-    esac
+    while true; do
+        clear
+        echo -e "${BLUE}=================================================${NC}"
+        echo -e "${GREEN}   🗄️  Database Tools - $SELECTED_DOMAIN${NC}"
+        echo -e "${BLUE}=================================================${NC}"
+        echo "1. Optimize Database"
+        echo "2. Delete Post Revisions"
+        echo "3. Delete Spam Comments"
+        echo "0. Quay lại"
+        echo -e "${BLUE}=================================================${NC}"
+        read -p "Chọn [0-3]: " c
+        
+        case $c in
+            1) $WP_CMD db optimize; pause ;;
+            2) 
+                log_info "Deleting revisions..."
+                $WP_CMD post delete $($WP_CMD post list --post_type='revision' --format=ids) --force 2>/dev/null
+                log_info "Done."
+                pause 
+                ;;
+            3) $WP_CMD comment delete $($WP_CMD comment list --status=spam --format=ids) --force 2>/dev/null; pause ;;
+            0) return ;;
+            *) echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause ;;
+        esac
+    done
 }
 
 # --- 6. Config Tools (Debug/Maintenance) ---
