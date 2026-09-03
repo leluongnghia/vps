@@ -496,24 +496,33 @@ setup_geoip_block() {
     local geoip_conf="/etc/nginx/conf.d/geoip_block.conf"
     {
         echo "# GeoIP Block - Tạo bởi VPS Manager"
-        echo "geoip2 ${geoip_dir}/GeoLite2-Country.mmdb {"
-        echo "    \$geoip2_country_code country iso_code;"
-        echo "}"
-        echo ""
-        echo "map \$geoip2_country_code \$blocked_country {"
+        echo "map \$http_cf_ipcountry \$is_blocked_country {"
         echo "    default 0;"
         for code in $country_list; do
             code=$(echo "$code" | tr '[:lower:]' '[:upper:]')
             echo "    $code 1;"
         done
         echo "}"
+        echo ""
+        echo "# Whitelist Search Engine Crawlers (Google, Facebook, Bing...)"
+        echo "map \$http_user_agent \$is_search_bot {"
+        echo "    default 0;"
+        echo "    \"~*(Googlebot|bingbot|facebookexternalhit|Facebot|Twitterbot|Applebot|DuckDuckBot|YandexBot)\" 1;"
+        echo "}"
     } > "$geoip_conf"
 
     # Tạo snippet để include trong server block
     cat > /etc/nginx/snippets/geoip_block.conf <<'GEOF'
 # Block countries defined in geoip_block.conf
-if ($blocked_country) {
-    return 403 "Access Denied - Geographic restriction.";
+set $country_block_flag 0;
+if ($is_blocked_country) {
+    set $country_block_flag 1;
+}
+if ($is_search_bot) {
+    set $country_block_flag 0;
+}
+if ($country_block_flag = 1) {
+    return 403 "Access Denied: Your country ($http_cf_ipcountry) is restricted from accessing this website.";
 }
 GEOF
 
