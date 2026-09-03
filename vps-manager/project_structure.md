@@ -27,7 +27,6 @@ vps-manager/
     ├── diagnose.sh             # Kiểm tra sức khỏe hệ thống, Port đang mở, hạn SSL và phân tích log
     ├── disk.sh                 # Phân tích dung lượng đĩa, quét file >100MB, Logrotate chống tràn đĩa
     ├── lemp.sh                 # Cài đặt nền tảng LEMP (Nginx, MariaDB, PHP-FPM, phpMyAdmin)
-    ├── monit.sh                # Cài đặt & cấu hình Monit Watchdog tự động khôi phục dịch vụ
     ├── nginx.sh                # Cấu hình máy chủ Nginx, quản lý vhost, cứu hộ config
     ├── php.sh                  # Quản lý đa phiên bản PHP (7.4 -> 8.4), gỡ PHP và tinh chỉnh php.ini
     ├── phpmyadmin.sh           # Cài đặt, bảo mật và thay đổi đường dẫn truy cập phpMyAdmin
@@ -72,7 +71,6 @@ vps-manager/
 *   **`diagnose.sh`**: Chẩn đoán toàn diện sức khỏe hệ thống, quét các Port mạng đang lắng nghe (`ss -tulpn`), quét thời hạn chứng chỉ SSL và phân tích log lỗi.
 *   **`disk.sh`**: Quản lý dung lượng lưu trữ, tìm kiếm nhanh các file lớn nhất toàn hệ thống (>100MB), cấu hình Logrotate tự động chống tràn đĩa.
 *   **`lemp.sh`**: Mô-đun cài đặt cốt lõi LEMP Stack (Nginx mainline, MariaDB với bind-address nội bộ an toàn, PHP-FPM tối ưu).
-*   **`monit.sh`**: Thiết lập dịch vụ giám sát hệ thống Monit Watchdog tự động khôi phục dịch vụ khi gặp sự cố crash.
 *   **`nginx.sh`**: Quản lý cấu hình dịch vụ Nginx toàn cục, vhost, kiểm tra cú pháp và công cụ tự động khắc phục lỗi cấu hình.
 *   **`php.sh`**: Quản lý đa phiên bản PHP (7.4 -> 8.4), gỡ cài đặt phiên bản PHP không dùng và tinh chỉnh thông số `php.ini` (upload limit, memory limit, timeout).
 *   **`phpmyadmin.sh`**: Cài đặt, bảo mật và thay đổi đường dẫn truy cập phpMyAdmin với HTTP Auth bảo vệ hai lớp.

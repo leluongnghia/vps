@@ -48,8 +48,7 @@ diagnose_system() {
         fi
     done
 
-    # Monit & Security
-    check_service_status "monit" "Watchdog (Monit)"
+    # Security Services
     check_service_status "ssh" "SSH Service" || check_service_status "sshd" "SSH Service"
     check_service_status "fail2ban" "Fail2ban Security"
     

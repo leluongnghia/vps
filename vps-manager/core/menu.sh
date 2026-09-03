@@ -55,11 +55,10 @@ _nginx_main_menu() {
     echo -e " 14. 🔄 Quản lý Dịch vụ Hệ thống (Restart, Reload, Stop, Status)"
     echo -e " 15. 🏥 Chẩn đoán Hệ thống (Health Check, Port đang mở, Hạn SSL)"
     echo -e " 16. 🛠️  Công cụ Bổ trợ & AppAdmin (Tối ưu ảnh WebP, HTTP Auth)"
-    echo -e " 17. 🛡️  Watchdog Giám sát Dịch vụ (Monit - Auto Recovery)"
-    echo -e " 18. 🔄 Cập nhật VPS Manager (Đồng bộ từ GitHub)"
+    echo -e " 17. 🔄 Cập nhật VPS Manager (Đồng bộ từ GitHub)"
     echo -e " 0.  🚪 Thoát"
     echo -e "${BLUE}=================================================${NC}"
-    read -p "Nhập lựa chọn [0-18]: " choice
+    read -p "Nhập lựa chọn [0-17]: " choice
 
     case $choice in
         1)  _nginx_sub_menu ;;
@@ -78,8 +77,7 @@ _nginx_main_menu() {
         14) source "$ROOT_DIR/modules/service.sh";               service_menu          ;;
         15) source "$ROOT_DIR/modules/diagnose.sh";              diagnose_system       ;;
         16) source "$ROOT_DIR/modules/appadmin.sh";              appadmin_menu         ;;
-        17) source "$ROOT_DIR/modules/monit.sh";                 monit_menu            ;;
-        18) source "$ROOT_DIR/modules/update.sh";                do_update             ;;
+        17) source "$ROOT_DIR/modules/update.sh";                do_update             ;;
         0)  echo -e "${GREEN}Exiting... Goodbye!${NC}"; exit 0 ;;
         *)  echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause ;;
     esac
