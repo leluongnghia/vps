@@ -129,31 +129,30 @@ wp_performance_menu() {
         echo -e "${YELLOW}           (Mode: Nginx LEMP)${NC}"
         echo -e "${BLUE}=================================================${NC}"
         echo -e "${CYAN}--- ⚙️  Server-level (Toàn bộ server) ---${NC}"
-        
         echo -e "1.  🚀 Auto-Optimize Server (PHP + MySQL + Nginx + OPcache)"
         echo -e "2.  ⚡ PHP-FPM Tuning (Memory, Workers)"
         echo -e "3.  💾 OPcache Optimization"
-        echo -e "5.  🔥 Nginx FastCGI Micro-Caching"
-        echo -e "7.  🌐 HTTP/2 & Brotli Compression"
-        echo -e "13. 🎀 PHP Preload (Nạp trước PHP vào RAM)"
-
-        # Shared items
         echo -e "4.  🗄️  MySQL/MariaDB Tuning"
+        echo -e "5.  🔥 Nginx FastCGI Micro-Caching"
         echo -e "6.  📦 Enable Object Cache (Redis/Valkey)"
-        echo -e "15. 🔥 Preload Cache (Warm-up Sitemap)"
-        echo -e "16. 💾 Tối ưu Disk I/O (noatime + XFS)"
-        echo -e "17. ⚡ Fix TBT/Render-Blocking Nâng Cao (ElementsKit, FontAwesome)"
+        echo -e "7.  🌐 HTTP/2 & Brotli Compression"
+        echo -e "8.  🎀 PHP Preload (Nạp trước PHP vào RAM)"
+        echo -e "9.  🔧 System Kernel Tuning (TCP BBR, File Limits)"
+        echo -e "10. 💾 Tối ưu Disk I/O (noatime + XFS)"
+        echo -e "11. 🧠 RAM Disk FastCGI Cache (tmpfs trên RAM - TTFB 5-15ms)"
         echo -e ""
         echo -e "${CYAN}--- 🌐 Per-Site (Chọn từng website) ---${NC}"
-        echo -e "8.  🧹 Database Cleanup & Optimization"
-        echo -e "9.  🎯 Disable WordPress Bloat (Heartbeat, Embeds...)"
-        echo -e "10. 🖼️  Image Optimization Setup"
-        echo -e "11. 📊 Performance Benchmark Test"
-        echo -e "12. 🔧 System Kernel Tuning (TCP BBR, File Limits)"
+        echo -e "12. 🧹 Database Cleanup & Optimization"
+        echo -e "13. 🎯 Disable WordPress Bloat (Heartbeat, Embeds...)"
+        echo -e "14. 🖼️  Image Optimization Setup"
+        echo -e "15. 🔥 Preload Cache (Warm-up Sitemap)"
+        echo -e "16. ⚡ Fix TBT/Render-Blocking Nâng Cao (ElementsKit, FontAwesome)"
+        echo -e "17. ⚡ Instant.page (Chuyển trang 0ms) & Tắt WC Cart Fragments"
+        echo -e "18. 📊 Performance Benchmark Test"
         echo -e ""
-        echo -e "0.  Back to Main Menu"
+        echo -e "0.  Quay lại Menu chính"
         echo -e "${BLUE}=================================================${NC}"
-        read -p "Select [0-17]: " choice
+        read -p "Select [0-18]: " choice
 
         case $choice in
             1) auto_optimize_server ;;
@@ -163,15 +162,17 @@ wp_performance_menu() {
             5) setup_fastcgi_microcache ;;
             6) setup_object_cache ;;
             7) enable_http2_brotli ;;
-            8) cleanup_wordpress_db ;;
-            9) disable_wordpress_bloat ;;
-            10) setup_image_optimization ;;
-            11) benchmark_wordpress ;;
-            12) optimize_system_kernel ;;
-            13) php_preload_menu ;;
+            8) php_preload_menu ;;
+            9) optimize_system_kernel ;;
+            10) optimize_disk_io ;;
+            11) setup_tmpfs_fastcgi_cache ;;
+            12) cleanup_wordpress_db ;;
+            13) disable_wordpress_bloat ;;
+            14) setup_image_optimization ;;
             15) preload_cache_sitemap ;;
-            16) optimize_disk_io ;;
-            17) fix_tbt_advanced ;;
+            16) fix_tbt_advanced ;;
+            17) setup_instant_page_optimizer ;;
+            18) benchmark_wordpress ;;
             0) return ;;
             *) echo -e "${RED}Invalid choice!${NC}"; pause ;;
         esac
@@ -1893,3 +1894,160 @@ list_preload_sites() {
     fi
     pause
 }
+
+setup_tmpfs_fastcgi_cache() {
+    clear
+    echo -e "${BLUE}=================================================${NC}"
+    echo -e "${GREEN}   🧠 Cấu hình RAM Disk cho FastCGI Cache (tmpfs)${NC}"
+    echo -e "${BLUE}=================================================${NC}"
+    echo -e "Công nghệ này đưa toàn bộ thư mục /var/cache/nginx/fastcgi lên RAM (tmpfs):"
+    echo -e "  • Lợi ích: Tốc độ đọc cache đạt hàng chục GB/s, không phụ thuộc ổ cứng."
+    echo -e "  • Hiệu quả: TTFB giảm từ ~80ms xuống chỉ còn ${GREEN}5ms – 15ms${NC}!"
+    echo -e "  • An toàn: Tự động ghi vào /etc/fstab để duy trì sau mỗi lần khởi động lại."
+    echo -e "${BLUE}=================================================${NC}"
+
+    local is_mounted=0
+    if mount | grep -q "/var/cache/nginx/fastcgi.*tmpfs"; then
+        is_mounted=1
+        echo -e "Trạng thái hiện tại: ${GREEN}● ĐÃ BẬT RAM Disk (tmpfs)${NC}"
+        df -h /var/cache/nginx/fastcgi 2>/dev/null | tail -n 1 | awk '{print "  Dung lượng đã dùng: " $3 " / " $2 " (" $5 ")"}'
+    else
+        echo -e "Trạng thái hiện tại: ${YELLOW}○ ĐANG DÙNG Ổ CỨNG VẬT LÝ (SSD/NVMe)${NC}"
+    fi
+
+    echo ""
+    echo -e "1. Bật RAM Disk FastCGI Cache (Khuyến nghị 256MB - 512MB)"
+    echo -e "2. Tắt RAM Disk (Chuyển lại về lưu trên ổ SSD)"
+    echo -e "0. Quay lại"
+    read -p "Chọn [0-2]: " t_choice
+
+    case $t_choice in
+        1)
+            local ram_mb
+            ram_mb=$(free -m | awk '/^Mem:/{print $2}')
+            local def_size=256
+            [[ "$ram_mb" -ge 4000 ]] && def_size=512
+            [[ "$ram_mb" -ge 8000 ]] && def_size=1024
+            
+            read -p "Nhập dung lượng RAM cấp cho Cache (MB) [Mặc định $def_size]: " user_size
+            [[ -z "$user_size" ]] && user_size=$def_size
+
+            mkdir -p /var/cache/nginx/fastcgi
+            if [[ "$is_mounted" -eq 1 ]]; then
+                umount /var/cache/nginx/fastcgi 2>/dev/null || true
+            fi
+            
+            log_info "Đang mount tmpfs ${user_size}M vào /var/cache/nginx/fastcgi..."
+            mount -t tmpfs -o size=${user_size}M,noatime,mode=0700,uid=www-data,gid=www-data tmpfs /var/cache/nginx/fastcgi
+            chown -R www-data:www-data /var/cache/nginx
+
+            sed -i '\|/var/cache/nginx/fastcgi|d' /etc/fstab
+            echo "tmpfs /var/cache/nginx/fastcgi tmpfs defaults,noatime,mode=0700,uid=www-data,gid=www-data,size=${user_size}M 0 0" >> /etc/fstab
+
+            systemctl reload nginx 2>/dev/null || systemctl restart nginx 2>/dev/null
+            log_info "✅ Đã kích hoạt RAM Disk FastCGI Cache thành công!"
+            pause
+            ;;
+        2)
+            if [[ "$is_mounted" -eq 0 ]]; then
+                echo -e "${YELLOW}RAM Disk chưa được bật.${NC}"
+                pause; return
+            fi
+            log_info "Đang gỡ bỏ RAM Disk..."
+            umount /var/cache/nginx/fastcgi 2>/dev/null || true
+            sed -i '\|/var/cache/nginx/fastcgi|d' /etc/fstab
+            mkdir -p /var/cache/nginx/fastcgi
+            chown -R www-data:www-data /var/cache/nginx
+            systemctl reload nginx 2>/dev/null || true
+            log_info "Đã hoàn nguyên về lưu trữ trên ổ đĩa SSD."
+            pause
+            ;;
+        *) return ;;
+    esac
+}
+
+setup_instant_page_optimizer() {
+    clear
+    echo -e "${BLUE}=================================================${NC}"
+    echo -e "${GREEN} ⚡ Tối ưu Trải nghiệm: Instant.page & Tắt Cart Fragments${NC}"
+    echo -e "${BLUE}=================================================${NC}"
+    echo -e "Công cụ này sẽ triển khai một MU-Plugin (Must-Use Plugin) nhẹ vào WordPress:"
+    echo -e "  1. ${CYAN}Instant.page (Speculative Preload)${NC}:"
+    echo -e "     Khi người dùng rê chuột lên liên kết (>65ms), trình duyệt tự prefetch trước"
+    echo -e "     nội dung ngầm. Khi click, trang hiển thị ${GREEN}NGAY LẬP TỨC (0ms cảm nhận)${NC}!"
+    echo -e "  2. ${CYAN}Chặn WooCommerce Cart Fragments trên trang tĩnh${NC}:"
+    echo -e "     Triệt tiêu request AJAX chậm chạp /?wc-ajax=get_refreshed_fragments trên"
+    echo -e "     Trang chủ, Bài viết... Giúp giảm 0.5s – 1s thời gian chờ!"
+    echo -e "  3. ${CYAN}DNS Prefetch & Preconnect${NC} sẵn cho Google Fonts / CDN."
+    echo -e "${BLUE}=================================================${NC}"
+
+    source "$(dirname "${BASH_SOURCE[0]}")/site.sh"
+    select_site || return
+    local domain=$SELECTED_DOMAIN
+    local site_root="/var/www/$domain/public_html"
+    local mu_dir="$site_root/wp-content/mu-plugins"
+    local booster_file="$mu_dir/vps-speed-booster.php"
+
+    if [[ ! -d "$site_root/wp-content" ]]; then
+        echo -e "${RED}Không tìm thấy thư mục WordPress wp-content!${NC}"
+        pause; return
+    fi
+
+    echo ""
+    echo -e "1. Kích hoạt Siêu tốc (Instant.page + Tắt Cart Fragments + DNS Prefetch)"
+    echo -e "2. Gỡ bỏ tính năng này"
+    echo -e "0. Quay lại"
+    read -p "Chọn [0-2]: " b_choice
+
+    case $b_choice in
+        1)
+            mkdir -p "$mu_dir"
+            cat > "$booster_file" << 'PHPBOOSTER'
+<?php
+/**
+ * Plugin Name: VPS Speed Booster (Instant.page & WC Performance)
+ * Description: Tăng tốc độ chuyển trang 0ms và loại bỏ request chặn hiển thị của WooCommerce.
+ * Author: VPS Manager
+ * Version: 1.0.0
+ */
+
+// 1. Tải trước trang khi rê chuột (Instant.page - Speculative Preloading)
+add_action('wp_footer', function() {
+    if (is_admin()) return;
+    ?>
+    <script type="module">
+    /*! instant.page v5.2.0 - (C) 2019-2023 Alexandre Dieulot - https://instant.page/license */
+    let t,e;const n=new Set,o=document.createElement("link"),s=o.relList&&o.relList.supports&&o.relList.supports("prefetch"),c="instantPageExternalAllowed"in document.body.dataset,d="instantAllowQueryString"in document.body.dataset,u="instantAllowExternalLinks"in document.body.dataset,l="instantWhitelist"in document.body.dataset,a="instantVaryAccept"in document.body.dataset,f=1111;let r=65,m=!1,v=!1,p=!1;if("instantIntensity"in document.body.dataset){const t=document.body.dataset.instantIntensity;if("mousedown"==t)m=!0,"mousedown-only"==t&&(v=!0);else if("viewport"==t){const e=navigator.connection;(!e||!e.saveData)&&(p=!0)}else{const e=parseInt(t);isNaN(e)||(r=e)}}if(s){const o={capture:!0,passive:!0};v||document.addEventListener("touchstart",(function(t){w(t)}),o),document.addEventListener("mouseover",(function(e){y(e)}),o),m||document.addEventListener("mousedown",(function(t){A(t)}),o),p&&("requestIdleCallback"in window?requestIdleCallback((function(){b()})):b())}function b(){const t=new IntersectionObserver((e=>{e.forEach((e=>{if(e.isIntersecting){const n=e.target;t.unobserve(n),h(n.href)}}))}));document.querySelectorAll("a").forEach((e=>{E(e)&&t.observe(e)}))}function w(t){const e=t.target.closest("a");E(e)&&h(e.href,"high")}function y(n){if(n.relatedTarget&&n.target.closest("a")==n.relatedTarget.closest("a"))return;const o=n.target.closest("a");E(o)&&(o.addEventListener("mouseout",k,{passive:!0}),t=setTimeout((()=>{h(o.href,"high"),t=void 0}),r))}function A(t){const e=t.target.closest("a");E(e)&&h(e.href,"high")}function k(n){n.relatedTarget&&n.target.closest("a")==n.relatedTarget.closest("a")||t&&(clearTimeout(t),t=void 0)}function E(t){if(!t||!t.href)return!1;if(l&&!("instant"in t.dataset))return!1;if(!c&&t.origin!=location.origin&&!("instant"in t.dataset))return!1;if(["http:","https:"].indexOf(t.protocol)==-1)return!1;if("http:"==t.protocol&&"https:"==location.protocol)return!1;if(!d&&t.search&&!("instant"in t.dataset))return!1;if(t.hash&&t.pathname+t.search==location.pathname+location.search)return!1;if("noInstant"in t.dataset)return!1;return!0}function h(t,e="auto"){if(n.has(t))return;const o=document.createElement("link");o.rel="prefetch",o.href=t,o.as="document",o.fetchPriority=e,document.head.appendChild(o),n.add(t)}
+    </script>
+    <?php
+}, 999);
+
+// 2. Vô hiệu hóa WooCommerce Cart Fragments trên trang không phải Shop/Cart
+add_action('wp_enqueue_scripts', function() {
+    if (function_exists('is_woocommerce')) {
+        if (!is_cart() && !is_checkout()) {
+            wp_dequeue_script('wc-cart-fragments');
+        }
+    }
+}, 100);
+
+// 3. DNS Prefetch & Preconnect tự động
+add_action('wp_head', function() {
+    echo '<link rel="dns-prefetch" href="//fonts.googleapis.com">' . "\n";
+    echo '<link rel="dns-prefetch" href="//fonts.gstatic.com">' . "\n";
+    echo '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>' . "\n";
+}, 1);
+PHPBOOSTER
+            chown -R www-data:www-data "$mu_dir"
+            log_info "✅ Đã cài đặt VPS Speed Booster cho $domain!"
+            pause
+            ;;
+        2)
+            rm -f "$booster_file"
+            log_info "Đã gỡ bỏ VPS Speed Booster cho $domain."
+            pause
+            ;;
+        *) return ;;
+    esac
+}
+

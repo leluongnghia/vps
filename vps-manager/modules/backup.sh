@@ -9,18 +9,19 @@ backup_menu() {
     while true; do
         clear
         echo -e "${BLUE}=================================================${NC}"
-        echo -e "${GREEN}          💾 Sao lưu & Khôi phục${NC}"
+        echo -e "${GREEN}          💾 Sao lưu & Khôi phục (Backup & Restore)${NC}"
         echo -e "${BLUE}=================================================${NC}"
-        echo -e "1. Backup Website (Local)"
-        echo -e "2. Backup Website (Google Drive)"
-        echo -e "3. Restore Website (Local)"
-        echo -e "4. Restore Website (Manual Uploaded - trong public_html)"
-        echo -e "5. Restore Website (Google Drive)"
+        echo -e "1. Backup Website (Lưu trữ Local trên VPS)"
+        echo -e "2. Backup Website (Đồng bộ lên Google Drive qua Rclone)"
+        echo -e "3. Restore Website (Từ bản backup Local)"
+        echo -e "4. Restore Website (Từ file zip/sql tải lên thủ công trong public_html)"
+        echo -e "5. Restore Website (Khôi phục trực tiếp từ Google Drive)"
         echo -e "6. Cấu hình Google Drive (rclone)"
-        echo -e "7. Quản lý bản Backup (List/Delete)"
+        echo -e "7. Quản lý bản Backup (Xem danh sách / Xóa)"
+        echo -e "8. ⏰ Thiết lập Backup Tự động (Auto Backup Cron hàng ngày/tuần)"
         echo -e "0. Quay lại Menu chính"
         echo -e "${BLUE}=================================================${NC}"
-        read -p "Nhập lựa chọn [0-7]: " choice
+        read -p "Nhập lựa chọn [0-8]: " choice
 
         case $choice in
             1) backup_site_local ;;
@@ -30,6 +31,7 @@ backup_menu() {
             5) restore_site_gdrive ;;
             6) setup_gdrive ;;
             7) manage_backups ;;
+            8) auto_backup_menu ;;
             0) return ;;
             *) echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause ;;
         esac

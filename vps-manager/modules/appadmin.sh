@@ -3,46 +3,47 @@
 # modules/appadmin.sh - AppAdmin Protection & Tools
 
 appadmin_menu() {
-    clear
-    echo -e "${BLUE}=================================================${NC}"
-    echo -e "${GREEN}          Quản lý AppAdmin & Tiện ích${NC}"
-    echo -e "${BLUE}=================================================${NC}"
-    echo -e "1. Bảo vệ Tools (HTTP Auth - User/Pass)"
-    echo -e "2. Thay đổi Port Admin (Nginx)"
-    echo -e "3. Tối ưu hóa Ảnh (Image Optimize)"
-    echo -e "4. Cập nhật Hệ thống (System Update)"
-    echo -e "0. Quay lại"
-    read -p "Chọn: " choice
-    
-    case $choice in
-        1) setup_http_auth ;;
-        2) change_admin_port ;;
-        3) optimize_images ;;
-        4) update_system ;;
-        0) return ;;
-    esac
+    while true; do
+        clear
+        echo -e "${BLUE}=================================================${NC}"
+        echo -e "${GREEN}          🛠️  AppAdmin & Công cụ Bổ trợ${NC}"
+        echo -e "${BLUE}=================================================${NC}"
+        echo -e "1. 🔒 Đặt mật khẩu bảo vệ thư mục (HTTP Basic Auth)"
+        echo -e "2. 🖼️  Tối ưu hóa ảnh (Nén JPG/PNG & Chuyển đổi WebP)"
+        echo -e "0. Quay lại Menu chính"
+        echo -e "${BLUE}=================================================${NC}"
+        read -p "Nhập lựa chọn [0-2]: " choice
+        
+        case $choice in
+            1) setup_http_auth ;;
+            2) optimize_images ;;
+            0) return ;;
+            *) echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause ;;
+        esac
+    done
 }
 
 setup_http_auth() {
-    echo "Tính năng này sẽ tạo user/pass cho các folder admin (như /phpmyadmin)."
+    echo -e "${GREEN}=== Tạo tài khoản bảo vệ HTTP Basic Auth ===${NC}"
+    echo "Tính năng này sẽ tạo user/pass cho các folder admin (như /phpmyadmin hoặc wp-admin)."
     read -p "Nhập Username mới: " user
+    [[ -z "$user" ]] && { echo -e "${RED}Username không được để trống!${NC}"; pause; return; }
     
     if ! command -v htpasswd &> /dev/null; then
-        apt-get install -y apache2-utils
+        if [[ "$OS_FAMILY" == "rhel" ]]; then
+            pkg_install httpd-tools
+        else
+            pkg_install apache2-utils
+        fi
     fi
     
     mkdir -p /etc/nginx/auth
     htpasswd -c /etc/nginx/auth/.htpasswd "$user"
     
-    log_info "Đã tạo file auth. Vui lòng thêm cấu hình sau vào Nginx location cần bảo vệ:"
-    echo -e "${YELLOW}auth_basic \"Restricted Area\";"
-    echo -e "auth_basic_user_file /etc/nginx/auth/.htpasswd;${NC}"
-    pause
-}
-
-change_admin_port() {
-    # Placeholder: requires a dedicated admin vhost
-    log_info "Tính năng này yêu cầu bạn có file config admin riêng (ví dụ 22222.conf)."
+    log_info "Đã tạo file auth tại /etc/nginx/auth/.htpasswd."
+    echo -e "${YELLOW}Để áp dụng, cấu hình sau có thể được include vào Nginx location cần bảo vệ:"
+    echo -e "    auth_basic \"Restricted Area\";"
+    echo -e "    auth_basic_user_file /etc/nginx/auth/.htpasswd;${NC}"
     pause
 }
 

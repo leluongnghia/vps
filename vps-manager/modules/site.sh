@@ -121,9 +121,11 @@ add_new_site() {
     else
         log_info "Đang khởi tạo cấu hình FastCGI Cache Global..."
         cat > /etc/nginx/conf.d/fastcgi_cache.conf <<EOF
-fastcgi_cache_path /var/cache/nginx/fastcgi levels=1:2 keys_zone=WORDPRESS:100m inactive=60m;
+fastcgi_cache_path /var/cache/nginx/fastcgi levels=1:2 keys_zone=WORDPRESS:100m inactive=60m max_size=1g;
 fastcgi_cache_key "\$scheme\$request_method\$host\$request_uri";
-fastcgi_cache_use_stale error timeout invalid_header http_500;
+fastcgi_cache_use_stale error timeout updating invalid_header http_500 http_503;
+fastcgi_cache_background_update on;
+fastcgi_cache_lock on;
 fastcgi_ignore_headers Cache-Control Expires Set-Cookie;
 EOF
     fi
@@ -450,23 +452,45 @@ server {
     client_max_body_size 128M;
 
     # ============================================================
-    # FastCGI Cache Skip Rules
-    # Bỏ qua cache cho admin và login để tránh lỗi đăng nhập
+    # FastCGI Cache Skip Rules (Ultra Fast / Ads & Marketing Compatible)
     # ============================================================
     set \$skip_cache 0;
     if (\$request_method = POST) { set \$skip_cache 1; }
+
+    # Bỏ qua cache khi có query string, trừ các tham số marketing/tracking thông dụng (UTM, Facebook, Google Ads)
     if (\$query_string != "") { set \$skip_cache 1; }
+    if (\$query_string ~* "^(utm_source|utm_medium|utm_campaign|utm_term|utm_content|fbclid|gclid|ttclid|ref|source)=") {
+        set \$skip_cache 0;
+    }
+
     # Bỏ qua cache cho wp-admin/, wp-login.php, xmlrpc, feed, sitemap
     if (\$request_uri ~* "/wp-admin/|/wp-login\.php|/xmlrpc\.php|/wp-.*\.php|^/feed/|/tag/.*/feed/|/.*sitemap.*\.(xml|xsl)") {
         set \$skip_cache 1;
     }
-    # Bỏ qua cache cho user đã đăng nhập (WordPress cookies)
-    if (\$http_cookie ~* "comment_author|wordpress_[a-f0-9]+|wp-postpass|wordpress_no_cache|wordpress_logged_in") {
+    # Bỏ qua cache cho user đã đăng nhập hoặc giỏ hàng WooCommerce
+    if (\$http_cookie ~* "comment_author|wordpress_[a-f0-9]+|wp-postpass|wordpress_no_cache|wordpress_logged_in|woocommerce_items_in_cart|woocommerce_cart_hash") {
         set \$skip_cache 1;
     }
 
     location / {
         try_files \$uri \$uri/ /index.php?\$args;
+    }
+
+    # ============================================================
+    # High-Performance Browser Caching (Images, Fonts, CSS, JS)
+    # ============================================================
+    location ~* \.(jpg|jpeg|gif|png|webp|avif|ico|svg|woff|woff2|ttf|eot)$ {
+        expires 365d;
+        add_header Cache-Control "public, no-transform, immutable";
+        access_log off;
+        log_not_found off;
+    }
+
+    location ~* \.(css|js)$ {
+        expires 30d;
+        add_header Cache-Control "public, no-transform";
+        access_log off;
+        log_not_found off;
     }
 
     location ~ \.php$ {
@@ -482,10 +506,11 @@ server {
         fastcgi_send_timeout 300;
         fastcgi_connect_timeout 300;
         
-        # FastCGI Cache Settings
+        # FastCGI Cache Settings (Zero-Downtime Background Update)
         fastcgi_cache WORDPRESS;
         fastcgi_cache_valid 200 301 302 60m;
         fastcgi_cache_use_stale error timeout updating invalid_header http_500 http_503;
+        fastcgi_cache_background_update on;
         fastcgi_cache_min_uses 1;
         fastcgi_cache_lock on;
         fastcgi_cache_bypass \$skip_cache;
@@ -589,6 +614,10 @@ install_wordpress() {
         elif [[ -e "/var/run/keydb/keydb.sock" ]]; then socket_path="/var/run/keydb/keydb.sock"
         elif [[ -e "/tmp/valkey.sock" ]]; then socket_path="/tmp/valkey.sock"
         elif [[ -e "/tmp/redis.sock" ]]; then socket_path="/tmp/redis.sock"
+        elif command -v redis-server >/dev/null 2>&1 || systemctl is-active --quiet redis-server 2>/dev/null || [[ -d /etc/redis ]]; then
+            socket_path="/var/run/redis/redis.sock"
+        elif command -v valkey-server >/dev/null 2>&1 || systemctl is-active --quiet valkey 2>/dev/null || [[ -d /etc/valkey ]]; then
+            socket_path="/var/run/valkey/valkey.sock"
         fi
     fi
 

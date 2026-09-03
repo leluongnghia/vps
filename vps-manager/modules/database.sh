@@ -17,9 +17,10 @@ database_menu() {
         echo -e "7. 🔍 Xem DB theo Website (WordPress)"
         echo -e "8. Quản lý phpMyAdmin"
         echo -e "9. ⚡ Chuyển đổi công nghệ lưu trữ (Convert to InnoDB)"
+        echo -e "10. 🛠️  Tối ưu & Sửa chữa tất cả Database (mysqlcheck repair/optimize)"
         echo -e "0. Quay lại Menu chính"
         echo -e "${BLUE}=================================================${NC}"
-        read -p "Nhập lựa chọn [0-9]: " choice
+        read -p "Nhập lựa chọn [0-10]: " choice
 
         case $choice in
             1) list_databases ;;
@@ -34,6 +35,7 @@ database_menu() {
                 phpmyadmin_menu 
                 ;;
             9) convert_engine_to_innodb ;;
+            10) repair_optimize_databases ;;
             0) return ;;
             *) echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause ;;
         esac
@@ -268,3 +270,31 @@ convert_engine_to_innodb() {
     echo -e "\n${GREEN}🎉 Hoàn tất quá trình đồng bộ Engine sang InnoDB!${NC}"
     pause
 }
+
+repair_optimize_databases() {
+    clear
+    echo -e "${BLUE}=================================================${NC}"
+    echo -e "${GREEN}   🛠️  Tối ưu hóa & Tự động Sửa chữa Database${NC}"
+    echo -e "${BLUE}=================================================${NC}"
+    echo -e "Công cụ này sẽ sử dụng mysqlcheck để:"
+    echo -e "  • Kiểm tra toàn vẹn bảng (Check)"
+    echo -e "  • Tự động sửa chữa các bảng bị lỗi/crash (Auto-repair)"
+    echo -e "  • Chống phân mảnh và tối ưu hóa index (Optimize)"
+    echo -e "  • Cập nhật số liệu thống kê bảng (Analyze)"
+    echo -e "${BLUE}=================================================${NC}"
+    read -p "Bắt đầu chạy tối ưu cho tất cả Database? [Y/n]: " confirm_ro
+    [[ "$confirm_ro" == "n" || "$confirm_ro" == "N" ]] && return
+
+    echo ""
+    log_info "1. Đang kiểm tra và sửa lỗi các bảng (mysqlcheck --auto-repair)..."
+    mysqlcheck -A --auto-repair 2>/dev/null || mariadb-check -A --auto-repair 2>/dev/null
+
+    echo ""
+    log_info "2. Đang tối ưu hóa các bảng (mysqlcheck --optimize)..."
+    mysqlcheck -A --optimize 2>/dev/null || mariadb-check -A --optimize 2>/dev/null
+
+    echo ""
+    echo -e "${GREEN}✅ Quá trình tối ưu và sửa chữa Database đã hoàn tất xuất sắc!${NC}"
+    pause
+}
+

@@ -116,9 +116,12 @@ open('$nginx_conf', 'w').write(content)
 " 2>/dev/null || sed -i "/http {/a \\$gzip_block" "$nginx_conf" 2>/dev/null || true
     fi
 
-    # ── Security: hide server version ─────────────────────
+    # ── Security: hide server version & open_file_cache ───
     if ! grep -q "server_tokens" "$nginx_conf"; then
         sed -i '/http {/a \    server_tokens off;' "$nginx_conf" 2>/dev/null || true
+    fi
+    if ! grep -q "open_file_cache" "$nginx_conf"; then
+        sed -i '/http {/a \    open_file_cache max=10000 inactive=30s;\n    open_file_cache_valid 60s;\n    open_file_cache_min_uses 2;\n    open_file_cache_errors on;' "$nginx_conf" 2>/dev/null || true
     fi
 
     # ── Security: Security Headers snippet ────────────────
@@ -161,7 +164,6 @@ location ~* /(?:uploads|files)/.*\.php$ { deny all; }
 # Bảo vệ wp-includes
 location ~* /wp-includes/.*\.php$ {
     deny all;
-    allow /wp-includes/ms-files.php;
 }
 WPSEC
         log_info "✓ Tạo wp-security.conf snippet"
@@ -205,37 +207,38 @@ install_mariadb() {
     local db_admin_pass
     db_admin_pass=$(openssl rand -base64 32 | tr -dc 'a-zA-Z0-9' | head -c 32)
 
-    # Bảo mật: đổi tên user root -> wpdbadmin
-    # Hacker brute-force khó đoán tên user hơn
+    # Bảo mật: Cấu hình user admin wpdbadmin và bảo vệ user root
     mariadb <<SQLEOF 2>/dev/null || mysql <<SQLEOF2 2>/dev/null
 use mysql;
 FLUSH PRIVILEGES;
 CREATE USER IF NOT EXISTS 'wpdbadmin'@'localhost' IDENTIFIED BY '${db_admin_pass}';
 GRANT ALL PRIVILEGES ON *.* TO 'wpdbadmin'@'localhost' WITH GRANT OPTION;
-DROP USER IF EXISTS 'root'@'localhost';
+ALTER USER 'root'@'localhost' IDENTIFIED BY '${db_admin_pass}';
 DROP USER IF EXISTS ''@'localhost';
 DROP DATABASE IF EXISTS test;
 DELETE FROM mysql.db WHERE Db='test' OR Db='test_%';
 FLUSH PRIVILEGES;
 SQLEOF
 use mysql;
+CREATE USER IF NOT EXISTS 'wpdbadmin'@'localhost' IDENTIFIED BY '${db_admin_pass}';
+GRANT ALL PRIVILEGES ON *.* TO 'wpdbadmin'@'localhost' WITH GRANT OPTION;
 ALTER USER 'root'@'localhost' IDENTIFIED BY '${db_admin_pass}';
 DELETE FROM mysql.user WHERE User='';
 DROP DATABASE IF EXISTS test;
 FLUSH PRIVILEGES;
 SQLEOF2
 
-    # Ghi credentials
+    # Ghi credentials cho cả root và wpdbadmin
     cat > /root/.my.cnf <<MYCNF
 # Managed by VPS-Manager
 [client]
 host     = localhost
-user     = wpdbadmin
+user     = root
 password = ${db_admin_pass}
 
 [mysql_upgrade]
 host     = localhost
-user     = wpdbadmin
+user     = root
 password = ${db_admin_pass}
 MYCNF
     chmod 600 /root/.my.cnf
@@ -298,7 +301,10 @@ max_allowed_packet      = 64M
 wait_timeout            = 60
 interactive_timeout     = 60
 skip-log-bin
-skip-networking
+bind-address            = 127.0.0.1
+innodb_flush_log_at_trx_commit = 2
+innodb_flush_method     = O_DIRECT
+innodb_file_per_table   = 1
 DBCONF
 
     log_info "MariaDB tuning: RAM=${total_ram_mb}MB, InnoDB=${innodb_buffer}M, MaxConn=${max_connections}"

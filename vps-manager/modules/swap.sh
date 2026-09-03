@@ -3,23 +3,32 @@
 # modules/swap.sh - Manage Swap Memory
 
 swap_menu() {
-    clear
-    echo -e "${BLUE}=================================================${NC}"
-    echo -e "${GREEN}          Quản lý S wap (RAM ảo)${NC}"
-    echo -e "${BLUE}=================================================${NC}"
-    echo -e "Thông tin hiện tại:"
-    free -h | grep -i swap
-    echo -e "${BLUE}=================================================${NC}"
-    echo -e "1. Tạo Swap (1GB/2GB...)"
-    echo -e "2. Xóa Swap"
-    echo -e "0. Quay lại"
-    read -p "Chọn: " choice
-    
-    case $choice in
-        1) create_swap ;;
-        2) remove_swap ;;
-        0) return ;;
-    esac
+    while true; do
+        clear
+        echo -e "${BLUE}=================================================${NC}"
+        echo -e "${GREEN}          🧠 Quản lý Bộ nhớ ảo (Swap & ZRAM)${NC}"
+        echo -e "${BLUE}=================================================${NC}"
+        echo -e "Trạng thái bộ nhớ hiện tại:"
+        free -h | grep -E "(Mem|Swap)"
+        echo -e "${BLUE}=================================================${NC}"
+        echo -e "1. Tạo File Swap trên ổ cứng (1GB, 2GB...)"
+        echo -e "2. Xóa File Swap trên ổ cứng"
+        echo -e "3. ⚡ Chuyển sang ZRAM Swap (Swap nén trên RAM - Siêu tốc, khuyên dùng)"
+        echo -e "0. Quay lại Menu chính"
+        echo -e "${BLUE}=================================================${NC}"
+        read -p "Chọn [0-3]: " choice
+        
+        case $choice in
+            1) create_swap ;;
+            2) remove_swap ;;
+            3) 
+                source "$(dirname "${BASH_SOURCE[0]}")/zram.sh"
+                zram_menu
+                ;;
+            0) return ;;
+            *) echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause ;;
+        esac
+    done
 }
 
 create_swap() {
@@ -28,7 +37,7 @@ create_swap() {
         echo -e "${RED}CẢNH BÁO: BẠN ĐANG SỬ DỤNG ZRAM SWAP CAO CẤP!${NC}"
         echo -e "${YELLOW}Hệ thống đang cấu hình vm.swappiness = 100 để nén dữ liệu vào RAM.${NC}"
         echo -e "${YELLOW}Việc tạo thêm Swap tĩnh (File Swap) trên ổ cứng lúc này sẽ gây xung đột cấu hình và ghi rác lên ổ SSD, làm máy chủ chậm hơn.${NC}"
-        echo -e "-> Hãy tắt ZRAM (tại Menu 22) nếu bạn thật sự muốn dùng Swap truyền thống!"
+        echo -e "-> Hãy tắt ZRAM (chọn mục 3 trong menu này) nếu bạn thật sự muốn dùng Swap tĩnh trên đĩa!"
         if [[ -z "$1" ]]; then pause; fi
         return
     fi
