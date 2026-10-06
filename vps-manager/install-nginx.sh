@@ -220,4 +220,6 @@ mkdir -p "$HOME/.vps-manager"
 echo "ACTIVE_STACK=nginx" > "$HOME/.vps-manager/stack.conf"
 
 cd "$INSTALL_DIR"
-exec "$INSTALL_DIR/install.sh"
+if [[ -t 0 ]] && [[ "${1:-}" != "--non-interactive" ]]; then
+    exec "$INSTALL_DIR/install.sh"
+fi
