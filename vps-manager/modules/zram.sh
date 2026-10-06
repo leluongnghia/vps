@@ -345,12 +345,18 @@ zram_info() {
     echo ""
     # Chi tiết ZRAM nếu có
     if [[ -d /sys/block/zram0 ]]; then
-        local orig_size comp_size mem_used
-        orig_size=$(awk '{printf "%.1f MB", $1/1024/1024}' /sys/block/zram0/orig_data_size 2>/dev/null)
-        comp_size=$(awk '{printf "%.1f MB", $1/1024/1024}' /sys/block/zram0/compr_data_size 2>/dev/null)
-        mem_used=$(awk '{printf "%.1f MB", $1/1024/1024}' /sys/block/zram0/mem_used_total 2>/dev/null)
+        local orig_size="" comp_size="" mem_used=""
+        if [[ -f /sys/block/zram0/mm_stat ]]; then
+            orig_size=$(awk '{printf "%.1f MB", $1/1024/1024}' /sys/block/zram0/mm_stat 2>/dev/null || echo "0.0 MB")
+            comp_size=$(awk '{printf "%.1f MB", $2/1024/1024}' /sys/block/zram0/mm_stat 2>/dev/null || echo "0.0 MB")
+            mem_used=$(awk '{printf "%.1f MB", $3/1024/1024}' /sys/block/zram0/mm_stat 2>/dev/null || echo "0.0 MB")
+        elif [[ -f /sys/block/zram0/orig_data_size ]]; then
+            orig_size=$(awk '{printf "%.1f MB", $1/1024/1024}' /sys/block/zram0/orig_data_size 2>/dev/null || echo "0.0 MB")
+            comp_size=$(awk '{printf "%.1f MB", $1/1024/1024}' /sys/block/zram0/compr_data_size 2>/dev/null || echo "0.0 MB")
+            mem_used=$(awk '{printf "%.1f MB", $1/1024/1024}' /sys/block/zram0/mem_used_total 2>/dev/null || echo "0.0 MB")
+        fi
         local algo
-        algo=$(cat /sys/block/zram0/comp_algorithm 2>/dev/null | grep -oP '\[.*?\]' | tr -d '[]')
+        algo=$(cat /sys/block/zram0/comp_algorithm 2>/dev/null | grep -oP '\[.*?\]' | tr -d '[]' || echo "N/A")
 
         echo -e "${CYAN}  ZRAM Device (/dev/zram0):${NC}"
         echo -e "    Thuật toán  : ${GREEN}${algo:-N/A}${NC}"
@@ -358,11 +364,14 @@ zram_info() {
         echo -e "    Sau nén     : ${comp_size:-N/A}"
         echo -e "    RAM sử dụng : ${mem_used:-N/A}"
 
-        if [[ -n "$orig_size" && -n "$comp_size" ]]; then
+        if [[ -f /sys/block/zram0/mm_stat ]]; then
+            local ratio
+            ratio=$(awk '{if ($2>0) printf "%.1fx", $1/$2}' /sys/block/zram0/mm_stat 2>/dev/null || true)
+            [[ -n "$ratio" ]] && echo -e "    Tỉ lệ nén   : ${GREEN}${ratio}${NC}"
+        elif [[ -f /sys/block/zram0/orig_data_size && -f /sys/block/zram0/compr_data_size ]]; then
             local ratio
             ratio=$(awk '{if ($2>0) printf "%.1fx", $1/$2}' \
-                <(paste <(cat /sys/block/zram0/orig_data_size) \
-                        <(cat /sys/block/zram0/compr_data_size)) 2>/dev/null)
+                <(paste /sys/block/zram0/orig_data_size /sys/block/zram0/compr_data_size 2>/dev/null) 2>/dev/null || true)
             [[ -n "$ratio" ]] && echo -e "    Tỉ lệ nén   : ${GREEN}${ratio}${NC}"
         fi
     fi
