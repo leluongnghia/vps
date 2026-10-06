@@ -128,13 +128,16 @@ install_nginx
 log_info "Cài đặt MariaDB..."
 install_mariadb
 
-echo ""
-echo -e "${YELLOW}Chọn phiên bản PHP chính (mặc định: 8.3):${NC}"
-echo "  1. PHP 8.3 (Khuyên dùng)"
-echo "  2. PHP 8.4 (Mới nhất)"
-echo "  3. PHP 8.2"
-echo "  4. PHP 8.1"
-read -t 10 -p "Chọn [1-4, Enter = 8.3]: " php_choice || php_choice=""
+php_choice=""
+if [[ -t 0 ]] && [[ "${1:-}" != "--non-interactive" ]]; then
+    echo ""
+    echo -e "${YELLOW}Chọn phiên bản PHP chính (mặc định: 8.3):${NC}"
+    echo "  1. PHP 8.3 (Khuyên dùng)"
+    echo "  2. PHP 8.4 (Mới nhất)"
+    echo "  3. PHP 8.2"
+    echo "  4. PHP 8.1"
+    read -t 10 -p "Chọn [1-4, Enter = 8.3]: " php_choice </dev/tty 2>/dev/null || php_choice=""
+fi
 case "$php_choice" in
     2) PHP_VER="8.4" ;;
     3) PHP_VER="8.2" ;;
@@ -152,19 +155,22 @@ install_phpmyadmin 2>/dev/null || true
 # L1: Nginx FastCGI Cache (page cache, bypass PHP hoàn toàn)
 # L2: Valkey / Redis / KeyDB (object cache, Unix Socket, giảm tải MariaDB)
 # =============================================================================
-echo ""
-echo -e "${BLUE}══════════════════════════════════════════════════════${NC}"
-echo -e "${GREEN}  Kiến trúc Cache tối ưu cho Nginx + WordPress${NC}"
-echo -e "  L1: Nginx FastCGI Cache  → Serve HTML tĩnh, bypass PHP hoàn toàn"
-echo -e "  L2: Valkey/Redis (Unix Socket) → Cache DB queries, giảm tải MariaDB 80%+"
-echo -e "${BLUE}══════════════════════════════════════════════════════${NC}"
-echo ""
-echo -e "${YELLOW}Chọn Object Cache (L2) sử dụng Unix Socket:${NC}"
-echo "  1. Valkey  [KHUẾN DÙNG] — fork mới của Redis, MIT license, hiệu suất cao"
-echo "  2. Redis   — phổ biến, ổn định (BSL license từ 2024)"
-echo "  3. KeyDB   — Redis đa luồng, xử lý nhiều connection cùng lúc tốt hơn"
-echo "  0. Bỏ qua  — chỉ dùng Nginx FastCGI Cache (L1 only)"
-read -t 15 -p "Chọn [0-3, Enter = Valkey]: " cache_choice || cache_choice="1"
+cache_choice="1"
+if [[ -t 0 ]] && [[ "${1:-}" != "--non-interactive" ]]; then
+    echo ""
+    echo -e "${BLUE}══════════════════════════════════════════════════════${NC}"
+    echo -e "${GREEN}  Kiến trúc Cache tối ưu cho Nginx + WordPress${NC}"
+    echo -e "  L1: Nginx FastCGI Cache  → Serve HTML tĩnh, bypass PHP hoàn toàn"
+    echo -e "  L2: Valkey/Redis (Unix Socket) → Cache DB queries, giảm tải MariaDB 80%+"
+    echo -e "${BLUE}══════════════════════════════════════════════════════${NC}"
+    echo ""
+    echo -e "${YELLOW}Chọn Object Cache (L2) sử dụng Unix Socket:${NC}"
+    echo "  1. Valkey  [KHUẾN DÙNG] — fork mới của Redis, MIT license, hiệu suất cao"
+    echo "  2. Redis   — phổ biến, ổn định (BSL license từ 2024)"
+    echo "  3. KeyDB   — Redis đa luồng, xử lý nhiều connection cùng lúc tốt hơn"
+    echo "  0. Bỏ qua  — chỉ dùng Nginx FastCGI Cache (L1 only)"
+    read -t 15 -p "Chọn [0-3, Enter = Valkey]: " cache_choice </dev/tty 2>/dev/null || cache_choice="1"
+fi
 case "$cache_choice" in
     2) log_info "Cài đặt Redis (Unix Socket)...";  _install_object_cache_nginx "redis"  ;;
     3) log_info "Cài đặt KeyDB (Unix Socket)..."; _install_object_cache_nginx "keydb"  ;;
