@@ -542,6 +542,8 @@ SYSOVERRIDE
 install_php() {
     if [[ "$OS_FAMILY" == "rhel" ]]; then
         log_info "Adding PHP repository (Remi/EPEL)..."
+        dnf config-manager --enable ol9_codeready_builder ol9_developer_EPEL 2>/dev/null || true
+        dnf config-manager --set-enabled crb 2>/dev/null || true
         pkg_install epel-release dnf-utils >/dev/null 2>&1
         dnf install -y https://rpms.remirepo.net/enterprise/remi-release-9.rpm >/dev/null 2>&1
         dnf module reset php -y >/dev/null 2>&1

@@ -34,6 +34,8 @@ echo -e "${NC}"
 # ── Step 1: Install base dependencies ─────────────────────────────────────────
 echo -e "${CYAN}[1/5] Kiểm tra và cài đặt các gói phụ thuộc cơ bản...${NC}"
 if [[ -f /etc/redhat-release ]]; then
+    dnf config-manager --enable ol9_codeready_builder ol9_developer_EPEL 2>/dev/null || true
+    dnf config-manager --set-enabled crb 2>/dev/null || true
     dnf install -y curl wget git unzip tar socat cronie &>/dev/null
 else
     # Clean up broken PPA files from previous attempts if any
