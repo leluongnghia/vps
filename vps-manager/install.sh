@@ -35,8 +35,8 @@ check_os() {
         exit 1
     fi
 
-    if [[ "$ID" != "ubuntu" ]] && [[ "$ID" != "debian" ]] && [[ "$ID" != "almalinux" ]] && [[ "$ID" != "rocky" ]] && [[ "$ID" != "rhel" ]] && [[ "$ID" != "centos" ]]; then
-        echo -e "${YELLOW}Warning: This script is optimized for Ubuntu/Debian and AlmaLinux/RHEL.${NC}"
+    if [[ "$ID" != "ubuntu" ]] && [[ "$ID" != "debian" ]] && [[ "$ID" != "almalinux" ]] && [[ "$ID" != "rocky" ]] && [[ "$ID" != "rhel" ]] && [[ "$ID" != "centos" ]] && [[ "$ID" != "ol" ]] && [[ "$ID" != "oracle" ]]; then
+        echo -e "${YELLOW}Warning: This script is optimized for Ubuntu/Debian and AlmaLinux/RHEL/Oracle Linux.${NC}"
         echo -e "${YELLOW}Detected: $OS $VER${NC}"
         read -p "Press Enter to continue anyway or Ctrl+C to cancel..."
     fi
@@ -153,7 +153,6 @@ auto_install_stack() {
     echo -e "- Core: PHP 8.4"
     echo -e "- Caching: Valkey (Thay thế hoàn toàn Redis)"
     echo -e "- Tường lửa: Firewalld/UFW + Fail2ban"
-    echo -e "- Giám sát: Monit Watchdog"
     echo -e ""
     read -p "Bắt đầu cài đặt ngay? [Y/n]: " opt_lemp
     if [[ "$opt_lemp" == "y" || "$opt_lemp" == "Y" || -z "$opt_lemp" ]]; then
@@ -180,13 +179,14 @@ auto_install_stack() {
         source modules/wordpress_performance.sh 2>/dev/null
         install_valkey
 
-        echo -e "${BLUE}[6/7] Đang cấu hình Firewall...${NC}"
+        echo -e "${BLUE}[6/6] Đang cấu hình Firewall...${NC}"
         source modules/security.sh
         setup_firewall "auto"
 
-        echo -e "${BLUE}[7/7] Đang cấu hình Monit Watchdog...${NC}"
-        source modules/monit.sh
-        monit_install "auto"
+        if [[ -f "modules/monit.sh" ]]; then
+            source modules/monit.sh
+            monit_install "auto"
+        fi
 
         echo -e "${GREEN}=================================================${NC}"
         echo -e "${GREEN}Quá trình khởi tạo Server đã hoàn tất xuất sắc!${NC}"
@@ -233,7 +233,7 @@ main() {
             echo -e "${BLUE}=================================================${NC}"
             echo -e "Đây là lần đầu tiên chạy VPS Manager."
             echo -e "Bạn có muốn chạy Auto-Install toàn bộ hệ thống LEMP không?"
-            echo -e "(Bao gồm: Nginx, MariaDB, PHP tự động, Valkey Cache, ZRAM Swap, Monit, Firewall)"
+            echo -e "(Bao gồm: Nginx, MariaDB, PHP tự động, Valkey Cache, ZRAM Swap, Firewall)"
             read -p "Chạy Auto-Install ngay? [Y/n]: " auto
             if [[ "$auto" == "y" || "$auto" == "Y" || -z "$auto" ]]; then
                 auto_install_stack

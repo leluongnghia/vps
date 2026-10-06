@@ -72,7 +72,7 @@ detect_os() {
     if [[ "$OS_ID" == "ubuntu" ]] || [[ "$OS_ID" == "debian" ]]; then
         export OS_FAMILY="debian"
         export PKG_MGR="apt-get"
-    elif [[ "$OS_ID" == "almalinux" ]] || [[ "$OS_ID" == "rocky" ]] || [[ "$OS_ID" == "rhel" ]] || [[ "$OS_ID" == "centos" ]]; then
+    elif [[ "$OS_ID" == "almalinux" ]] || [[ "$OS_ID" == "rocky" ]] || [[ "$OS_ID" == "rhel" ]] || [[ "$OS_ID" == "centos" ]] || [[ "$OS_ID" == "ol" ]] || [[ "$OS_ID" == "oracle" ]] || [[ "${ID_LIKE:-}" =~ (rhel|fedora|centos) ]]; then
         export OS_FAMILY="rhel"
         export PKG_MGR="dnf"
     else

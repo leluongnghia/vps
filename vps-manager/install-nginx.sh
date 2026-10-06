@@ -79,7 +79,7 @@ if [[ -f /etc/os-release ]]; then
     . /etc/os-release
     if [[ "$ID" == "ubuntu" || "$ID" == "debian" ]]; then
         OS_FAMILY="debian"
-    elif [[ "$ID" == "almalinux" || "$ID" == "rocky" || "$ID" == "rhel" || "$ID" == "centos" ]]; then
+    elif [[ "$ID" == "almalinux" || "$ID" == "rocky" || "$ID" == "rhel" || "$ID" == "centos" || "$ID" == "ol" || "$ID" == "oracle" || "${ID_LIKE:-}" =~ (rhel|fedora|centos) ]]; then
         OS_FAMILY="rhel"
     else
         OS_FAMILY="debian"

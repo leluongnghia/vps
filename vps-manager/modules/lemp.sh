@@ -54,6 +54,13 @@ EOF
 
         pkg_install nginx
         
+        # Đảm bảo group và user www-data tồn tại trên RHEL/Oracle Linux để tương thích permissions
+        if [[ "$OS_FAMILY" == "rhel" ]]; then
+            groupadd -f www-data 2>/dev/null || true
+            id -u www-data &>/dev/null || useradd -r -g www-data -s /sbin/nologin -d /var/www www-data 2>/dev/null || true
+            usermod -aG www-data nginx 2>/dev/null || true
+        fi
+
         # Đảm bảo tương thích cấu trúc thư mục sites-available/sites-enabled (Debian style)
         if [[ ! -d /etc/nginx/sites-available ]]; then
             mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled

@@ -87,7 +87,7 @@ install_phpmyadmin() {
     if [[ "${ID:-}" == "ubuntu" || "${ID:-}" == "debian" ]]; then
         apt-get update -qq 2>/dev/null || true
         apt-get install -y php-mbstring php-zip php-gd php-curl php-xml apache2-utils wget unzip 2>/dev/null || true
-    elif [[ "${ID:-}" == "almalinux" || "${ID:-}" == "rocky" || "${ID:-}" == "rhel" || "${ID:-}" == "centos" ]]; then
+    elif [[ "${ID:-}" == "almalinux" || "${ID:-}" == "rocky" || "${ID:-}" == "rhel" || "${ID:-}" == "centos" || "${ID:-}" == "ol" || "${ID:-}" == "oracle" || "${ID_LIKE:-}" =~ (rhel|fedora|centos) ]]; then
         dnf install -y php-mbstring php-zip php-gd php-curl php-xml httpd-tools wget unzip 2>/dev/null || true
     else
         # Fallback: try pkg_install if available

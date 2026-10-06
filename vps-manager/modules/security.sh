@@ -107,15 +107,16 @@ EOF
         echo "y" | ufw enable
         
         # Configure Fail2ban
-        cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.local
-        
-        # Enable SSH protection
-        cat >> /etc/fail2ban/jail.local <<EOF
+        # Configure Fail2ban override
+        cat > /etc/fail2ban/jail.local <<EOF
+[DEFAULT]
+bantime = 3600
+findtime = 600
+maxretry = 5
+
 [sshd]
 enabled = true
 port = ssh
-filter = sshd
-logpath = /var/log/auth.log
 maxretry = 3
 bantime = 3600
 EOF
