@@ -9,10 +9,23 @@ _pma_err()  { echo -e "\033[0;31m[ERROR]\033[0m $1"; }
 
 # ─── PHP socket detection (standalone, no external deps) ──────────────────
 _detect_php_sock() {
-    # Try current PHP version first
+    # Check RHEL / CentOS / Oracle Linux standard socket paths
+    for s in /run/php-fpm/www.sock /var/run/php-fpm/www.sock /run/php-fpm/php-fpm.sock; do
+        if [[ -S "$s" ]]; then
+            echo "unix:$s"
+            return 0
+        fi
+    done
+    local rhel_sock=$(find /run/php-fpm /var/run/php-fpm -name "*.sock" 2>/dev/null | head -1)
+    if [[ -n "$rhel_sock" ]]; then
+        echo "unix:$rhel_sock"
+        return 0
+    fi
+
+    # Try current PHP version first (Debian)
     local ver
     ver=$(php -r "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;" 2>/dev/null)
-    for v in "$ver" "8.3" "8.2" "8.1" "8.0" "7.4"; do
+    for v in "$ver" "8.4" "8.3" "8.2" "8.1" "8.0" "7.4"; do
         [ -z "$v" ] && continue
         if [[ -S "/run/php/php${v}-fpm.sock" ]]; then
             echo "unix:/run/php/php${v}-fpm.sock"

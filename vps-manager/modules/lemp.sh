@@ -621,10 +621,11 @@ _install_single_php() {
 
         local pool_conf="/etc/php-fpm.d/www.conf"
         if [[ -f "$pool_conf" ]]; then
-            sed -i 's/^user = apache/user = nginx/' "$pool_conf"
-            sed -i 's/^group = apache/group = nginx/' "$pool_conf"
-            sed -i 's/^listen.owner = nobody/listen.owner = nginx/' "$pool_conf"
-            sed -i 's/^listen.group = nobody/listen.group = nginx/' "$pool_conf"
+            sed -i -E 's/^[; ]*user = .*/user = nginx/' "$pool_conf"
+            sed -i -E 's/^[; ]*group = .*/group = nginx/' "$pool_conf"
+            sed -i -E 's/^[; ]*listen\.owner = .*/listen.owner = nginx/' "$pool_conf"
+            sed -i -E 's/^[; ]*listen\.group = .*/listen.group = nginx/' "$pool_conf"
+            sed -i -E 's/^[; ]*listen\.mode = .*/listen.mode = 0660/' "$pool_conf"
         fi
 
         systemctl enable php-fpm >/dev/null 2>&1

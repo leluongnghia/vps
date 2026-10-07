@@ -88,7 +88,20 @@ show_progress() {
 
 # Dynamic PHP version detection
 detect_php_socket() {
-    # Find the latest PHP-FPM socket
+    # Check RHEL / CentOS / Oracle Linux standard socket paths
+    for s in /run/php-fpm/www.sock /var/run/php-fpm/www.sock /run/php-fpm/php-fpm.sock; do
+        if [[ -S "$s" ]]; then
+            echo "unix:$s"
+            return 0
+        fi
+    done
+    local rhel_sock=$(find /run/php-fpm /var/run/php-fpm -name "*.sock" 2>/dev/null | head -1)
+    if [[ -n "$rhel_sock" ]]; then
+        echo "unix:$rhel_sock"
+        return 0
+    fi
+
+    # Find the latest PHP-FPM socket in /run/php (Debian/Ubuntu)
     local socket=$(find /run/php -name "php*-fpm.sock" 2>/dev/null | sort -V | tail -1)
     
     if [[ -n "$socket" ]]; then
