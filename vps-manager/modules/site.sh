@@ -757,7 +757,10 @@ server {
         
         # FastCGI Cache Settings (Zero-Downtime Background Update)
         fastcgi_cache WORDPRESS;
-        fastcgi_cache_valid 200 301 302 60m;
+        fastcgi_cache_valid 200 301 60m;
+        # Chuyển hướng tạm (302) và 404 chỉ giữ 1 phút: 302 thường phụ thuộc trạng thái
+        # (chưa cài WordPress -> /wp-admin/install.php, trang cần đăng nhập...), giữ lâu sẽ phát sai cho khách.
+        fastcgi_cache_valid 302 404 1m;
         fastcgi_cache_use_stale error timeout updating invalid_header http_500 http_503;
         fastcgi_cache_background_update on;
         fastcgi_cache_min_uses 1;

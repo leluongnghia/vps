@@ -581,6 +581,51 @@ EOF
 }
 
 # ==============================================================================
+# IP thật của khách khi site đứng sau Cloudflare
+# Không có phần này, nginx chỉ thấy IP của Cloudflare: giới hạn wp-login, Fail2ban, WAF và log
+# đều tính theo IP Cloudflare (mọi khách dùng chung một IP) thay vì IP của từng người.
+# Header CF-Connecting-IP chỉ được tin khi request đến TỪ dải IP của Cloudflare, nên an toàn
+# cả với site không dùng Cloudflare.
+# ==============================================================================
+setup_cloudflare_real_ip() {
+    command -v nginx &>/dev/null || return 0
+    [[ -d /etc/nginx/conf.d ]] || return 0
+    local f="/etc/nginx/conf.d/vps-manager-cloudflare-realip.conf"
+    local v4 v6 ip had_old=0
+
+    # Lấy danh sách hiện hành từ Cloudflare; không lấy được thì dùng danh sách đi kèm
+    v4=$(curl -fsS --max-time 10 https://www.cloudflare.com/ips-v4 2>/dev/null)
+    v6=$(curl -fsS --max-time 10 https://www.cloudflare.com/ips-v6 2>/dev/null)
+    if [[ $(echo "$v4" | grep -cE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$') -lt 5 ]]; then
+        v4="173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22 141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20 197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/13 104.24.0.0/14 172.64.0.0/13 131.0.72.0/22"
+    fi
+    if [[ $(echo "$v6" | grep -cE '^[0-9a-fA-F:]+/[0-9]+$') -lt 3 ]]; then
+        v6="2400:cb00::/32 2606:4700::/32 2803:f800::/32 2405:b500::/32 2405:8100::/32 2a06:98c0::/29 2c0f:f248::/32"
+    fi
+
+    [[ -f "$f" ]] && { cp -p "$f" "${f}.bak_$$"; had_old=1; }
+    {
+        echo "# Managed by VPS-Manager: khôi phục IP thật của khách đi qua Cloudflare"
+        for ip in $v4 $v6; do
+            # chỉ nhận đúng định dạng CIDR - không ghi bất cứ thứ gì khác vào cấu hình nginx
+            if [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$ || "$ip" =~ ^[0-9a-fA-F:]+/[0-9]+$ ]]; then
+                echo "set_real_ip_from $ip;"
+            fi
+        done
+        echo "real_ip_header CF-Connecting-IP;"
+    } > "$f"
+
+    if nginx -t &>/dev/null; then
+        systemctl reload nginx 2>/dev/null
+        rm -f "${f}.bak_$$"
+        return 0
+    fi
+    if [[ "$had_old" -eq 1 ]]; then mv -f "${f}.bak_$$" "$f"; else rm -f "$f"; fi
+    log_warn "Không áp được cấu hình IP thật qua Cloudflare (nginx -t lỗi) - đã hoàn tác."
+    return 1
+}
+
+# ==============================================================================
 # 6. Làm mới cache khi nội dung WordPress thay đổi
 # ==============================================================================
 
@@ -799,6 +844,7 @@ run_reliability_setup() {
     opcache_relax_revalidate
     if command -v nginx &>/dev/null; then
         setup_nginx_globals
+        setup_cloudflare_real_ip
         _wplogin_limit_fix_vhosts
         fastcgi_cache_autosize
         cache_refresh_enable_all
