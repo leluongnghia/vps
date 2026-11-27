@@ -73,12 +73,29 @@ update_self() {
         TEMP_DIR=$(mktemp -d)
         echo -e "${YELLOW}Cloning repository...${NC}"
         git clone -b "$BRANCH" --depth 1 "$REPO_URL" "$TEMP_DIR/vps-repo"
-        
+
         if [[ $? -ne 0 ]]; then
             echo -e "${RED}Failed to clone repository. Check internet connection.${NC}"
             rm -rf "$TEMP_DIR"
             exit 1
         fi
+
+        # Kiểm tra bản tải về (đủ file, không lỗi cú pháp) TRƯỚC khi thay bản đang cài
+        local f
+        for f in install.sh core/menu.sh core/utils.sh; do
+            if [[ ! -s "$TEMP_DIR/vps-repo/vps-manager/$f" ]]; then
+                echo -e "${RED}Bản tải về thiếu file $f. Giữ nguyên phiên bản hiện tại.${NC}"
+                rm -rf "$TEMP_DIR"
+                exit 1
+            fi
+        done
+        while IFS= read -r -d '' f; do
+            if ! bash -n "$f" 2>/dev/null; then
+                echo -e "${RED}Bản tải về có file lỗi cú pháp: $f. Giữ nguyên phiên bản hiện tại.${NC}"
+                rm -rf "$TEMP_DIR"
+                exit 1
+            fi
+        done < <(find "$TEMP_DIR/vps-repo/vps-manager" -name "*.sh" -print0)
 
         # Safe Update Strategy
         BACKUP_DIR="${INSTALL_DIR}_backup_$(date +%s)"
@@ -141,13 +158,14 @@ update_self() {
     fi
 }
 
-# Auto Install Stack
+# Auto Install Stack (dùng chung core/stack_install.sh với install-nginx.sh)
 auto_install_stack() {
     clear
     echo -e "${YELLOW}=================================================${NC}"
     echo -e "${GREEN}   TIẾN TRÌNH CÀI ĐẶT: Nginx + MariaDB + PHP + Valkey${NC}"
     echo -e "${YELLOW}=================================================${NC}"
     echo -e "- RAM ảo: ZRAM (Tự động nén thông minh)"
+    echo -e "- Hệ thống: Tối ưu Kernel/TCP (BBR), giới hạn file"
     echo -e "- Web Server: Nginx (LEMP Stack ổn định, chịu tải cao)"
     echo -e "- Database: MariaDB"
     echo -e "- Core: PHP 8.4"
@@ -156,40 +174,8 @@ auto_install_stack() {
     echo -e ""
     read -p "Bắt đầu cài đặt ngay? [Y/n]: " opt_lemp
     if [[ "$opt_lemp" == "y" || "$opt_lemp" == "Y" || -z "$opt_lemp" ]]; then
-        echo -e "${BLUE}[1/7] Đang thiết lập ZRAM Swap...${NC}"
-        source modules/zram.sh
-        zram_install "auto"
-
-        echo -e "${BLUE}[2/7] Đang cài đặt Nginx & MariaDB...${NC}"
-        source modules/lemp.sh
-        install_mariadb
-
-        source modules/nginx.sh
-        install_nginx
-        echo -e "${BLUE}[3/7] Đang cài đặt PHP 8.4...${NC}"
-        install_php "8.4"
-
-        if [[ -f "modules/phpmyadmin.sh" ]]; then
-             echo -e "${BLUE}[4/7] Đang cài đặt phpMyAdmin...${NC}"
-             source modules/phpmyadmin.sh
-             install_phpmyadmin
-        fi
-
-        echo -e "${BLUE}[5/7] Đang cài đặt Valkey (Memory Cache)...${NC}"
-        source modules/wordpress_performance.sh 2>/dev/null
-        install_valkey
-
-        echo -e "${BLUE}[6/6] Đang cấu hình Firewall...${NC}"
-        source modules/security.sh
-        setup_firewall "auto"
-
-        if [[ -f "modules/monit.sh" ]]; then
-            source modules/monit.sh
-            monit_install "auto"
-        fi
-
-        echo -e "${GREEN}=================================================${NC}"
-        echo -e "${GREEN}Quá trình khởi tạo Server đã hoàn tất xuất sắc!${NC}"
+        source core/stack_install.sh
+        run_stack_install "8.4" "valkey"
     else
         echo -e "${YELLOW}Đã huỷ Auto-Install.${NC}"
     fi
@@ -240,6 +226,27 @@ main() {
             fi
         fi
         
+        # Server đã có web stack nhưng chưa áp gói Ổn định & Tốc độ của phiên bản này (vừa cập nhật script)
+        if command -v nginx &>/dev/null && reliability_setup_pending; then
+            echo -e "${BLUE}=================================================${NC}"
+            echo -e "${GREEN}VPS Manager v$(cat VERSION 2>/dev/null) có gói Ổn định & Tốc độ chưa áp dụng trên server này:${NC}"
+            echo -e "  • Tự khởi động lại Nginx / PHP-FPM / MariaDB khi chết, chống treo máy vì hết RAM"
+            echo -e "  • Cập nhật bản vá bảo mật tự động (không tự reboot)"
+            echo -e "  • Slow log PHP & MariaDB, kiểm tra sức khoẻ mỗi 5 phút"
+            echo -e "  • Giới hạn dò mật khẩu wp-login, HTTP/2, làm mới cache khi sửa bài"
+            echo -e "  • Tự tính kích thước cache theo RAM/ổ đĩa (${YELLOW}Nginx sẽ restart 1 lần, gián đoạn ~1 giây${NC})"
+            read -p "Áp dụng ngay? [Y/n]: " apply_rel
+            if [[ "$apply_rel" == "y" || "$apply_rel" == "Y" || -z "$apply_rel" ]]; then
+                run_reliability_setup
+            else
+                # Ghi nhận đã hỏi để không hỏi lại mỗi lần mở menu; áp sau qua mục 18 của menu chính
+                mkdir -p /etc/vps-manager
+                tr -d '[:space:]' < VERSION > /etc/vps-manager/reliability_version 2>/dev/null
+                echo -e "${YELLOW}Đã bỏ qua. Áp dụng sau: Menu chính → 18. Ổn định & Cảnh báo → 1.${NC}"
+            fi
+            read -p "Nhấn Enter để vào Menu chính..."
+        fi
+
         main_menu
     else
         echo -e "${RED}Critical Error: core/menu.sh not found in $MY_DIR${NC}"

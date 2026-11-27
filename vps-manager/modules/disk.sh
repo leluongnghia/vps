@@ -103,7 +103,10 @@ clean_system() {
     journalctl --vacuum-time=3d >/dev/null 2>&1
 
     log_info "3. Dọn dẹp thư mục tạm /tmp..."
-    rm -rf /tmp/* 2>/dev/null || true
+    # Chỉ xoá file tạm cũ hơn 3 ngày: xoá sạch /tmp sẽ làm hỏng upload PHP đang chạy,
+    # socket tmux/screen và file khoá của các tác vụ backup.
+    find /tmp -mindepth 1 -xdev -type f -mtime +3 -delete 2>/dev/null || true
+    find /tmp -mindepth 1 -xdev -type d -empty -mtime +3 -delete 2>/dev/null || true
 
     log_info "4. Dọn dẹp cache Nginx cũ..."
     if [[ -d /var/cache/nginx ]]; then
@@ -164,8 +167,12 @@ setup_logrotate() {
         pkg_install logrotate
     fi
 
+    # Log của nginx / php-fpm / mariadb ĐÃ có file logrotate riêng do gói cài đặt cung cấp.
+    # Khai báo lại cùng đường dẫn sẽ bị logrotate từ chối (duplicate log entry), nên ở đây:
+    #   1) chỉ khai báo các log do VPS Manager tự tạo;
+    #   2) bổ sung "maxsize 50M" vào các file có sẵn của gói.
     cat > /etc/logrotate.d/vps-manager << 'EOF'
-/var/log/nginx/*.log /var/log/php*-fpm.log /var/log/mariadb/*.log /var/log/mysql/*.log {
+/var/log/vps-manager.log /var/log/vps-*.log /var/log/aprg-cron-*.log /var/log/wp-cron-*.log {
     weekly
     maxsize 50M
     missingok
@@ -173,21 +180,29 @@ setup_logrotate() {
     compress
     delaycompress
     notifempty
-    create 0640 www-data adm
-    sharedscripts
-    postrotate
-        if [ -f /var/run/nginx.pid ]; then
-            kill -USR1 `cat /var/run/nginx.pid`
-        fi
-    endscript
+    copytruncate
 }
 EOF
 
-    # Test logrotate config syntax
-    if logrotate -d /etc/logrotate.d/vps-manager >/dev/null 2>&1; then
-        echo -e "${GREEN}✅ Cấu hình Logrotate đã được cài đặt và kích hoạt thành công!${NC}"
+    local f patched=0
+    for f in /etc/logrotate.d/nginx /etc/logrotate.d/php*-fpm /etc/logrotate.d/php-fpm \
+             /etc/logrotate.d/mariadb /etc/logrotate.d/mysql-server; do
+        [[ -f "$f" ]] || continue
+        if ! grep -q "maxsize" "$f"; then
+            # chèn ngay sau dấu "{" mở khối đầu tiên
+            sed -i '0,/{/s/{/{\n\tmaxsize 50M/' "$f"
+            patched=$((patched + 1))
+        fi
+    done
+
+    # Kiểm tra TOÀN BỘ cấu hình logrotate (không chỉ riêng file vừa tạo)
+    local out
+    out=$(logrotate -d /etc/logrotate.conf 2>&1)
+    if echo "$out" | grep -qiE "^error:|duplicate log entry"; then
+        echo -e "${RED}Logrotate báo lỗi cấu hình:${NC}"
+        echo "$out" | grep -iE "^error:|duplicate log entry" | head -5
     else
-        echo -e "${YELLOW}Đã tạo cấu hình Logrotate tại /etc/logrotate.d/vps-manager.${NC}"
+        echo -e "${GREEN}✅ Logrotate đã được cấu hình (đã thêm giới hạn 50M cho ${patched} file cấu hình có sẵn).${NC}"
     fi
     pause
 }

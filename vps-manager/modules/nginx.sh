@@ -65,9 +65,7 @@ _nginx_full_install() {
         install_phpmyadmin
     fi
 
-    # Tự động hardened nginx.conf (Performance + Security)
-    log_info "[+] Tối ưu và bảo mật nginx.conf..."
-    _configure_nginx_global
+    # (nginx.conf đã được tối ưu/bảo mật ngay trong install_nginx -> _configure_nginx_global)
 
     echo ""
     echo -e "${YELLOW}Bạn có muốn cài đặt Memory Cache (Valkey/Redis) không?${NC}"
@@ -76,13 +74,11 @@ _nginx_full_install() {
     echo -e "0. Bỏ qua"
     read -p "Chọn [0-2]: " cache_choice
 
-    if [[ "$cache_choice" == "1" || "$cache_choice" == "2" ]]; then
-        if [[ -f "$ROOT_DIR/modules/wordpress_performance.sh" ]]; then
-            source "$ROOT_DIR/modules/wordpress_performance.sh"
-        else
-            source "modules/wordpress_performance.sh" 2>/dev/null
-        fi
-        [[ "$cache_choice" == "1" ]] && install_valkey || install_redis
+    # Dùng chung 1 bộ cài object cache duy nhất trong lemp.sh (đã source ở trên)
+    if [[ "$cache_choice" == "1" ]]; then
+        _install_object_cache_nginx valkey || log_warn "Cài Valkey chưa thành công. Kiểm tra log phía trên."
+    elif [[ "$cache_choice" == "2" ]]; then
+        _install_object_cache_nginx redis || log_warn "Cài Redis chưa thành công. Kiểm tra log phía trên."
     fi
 
     echo ""
@@ -115,18 +111,17 @@ nginx_menu() {
         echo -e "1. Chỉnh sửa cấu hình chung (nginx.conf)"
         echo -e "2. Chỉnh sửa cấu hình Vhost (Domain)"
         echo -e "3. Kiểm tra cấu hình (nginx -t)"
-        echo -e "4. Khởi động lại Nginx"
-        echo -e "5. Cứu hộ Nginx (Fix lỗi Config tự động)"
+        echo -e "4. Cứu hộ Nginx (Fix lỗi Config tự động)"
         echo -e "0. Quay lại"
+        echo -e "   (Restart/Reload Nginx: Menu chính → 14. Quản lý Dịch vụ Hệ thống)"
         echo -e "${BLUE}=================================================${NC}"
-        read -p "Chọn: " choice
+        read -p "Chọn [0-4]: " choice
 
         case $choice in
             1) edit_nginx_conf ;;
             2) edit_vhost ;;
             3) nginx -t; pause ;;
-            4) systemctl restart nginx; pause ;;
-            5) fix_nginx_config ;;
+            4) fix_nginx_config ;;
             0) return ;;
             *) echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause ;;
         esac
@@ -134,8 +129,22 @@ nginx_menu() {
 }
 
 edit_nginx_conf() {
-    nano /etc/nginx/nginx.conf
-    nginx -t && systemctl reload nginx
+    local conf="/etc/nginx/nginx.conf"
+    local bak
+    bak=$(backup_nginx_config "$conf")
+    nano "$conf"
+    if nginx_test_reload; then
+        rm -f "$bak"
+        log_info "Đã áp dụng nginx.conf."
+    else
+        read -p "Config lỗi. Khôi phục bản trước khi sửa? [Y/n]: " r
+        if [[ "${r,,}" != "n" ]] && [[ -n "$bak" && -f "$bak" ]]; then
+            mv -f "$bak" "$conf"
+            log_warn "Đã khôi phục nginx.conf về bản trước khi sửa."
+        else
+            log_warn "Giữ nguyên file đang lỗi. Bản backup: $bak"
+        fi
+    fi
     pause
 }
 
@@ -151,8 +160,21 @@ edit_vhost() {
         pause; return
     fi
 
+    local bak
+    bak=$(backup_nginx_config "$conf")
     nano "$conf"
-    nginx -t && systemctl reload nginx
+    if nginx_test_reload; then
+        rm -f "$bak"
+        log_info "Đã áp dụng cấu hình vhost $domain."
+    else
+        read -p "Config lỗi. Khôi phục bản trước khi sửa? [Y/n]: " r
+        if [[ "${r,,}" != "n" ]] && [[ -n "$bak" && -f "$bak" ]]; then
+            mv -f "$bak" "$conf"
+            log_warn "Đã khôi phục vhost $domain về bản trước khi sửa."
+        else
+            log_warn "Giữ nguyên file đang lỗi. Bản backup: $bak"
+        fi
+    fi
     pause
 }
 
@@ -183,18 +205,38 @@ fix_nginx_config() {
         else
             echo -e "${RED}Vẫn còn lỗi chưa thể tự sửa:${NC}"
             nginx -t
-            echo -e "${YELLOW}Bạn có muốn xóa toàn bộ config trong conf.d/* để reset? (Chỉ giữ lại Vhost) [y/N]${NC}"
+            echo -e "${YELLOW}Bạn có muốn tạm gỡ các config trong conf.d/* để reset? (Giữ lại Vhost và các file cache bắt buộc) [y/N]${NC}"
             read -p "Chọn: " r
             if [[ "$r" == "y" ]]; then
-                mkdir -p /root/nginx_confd_backup
-                mv /etc/nginx/conf.d/*.conf /root/nginx_confd_backup/ 2>/dev/null
-                log_info "Đã backup conf.d ra /root/nginx_confd_backup và xóa sạch folder hiện tại."
-                systemctl restart nginx
+                local bk_dir="/root/nginx_confd_backup/$(date +%Y%m%d_%H%M%S)"
+                mkdir -p "$bk_dir"
+                local f base moved=()
+                for f in /etc/nginx/conf.d/*.conf; do
+                    [[ -f "$f" ]] || continue
+                    base=$(basename "$f")
+                    # Các vhost đều tham chiếu keys_zone WORDPRESS -> gỡ 2 file này là sập toàn bộ site
+                    case "$base" in
+                        fastcgi_cache.conf|fastcgi-buffer.conf) continue ;;
+                    esac
+                    mv "$f" "$bk_dir/" && moved+=("$base")
+                done
+                log_info "Đã chuyển ${#moved[@]} file conf.d sang $bk_dir (giữ lại fastcgi_cache.conf, fastcgi-buffer.conf)."
+
+                if nginx -t; then
+                    systemctl reload nginx 2>/dev/null || systemctl restart nginx
+                    log_info "Nginx đã chạy lại với conf.d tối giản."
+                else
+                    log_error "Vẫn lỗi sau khi gỡ conf.d - khôi phục lại các file vừa gỡ, KHÔNG restart Nginx."
+                    for base in "${moved[@]}"; do
+                        mv "$bk_dir/$base" /etc/nginx/conf.d/ 2>/dev/null
+                    done
+                    echo -e "${YELLOW}Lỗi nằm ở nginx.conf hoặc vhost. Xem chi tiết: nginx -t${NC}"
+                fi
             fi
         fi
     else
         log_info "Nginx cấu hình OK. Không tìm thấy lỗi."
-        systemctl restart nginx
+        systemctl reload nginx 2>/dev/null || systemctl restart nginx
     fi
     pause
 }

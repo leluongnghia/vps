@@ -7,37 +7,156 @@ _pma_log()  { echo -e "\033[0;32m[INFO]\033[0m $1"; }
 _pma_warn() { echo -e "\033[1;33m[WARN]\033[0m $1"; }
 _pma_err()  { echo -e "\033[0;31m[ERROR]\033[0m $1"; }
 
-# ─── PHP socket detection (standalone, no external deps) ──────────────────
-_detect_php_sock() {
-    # Check RHEL / CentOS / Oracle Linux standard socket paths
-    for s in /run/php-fpm/www.sock /var/run/php-fpm/www.sock /run/php-fpm/php-fpm.sock; do
-        if [[ -S "$s" ]]; then
-            echo "unix:$s"
-            return 0
-        fi
-    done
-    local rhel_sock=$(find /run/php-fpm /var/run/php-fpm -name "*.sock" 2>/dev/null | head -1)
-    if [[ -n "$rhel_sock" ]]; then
-        echo "unix:$rhel_sock"
-        return 0
-    fi
+# (PHP socket: dùng detect_php_socket của core/system_helpers.sh)
 
-    # Try current PHP version first (Debian)
-    local ver
-    ver=$(php -r "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;" 2>/dev/null)
-    for v in "$ver" "8.4" "8.3" "8.2" "8.1" "8.0" "7.4"; do
-        [ -z "$v" ] && continue
-        if [[ -S "/run/php/php${v}-fpm.sock" ]]; then
-            echo "unix:/run/php/php${v}-fpm.sock"
-            return 0
+PMA_STATE_FILE="/etc/vps-manager/pma_path"
+PMA_NGINX_CONF="/etc/nginx/sites-available/000-phpmyadmin"
+PMA_CERT_DIR="/etc/nginx/ssl/phpmyadmin"
+
+# Tên đường dẫn hiện tại của phpMyAdmin (mặc định "phpmyadmin", đổi được qua mục Secure)
+_pma_path() {
+    local p=""
+    [[ -f "$PMA_STATE_FILE" ]] && p=$(head -n 1 "$PMA_STATE_FILE" | tr -d '[:space:]')
+    [[ "$p" =~ ^[A-Za-z0-9_-]{1,64}$ ]] || p="phpmyadmin"
+    echo "$p"
+}
+
+_pma_public_ip() {
+    local ip
+    ip=$(curl -4 -s --connect-timeout 5 https://ifconfig.me 2>/dev/null)
+    [[ -z "$ip" ]] && ip=$(hostname -I | awk '{print $1}')
+    echo "$ip" | tr -d '\n '
+}
+
+# http hay https, tuỳ vhost đang chạy có TLS không
+_pma_scheme() {
+    if grep -q "listen 443 ssl" "$PMA_NGINX_CONF" 2>/dev/null; then echo "https"; else echo "http"; fi
+}
+
+# Tạo chứng chỉ tự ký để mật khẩu Basic Auth / MySQL không đi dạng cleartext trên Internet
+_pma_ensure_cert() {
+    [[ -s "$PMA_CERT_DIR/cert.pem" && -s "$PMA_CERT_DIR/key.pem" ]] && return 0
+    mkdir -p "$PMA_CERT_DIR"
+    openssl req -x509 -nodes -newkey rsa:2048 -days 3650 \
+        -subj "/CN=phpmyadmin.local" \
+        -keyout "$PMA_CERT_DIR/key.pem" -out "$PMA_CERT_DIR/cert.pem" &>/dev/null || return 1
+    chmod 600 "$PMA_CERT_DIR/key.pem"
+}
+
+# Ghi vhost phpMyAdmin.  $1 = tên đường dẫn, $2 = fastcgi_pass, $3 = "tls" | "plain"
+_pma_write_nginx_conf() {
+    local path=$1 sock=$2 mode=${3:-tls}
+    local pma_block
+    pma_block=$(cat <<EOF
+    location ^~ /${path} {
+        client_max_body_size 500M;
+        root /var/www/html;
+        index index.php index.html index.htm;
+
+        auth_basic "Restricted Access";
+        auth_basic_user_file /etc/nginx/.phpmyadmin_htpasswd;
+
+        # Thư mục nội bộ của phpMyAdmin không được truy cập từ web
+        location ~ ^/${path}/(libraries|templates|setup/lib|vendor|tmp|sql)/ { deny all; }
+
+        location ~ ^/${path}/(.+\\.php)\$ {
+            try_files \$uri =404;
+            fastcgi_pass ${sock};
+            fastcgi_buffer_size 128k;
+            fastcgi_buffers 4 256k;
+            fastcgi_busy_buffers_size 256k;
+            fastcgi_index index.php;
+            fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
+            fastcgi_param PHP_VALUE "upload_max_filesize=500M \\n post_max_size=500M \\n max_execution_time=3600 \\n max_input_time=3600";
+            include fastcgi_params;
+        }
+
+        location ~* ^/${path}/.+\\.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf)\$ {
+            try_files \$uri =404;
+            expires max;
+            add_header Cache-Control "public";
+        }
+    }
+EOF
+)
+    # PHP nằm ngoài thư mục phpMyAdmin trong /var/www/html KHÔNG được thực thi (cũng không lộ mã nguồn):
+    # tránh việc một bản sao cũ của phpMyAdmin chạy được mà không qua Basic Auth.
+    local deny_php='    location ~ \.php$ { return 404; }'
+
+    if [[ "$mode" == "tls" ]]; then
+        cat > "$PMA_NGINX_CONF" <<EOF
+# Managed by VPS-Manager (modules/phpmyadmin.sh)
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+    root /var/www/html;
+    index index.html index.htm;
+
+    location / { try_files \$uri \$uri/ =404; }
+    # phpMyAdmin chỉ phục vụ qua HTTPS
+    location ^~ /${path} { return 301 https://\$host\$request_uri; }
+${deny_php}
+}
+
+server {
+    listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
+    server_name _;
+    ssl_certificate     ${PMA_CERT_DIR}/cert.pem;
+    ssl_certificate_key ${PMA_CERT_DIR}/key.pem;
+    root /var/www/html;
+    index index.html index.htm;
+
+    location / { return 444; }
+${pma_block}
+${deny_php}
+}
+EOF
+    else
+        cat > "$PMA_NGINX_CONF" <<EOF
+# Managed by VPS-Manager (modules/phpmyadmin.sh)
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+    root /var/www/html;
+    index index.html index.htm;
+
+    location / { try_files \$uri \$uri/ =404; }
+${pma_block}
+${deny_php}
+}
+EOF
+    fi
+    ln -sf "$PMA_NGINX_CONF" /etc/nginx/sites-enabled/000-phpmyadmin
+    type selinux_restore &>/dev/null && selinux_restore "$PMA_NGINX_CONF" /var/www/html
+    return 0
+}
+
+# Ghi vhost (ưu tiên HTTPS tự ký; nếu nginx từ chối thì lùi về HTTP) rồi test + reload.
+# Lỗi hoàn toàn -> khôi phục vhost cũ.  $1 = path, $2 = fastcgi_pass
+_pma_apply_nginx() {
+    local path=$1 sock=$2 bak=""
+    [[ -f "$PMA_NGINX_CONF" ]] && { bak="${PMA_NGINX_CONF}.bak_$$"; cp -p "$PMA_NGINX_CONF" "$bak"; }
+
+    if _pma_ensure_cert; then
+        _pma_write_nginx_conf "$path" "$sock" tls
+        if nginx -t &>/dev/null; then
+            systemctl reload nginx; rm -f "$bak"; return 0
         fi
-    done
-    # Fallback: find any socket
-    local sock
-    sock=$(find /run/php -name "php*-fpm.sock" 2>/dev/null | sort -V | tail -1)
-    if [[ -n "$sock" ]]; then
-        echo "unix:$sock"
-        return 0
+        _pma_warn "Không bật được HTTPS cho phpMyAdmin (có vhost khác đã là default_server cổng 443?). Dùng HTTP."
+    fi
+    _pma_write_nginx_conf "$path" "$sock" plain
+    if nginx -t &>/dev/null; then
+        systemctl reload nginx; rm -f "$bak"; return 0
+    fi
+    _pma_err "Nginx config có lỗi:"
+    nginx -t 2>&1 | tail -5
+    if [[ -n "$bak" ]]; then
+        mv -f "$bak" "$PMA_NGINX_CONF"
+    else
+        rm -f /etc/nginx/sites-enabled/000-phpmyadmin
     fi
     return 1
 }
@@ -49,7 +168,7 @@ phpmyadmin_menu() {
         echo -e "${GREEN}          🗄️  Quản lý phpMyAdmin${NC}"
         echo -e "${BLUE}=================================================${NC}"
 
-        if [[ -d "/var/www/html/phpmyadmin" ]]; then
+        if [[ -d "/var/www/html/$(_pma_path)" ]]; then
             echo -e "Trạng thái: ${GREEN}● Đã cài đặt${NC}"
         else
             echo -e "Trạng thái: ${RED}● Chưa cài đặt${NC}"
@@ -87,9 +206,13 @@ install_phpmyadmin() {
         pause; return 1
     fi
 
-    PMA_DIR="/var/www/html/phpmyadmin"
-    PMA_VER="5.2.1"
-    TEMP_DIR="/tmp/pma_install_$$"
+    local PMA_PATH
+    PMA_PATH=$(_pma_path)
+    PMA_DIR="/var/www/html/${PMA_PATH}"
+    # Lấy phiên bản ổn định mới nhất từ phpmyadmin.net (bản cũ còn lỗi bảo mật đã được vá)
+    PMA_VER=$(curl -fsSL --max-time 10 https://www.phpmyadmin.net/home_page/version.txt 2>/dev/null | head -n 1 | tr -d '[:space:]')
+    [[ "$PMA_VER" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || PMA_VER="5.2.2"
+    TEMP_DIR=$(mktemp -d /tmp/pma_install_XXXXXX) || { _pma_err "Không tạo được thư mục tạm."; pause; return 1; }
 
     # ── Step 1: Dependencies ───────────────────────────────────
     _pma_log "Step 1/7: Cài đặt dependencies..."
@@ -114,28 +237,22 @@ install_phpmyadmin() {
 
     # ── Step 2: Download ───────────────────────────────────────
     _pma_log "Step 2/7: Tải phpMyAdmin ${PMA_VER}..."
-    rm -rf "$TEMP_DIR"
-    mkdir -p "$TEMP_DIR"
-
     local tarball="phpMyAdmin-${PMA_VER}-all-languages.tar.gz"
     local url="https://files.phpmyadmin.net/phpMyAdmin/${PMA_VER}/${tarball}"
 
-    # Try wget, fallback to curl
-    if command -v wget &>/dev/null; then
-        wget -q -O "$TEMP_DIR/$tarball" "$url"
-    elif command -v curl &>/dev/null; then
-        curl -sL -o "$TEMP_DIR/$tarball" "$url"
-    else
-        _pma_err "Không có wget hoặc curl. Cài: apt-get install -y wget  hoặc  dnf install -y wget"
+    # Tải kèm kiểm tra SHA256 do phpmyadmin.net công bố (bắt được file tải dở / bị thay đổi)
+    local pma_sum
+    pma_sum=$(curl -fsSL --max-time 20 "${url}.sha256" 2>/dev/null | awk '{print $1}' | head -n 1)
+    if [[ ! "$pma_sum" =~ ^[0-9a-fA-F]{64}$ ]]; then
+        _pma_err "Không lấy được checksum của phpMyAdmin ${PMA_VER}. Kiểm tra kết nối mạng."
         rm -rf "$TEMP_DIR"; pause; return 1
     fi
-
-    if [[ ! -f "$TEMP_DIR/$tarball" ]] || [[ ! -s "$TEMP_DIR/$tarball" ]]; then
-        _pma_err "Tải thất bại! Kiểm tra kết nối mạng."
+    if ! safe_download "$url" "$TEMP_DIR/$tarball" "$pma_sum"; then
+        _pma_err "Tải thất bại hoặc checksum không khớp."
         _pma_err "Thử thủ công: wget '$url'"
         rm -rf "$TEMP_DIR"; pause; return 1
     fi
-    _pma_log "Tải thành công: $(du -sh "$TEMP_DIR/$tarball" | cut -f1)"
+    _pma_log "Tải thành công (đã xác minh SHA256): $(du -sh "$TEMP_DIR/$tarball" | cut -f1)"
 
     # ── Step 3: Extract ────────────────────────────────────────
     _pma_log "Step 3/7: Giải nén..."
@@ -223,7 +340,7 @@ install_phpmyadmin() {
 
     # ── Detect PHP Socket ──────────────────────────────────────
     local PHP_SOCK
-    PHP_SOCK=$(_detect_php_sock)
+    PHP_SOCK=$(detect_php_socket 2>/dev/null)
     if [[ -z "$PHP_SOCK" ]]; then
         _pma_err "Không tìm thấy PHP-FPM socket!"
         _pma_err "Kiểm tra: ls /run/php/ hoặc ls /var/run/php-fpm/"
@@ -234,82 +351,30 @@ install_phpmyadmin() {
 
     # ── Detect VPS IP ──────────────────────────────────────────
     local VPS_IP
-    VPS_IP=$(curl -4 -s --connect-timeout 5 https://ifconfig.me 2>/dev/null)
-    [ -z "$VPS_IP" ] && VPS_IP=$(hostname -I | awk '{print $1}')
-    VPS_IP=$(echo "$VPS_IP" | tr -d '\n ')
+    VPS_IP=$(_pma_public_ip)
 
     # ── Remove old default Nginx ───────────────────────────────
     [ -L "/etc/nginx/sites-enabled/default" ] && rm -f /etc/nginx/sites-enabled/default
 
-    # ── Write Nginx config (printf avoids heredoc $ escaping issues) ─
-    local NGINX_CONF="/etc/nginx/sites-available/000-phpmyadmin"
-    {
-        printf 'server {\n'
-        printf '    listen 80 default_server;\n'
-        printf '    listen [::]:80 default_server;\n'
-        printf '    server_name _;\n'
-        printf '    root /var/www/html;\n'
-        printf '    index index.php index.html index.htm;\n\n'
-
-        printf '    location / {\n'
-        printf '        try_files $uri $uri/ =404;\n'
-        printf '    }\n\n'
-
-        printf '    # phpMyAdmin location\n'
-        printf '    location ^~ /phpmyadmin {\n'
-        printf '        client_max_body_size 500M;\n'
-        printf '        root /var/www/html;\n'
-        printf '        index index.php index.html index.htm;\n\n'
-        printf '        auth_basic "Restricted Access";\n'
-        printf '        auth_basic_user_file /etc/nginx/.phpmyadmin_htpasswd;\n\n'
-
-        printf '        location ~ ^/phpmyadmin/(.+\\.php)$ {\n'
-        printf '            try_files $uri =404;\n'
-        printf '            fastcgi_pass %s;\n' "$PHP_SOCK"
-        printf '            fastcgi_buffer_size 128k;\n'
-        printf '            fastcgi_buffers 4 256k;\n'
-        printf '            fastcgi_busy_buffers_size 256k;\n'
-        printf '            fastcgi_index index.php;\n'
-        printf '            fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;\n'
-        printf '            fastcgi_param PHP_VALUE "upload_max_filesize=500M \\n post_max_size=500M \\n max_execution_time=3600 \\n max_input_time=3600";\n'
-        printf '            include fastcgi_params;\n'
-        printf '        }\n\n'
-
-        printf '        location ~* ^/phpmyadmin/.+\\.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf)$ {\n'
-        printf '            try_files $uri =404;\n'
-        printf '            expires max;\n'
-        printf '            add_header Cache-Control "public";\n'
-        printf '        }\n'
-        printf '    }\n\n'
-
-        printf '    # PHP handler for root\n'
-        printf '    location ~ \\.php$ {\n'
-        printf '        try_files $uri =404;\n'
-        printf '        fastcgi_pass %s;\n' "$PHP_SOCK"
-        printf '        fastcgi_index index.php;\n'
-        printf '        fastcgi_buffer_size 128k;\n'
-        printf '        fastcgi_buffers 4 256k;\n'
-        printf '        fastcgi_busy_buffers_size 256k;\n'
-        printf '        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;\n'
-        printf '        include fastcgi_params;\n'
-        printf '    }\n'
-        printf '}\n'
-    } > "$NGINX_CONF"
-
-    ln -sf "$NGINX_CONF" /etc/nginx/sites-enabled/000-phpmyadmin
-
-    # ── Test & Reload ──────────────────────────────────────────
+    # ── Ghi vhost (HTTPS tự ký, lùi về HTTP nếu không được), test & reload, tự hoàn tác khi lỗi ─
     echo ""
-    nginx -t
-    if [[ $? -eq 0 ]]; then
-        systemctl reload nginx
+    if _pma_apply_nginx "$PMA_PATH" "$PHP_SOCK"; then
+        mkdir -p "$(dirname "$PMA_STATE_FILE")"
+        echo "$PMA_PATH" > "$PMA_STATE_FILE"
+        local scheme
+        scheme=$(_pma_scheme)
         echo ""
         echo -e "${GREEN}╔══════════════════════════════════════════════╗${NC}"
         echo -e "${GREEN}║  ✅  Cài đặt phpMyAdmin THÀNH CÔNG!          ║${NC}"
         echo -e "${GREEN}╚══════════════════════════════════════════════╝${NC}"
         echo ""
         echo -e "${YELLOW}🌐 URL truy cập:${NC}"
-        echo -e "   http://${VPS_IP}/phpmyadmin/"
+        echo -e "   ${scheme}://${VPS_IP}/${PMA_PATH}/"
+        if [[ "$scheme" == "https" ]]; then
+            echo -e "   ${CYAN}(Chứng chỉ tự ký: trình duyệt sẽ cảnh báo lần đầu - chọn 'Tiếp tục'. Kết nối vẫn được mã hoá.)${NC}"
+        else
+            echo -e "   ${RED}CẢNH BÁO: đang chạy HTTP - mật khẩu đi qua mạng không mã hoá. Nên giới hạn IP truy cập.${NC}"
+        fi
         echo ""
         echo -e "${CYAN}🔐 [Lớp 1] HTTP Basic Auth:${NC}"
         echo -e "   User: ${PMA_AUTH_USER}"
@@ -332,22 +397,25 @@ install_phpmyadmin() {
             done < "$data_file"
         fi
     else
-        _pma_err "Nginx config có lỗi! Đang rollback..."
-        rm -f /etc/nginx/sites-enabled/000-phpmyadmin
-        _pma_err "Kiểm tra thủ công: nginx -t"
+        _pma_err "Không cấu hình được Nginx cho phpMyAdmin (đã hoàn tác). Kiểm tra thủ công: nginx -t"
     fi
     pause
 }
 
 uninstall_phpmyadmin() {
     echo -e "${YELLOW}--- Xóa phpMyAdmin ---${NC}"
-    read -p "Xác nhận gỡ bỏ phpMyAdmin? (y/n): " c
+    local cur
+    cur=$(_pma_path)
+    read -p "Xác nhận gỡ bỏ phpMyAdmin (/var/www/html/${cur})? (y/n): " c
     if [[ "$c" == "y" ]]; then
-        rm -rf /var/www/html/phpmyadmin
+        # $cur đã được _pma_path kiểm tra chỉ gồm [A-Za-z0-9_-] nên không thể trỏ ra ngoài /var/www/html
+        rm -rf "/var/www/html/${cur}"
+        [[ "$cur" != "phpmyadmin" ]] && rm -rf /var/www/html/phpmyadmin
         rm -f /etc/nginx/sites-enabled/000-phpmyadmin
-        rm -f /etc/nginx/sites-available/000-phpmyadmin
-        rm -f /etc/nginx/.phpmyadmin_htpasswd
-        nginx -t 2>/dev/null && systemctl reload nginx
+        rm -f "$PMA_NGINX_CONF"
+        rm -f /etc/nginx/.phpmyadmin_htpasswd "$PMA_STATE_FILE"
+        rm -f /root/.vps-manager/phpmyadmin_auth.conf
+        nginx_test_reload
         _pma_log "Đã gỡ bỏ phpMyAdmin."
     else
         echo -e "${YELLOW}Đã hủy.${NC}"
@@ -357,37 +425,45 @@ uninstall_phpmyadmin() {
 
 secure_phpmyadmin() {
     echo -e "${YELLOW}--- Đổi URL phpMyAdmin (Ẩn đường dẫn) ---${NC}"
-    read -p "Nhập tên đường dẫn mới (vd: manage_db_2025): " new_path
-
-    if [[ -z "$new_path" ]]; then
-        echo -e "${RED}Tên đường dẫn không được rỗng.${NC}"
-        pause; return
-    fi
-
-    local NGINX_CONF="/etc/nginx/sites-available/000-phpmyadmin"
-    if [[ ! -f "$NGINX_CONF" ]]; then
+    local cur
+    cur=$(_pma_path)
+    if [[ ! -f "$PMA_NGINX_CONF" ]] || [[ ! -d "/var/www/html/${cur}" ]]; then
         _pma_err "Chưa cài đặt phpMyAdmin hoặc thiếu cấu hình Nginx."
         pause; return
     fi
+    echo -e "Đường dẫn hiện tại: /${cur}/"
+    read -p "Nhập tên đường dẫn mới (vd: manage_db_2025): " new_path
 
-    # Rename folder
-    if [[ -d "/var/www/html/phpmyadmin" ]]; then
-        mv "/var/www/html/phpmyadmin" "/var/www/html/${new_path}"
-        _pma_log "Đã đổi thư mục thành /var/www/html/${new_path}"
+    if ! [[ "$new_path" =~ ^[A-Za-z0-9_-]{6,64}$ ]]; then
+        echo -e "${RED}Tên đường dẫn chỉ gồm chữ, số, '_' hoặc '-', dài 6-64 ký tự.${NC}"
+        pause; return
+    fi
+    if [[ "$new_path" == "$cur" ]]; then
+        echo -e "${YELLOW}Đường dẫn mới trùng với đường dẫn hiện tại.${NC}"
+        pause; return
+    fi
+    if [[ -e "/var/www/html/${new_path}" ]]; then
+        echo -e "${RED}/var/www/html/${new_path} đã tồn tại. Chọn tên khác.${NC}"
+        pause; return
     fi
 
-    # Update nginx config
-    sed -i "s|location \^~ /phpmyadmin|location ^~ /${new_path}|g" "$NGINX_CONF"
-    sed -i "s|/phpmyadmin/|/${new_path}/|g" "$NGINX_CONF"
+    local PHP_SOCK
+    PHP_SOCK=$(detect_php_socket 2>/dev/null)
+    if [[ -z "$PHP_SOCK" ]]; then
+        _pma_err "Không tìm thấy PHP-FPM socket."
+        pause; return 1
+    fi
 
-    if nginx -t 2>/dev/null; then
-        systemctl reload nginx
-        local VPS_IP
-        VPS_IP=$(curl -4 -s --connect-timeout 5 https://ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
+    mv "/var/www/html/${cur}" "/var/www/html/${new_path}"
+    if _pma_apply_nginx "$new_path" "$PHP_SOCK"; then
+        mkdir -p "$(dirname "$PMA_STATE_FILE")"
+        echo "$new_path" > "$PMA_STATE_FILE"
         _pma_log "Đã đổi URL thành công!"
-        echo -e "${GREEN}URL mới: http://${VPS_IP}/${new_path}/${NC}"
+        echo -e "${GREEN}URL mới: $(_pma_scheme)://$(_pma_public_ip)/${new_path}/${NC}"
     else
-        _pma_err "Lỗi Nginx sau khi cập nhật. Kiểm tra nginx -t"
+        # Vhost đã được hoàn tác -> trả thư mục về tên cũ cho khớp
+        mv "/var/www/html/${new_path}" "/var/www/html/${cur}"
+        _pma_err "Đổi URL thất bại - đã giữ nguyên đường dẫn cũ /${cur}/."
     fi
     pause
 }
@@ -402,7 +478,8 @@ reset_phpmyadmin_auth() {
         fi
     fi
 
-    read -p "Nhập mật khẩu mới (Để trống = sinh ngẫu nhiên): " new_pass
+    read -s -p "Nhập mật khẩu mới (Để trống = sinh ngẫu nhiên): " new_pass
+    echo ""
     if [[ -z "$new_pass" ]]; then
         new_pass=$(openssl rand -base64 12 | tr -dc 'a-zA-Z0-9' | head -c 12)
     fi
@@ -426,13 +503,10 @@ view_phpmyadmin_info() {
     echo -e "${YELLOW}--- Thông tin truy cập phpMyAdmin ---${NC}"
 
     local VPS_IP
-    VPS_IP=$(curl -4 -s --connect-timeout 5 https://ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
+    VPS_IP=$(_pma_public_ip)
 
-    local NGINX_CONF="/etc/nginx/sites-available/000-phpmyadmin"
-    if [[ -f "$NGINX_CONF" ]]; then
-        local PMA_PATH
-        PMA_PATH=$(grep "location \^~" "$NGINX_CONF" | awk '{print $3}')
-        echo -e "${CYAN}URL:${NC} http://${VPS_IP}${PMA_PATH}"
+    if [[ -f "$PMA_NGINX_CONF" ]]; then
+        echo -e "${CYAN}URL:${NC} $(_pma_scheme)://${VPS_IP}/$(_pma_path)/"
     else
         echo -e "${RED}Chưa có cấu hình Nginx cho phpMyAdmin.${NC}"
     fi

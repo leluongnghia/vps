@@ -2,8 +2,21 @@
 
 # modules/wordpress_performance.sh - WordPress Performance Optimization
 
+# Helper dùng chung cho WordPress/Object Cache nằm ở cache.sh
+# (_wp_config_path, _wp_list_sites, _wp_config_put_define, _wp_redis_*, _oc_*)
+# shellcheck disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/cache.sh"
+
 # Helper: Get ACTIVE PHP-FPM version (not CLI version which may differ)
 get_installed_php_version() {
+    # RHEL / Oracle Linux: 1 bản PHP theo module stream, không có /etc/php/X.Y
+    if [[ "${OS_FAMILY:-}" == "rhel" ]]; then
+        local rv
+        rv=$(php_default_version)
+        if [[ -n "$rv" ]]; then echo "$rv"; return 0; fi
+        echo ""; return 1
+    fi
+
     # Method 1: Find running php-fpm service (most reliable)
     local running
     running=$(systemctl list-units --type=service --state=running 2>/dev/null \
@@ -60,11 +73,11 @@ _wp_enable_php_mysql_extension() {
     [[ -z "$ver" ]] && return 1
 
     log_info "[Auto-Fix] PHP $ver thieu MySQL extension. Dang tu dong tai va cai dat/bat extension..."
-    if command -v apt-get > /dev/null 2>&1; then
-        apt-get update > /dev/null 2>&1 || true
-        DEBIAN_FRONTEND=noninteractive apt-get install -y "php${ver}-mysql" > /dev/null 2>&1 || true
-    elif command -v dnf >/dev/null 2>&1; then
-        dnf install -y "php${ver}-mysqlnd" >/dev/null 2>&1 || true
+    if [[ "${OS_FAMILY:-}" == "rhel" ]]; then
+        pkg_install php-mysqlnd >/dev/null 2>&1 || true
+    else
+        pkg_update > /dev/null 2>&1 || true
+        pkg_install "php${ver}-mysql" > /dev/null 2>&1 || true
     fi
 
     if command -v phpenmod >/dev/null 2>&1; then
@@ -119,6 +132,64 @@ _wp_resolve_php_bin_for_site() {
     return 1
 }
 
+# Chuẩn bị WP-CLI cho 1 site: đặt biến WEB_ROOT và WP_CMD (chạy bằng user của site, KHÔNG dùng root).
+# Dùng trong hàm đã khai báo: local WEB_ROOT WP_CMD;  _wp_prepare_cli "$domain" || return
+_wp_prepare_cli() {
+    local domain=$1 php_bin="php"
+    WEB_ROOT="/var/www/$domain/public_html"
+    if ! _wp_config_path "$domain" >/dev/null; then
+        echo -e "${RED}$domain không phải WordPress site.${NC}"
+        return 1
+    fi
+    ensure_wp_cli || return 1
+    if ! _wp_resolve_php_bin_for_site "$domain" php_bin; then
+        log_warn "[$domain] PHP CLI vẫn thiếu mysqli/pdo_mysql sau auto-fix -- bỏ qua."
+        return 1
+    fi
+    WP_CMD=$(wp_cmd_prefix "$WEB_ROOT" "$php_bin")
+    return 0
+}
+
+# Chạy 1 hàm cho 1 site được chọn hoặc TẤT CẢ WordPress site.
+# Dùng: _wp_run_scoped <tên hàm nhận domain> [hàm chạy 1 lần trước khi lặp]
+_wp_run_scoped() {
+    local callback=$1 pre=${2:-}
+    local scope domain c found=0 all_sites=()
+
+    echo -e "Phạm vi áp dụng:"
+    echo -e "  1. Chọn 1 website cụ thể"
+    echo -e "  2. Áp dụng cho TẤT CẢ WordPress sites"
+    echo -e "  0. Hủy"
+    read -p "Chọn: " scope
+
+    case $scope in
+        1)
+            source "$(dirname "${BASH_SOURCE[0]}")/wordpress_tool.sh"
+            select_wp_site || return 1
+            [[ -n "$pre" ]] && "$pre"
+            "$callback" "$SELECTED_DOMAIN"
+            ;;
+        2)
+            all_sites=($(_wp_list_sites))
+            found=${#all_sites[@]}
+            if [[ "$found" -eq 0 ]]; then
+                echo -e "${RED}Không có site WordPress nào.${NC}"
+                return 1
+            fi
+            echo -e "${YELLOW}Áp dụng cho TẤT CẢ WordPress sites:${NC}"
+            for domain in "${all_sites[@]}"; do echo "  → $domain"; done
+            echo ""
+            read -p "Tiếp tục cho $found site? [y/N]: " c
+            [[ "$c" != "y" && "$c" != "Y" ]] && return 1
+            [[ -n "$pre" ]] && "$pre"
+            for domain in "${all_sites[@]}"; do
+                "$callback" "$domain"
+            done
+            ;;
+        *) return 1 ;;
+    esac
+    return 0
+}
 
 
 wp_performance_menu() {
@@ -130,29 +201,28 @@ wp_performance_menu() {
         echo -e "${BLUE}=================================================${NC}"
         echo -e "${CYAN}--- ⚙️  Server-level (Toàn bộ server) ---${NC}"
         echo -e "1.  🚀 Auto-Optimize Server (PHP + MySQL + Nginx + OPcache)"
-        echo -e "2.  ⚡ PHP-FPM Tuning (Memory, Workers)"
+        echo -e "2.  ⚡ PHP-FPM Tuning (Áp lại workers/memory theo RAM)"
         echo -e "3.  💾 OPcache Optimization"
-        echo -e "4.  🗄️  MySQL/MariaDB Tuning"
-        echo -e "5.  🔥 Nginx FastCGI Micro-Caching"
-        echo -e "6.  📦 Enable Object Cache (Redis/Valkey)"
-        echo -e "7.  🌐 HTTP/2 & Brotli Compression"
-        echo -e "8.  🎀 PHP Preload (Nạp trước PHP vào RAM)"
-        echo -e "9.  🔧 System Kernel Tuning (TCP BBR, File Limits)"
-        echo -e "10. 💾 Tối ưu Disk I/O (noatime + XFS)"
-        echo -e "11. 🧠 RAM Disk FastCGI Cache (tmpfs trên RAM - TTFB 5-15ms)"
+        echo -e "4.  🗄️  MySQL/MariaDB Tuning (Áp lại theo RAM)"
+        echo -e "5.  🔥 Nginx FastCGI Cache (Tạo/sửa cấu hình cache zone)"
+        echo -e "6.  🌐 HTTP/2 & Brotli Compression"
+        echo -e "7.  🔧 System Kernel Tuning (TCP BBR, File Limits)"
+        echo -e "8.  💾 Tối ưu Disk I/O (noatime + XFS)"
+        echo -e "9.  🧠 RAM Disk FastCGI Cache (tmpfs trên RAM - TTFB 5-15ms)"
         echo -e ""
         echo -e "${CYAN}--- 🌐 Per-Site (Chọn từng website) ---${NC}"
-        echo -e "12. 🧹 Database Cleanup & Optimization"
-        echo -e "13. 🎯 Disable WordPress Bloat (Heartbeat, Embeds...)"
-        echo -e "14. 🖼️  Image Optimization Setup"
-        echo -e "15. 🔥 Preload Cache (Warm-up Sitemap)"
-        echo -e "16. ⚡ Fix TBT/Render-Blocking Nâng Cao (ElementsKit, FontAwesome)"
-        echo -e "17. ⚡ Instant.page (Chuyển trang 0ms) & Tắt WC Cart Fragments"
-        echo -e "18. 📊 Performance Benchmark Test"
+        echo -e "10. 🧹 Database Cleanup & Optimization"
+        echo -e "11. 🎯 Disable WordPress Bloat (Revisions, Autosave, Trash)"
+        echo -e "12. 🖼️  Image Optimization Setup"
+        echo -e "13. 🔥 Preload Cache (Warm-up Sitemap)"
+        echo -e "14. ⚡ Fix TBT/Render-Blocking Nâng Cao (ElementsKit, FontAwesome)"
+        echo -e "15. ⚡ Instant.page (Chuyển trang 0ms) & Tắt WC Cart Fragments"
+        echo -e "16. 📊 Performance Benchmark Test"
         echo -e ""
+        echo -e "${CYAN}Object Cache (Valkey/Redis): Menu chính -> Quản lý Cache -> mục 8${NC}"
         echo -e "0.  Quay lại Menu chính"
         echo -e "${BLUE}=================================================${NC}"
-        read -p "Select [0-18]: " choice
+        read -p "Select [0-16]: " choice
 
         case $choice in
             1) auto_optimize_server ;;
@@ -160,19 +230,17 @@ wp_performance_menu() {
             3) optimize_opcache ;;
             4) tune_mysql ;;
             5) setup_fastcgi_microcache ;;
-            6) setup_object_cache ;;
-            7) enable_http2_brotli ;;
-            8) php_preload_menu ;;
-            9) optimize_system_kernel ;;
-            10) optimize_disk_io ;;
-            11) setup_tmpfs_fastcgi_cache ;;
-            12) cleanup_wordpress_db ;;
-            13) disable_wordpress_bloat ;;
-            14) setup_image_optimization ;;
-            15) preload_cache_sitemap ;;
-            16) fix_tbt_advanced ;;
-            17) setup_instant_page_optimizer ;;
-            18) benchmark_wordpress ;;
+            6) enable_http2_brotli ;;
+            7) optimize_system_kernel ;;
+            8) optimize_disk_io ;;
+            9) setup_tmpfs_fastcgi_cache ;;
+            10) cleanup_wordpress_db ;;
+            11) disable_wordpress_bloat ;;
+            12) setup_image_optimization ;;
+            13) preload_cache_sitemap ;;
+            14) fix_tbt_advanced ;;
+            15) setup_instant_page_optimizer ;;
+            16) benchmark_wordpress ;;
             0) return ;;
             *) echo -e "${RED}Invalid choice!${NC}"; pause ;;
         esac
@@ -180,7 +248,7 @@ wp_performance_menu() {
 }
 
 
-# 17. Fix TBT/Render-Blocking Nâng Cao - Nginx-native (không dùng LiteSpeed/OLS)
+# 15. Fix TBT/Render-Blocking Nâng Cao (Nginx)
 # Áp dụng: MU Plugin PHP + Nginx headers + WP-CLI
 fix_tbt_advanced() {
     clear
@@ -197,10 +265,12 @@ fix_tbt_advanced() {
     local site_root="/var/www/$domain/public_html"
     local nginx_conf="/etc/nginx/sites-available/$domain"
 
-    if [[ ! -f "$site_root/wp-config.php" ]]; then
+    if ! _wp_config_path "$domain" >/dev/null; then
         log_error "Không tìm thấy WordPress tại $site_root"
         pause; return
     fi
+    local site_user
+    site_user=$(site_owner "$site_root")
 
     # ── 1. MU Plugin: Resource Hints + FontAwesome Async + Delay JS ──────────
     log_info "1. Tạo MU Plugin 'vps-performance-hints.php'..."
@@ -211,9 +281,28 @@ fix_tbt_advanced() {
 /**
  * Plugin Name: VPS Performance Hints (Nginx)
  * Description: Resource Hints, Async CSS/JS, Preconnect để giảm TBT/LCP trên Nginx LEMP
- * Version: 2.0
+ * Version: 2.1
  */
 if ( ! defined( 'ABSPATH' ) ) exit;
+
+/**
+ * Chỉ tối ưu ở FRONT-END cho khách xem trang.
+ * Không đụng tới wp-admin, trang đăng nhập, Customizer, REST/AJAX, cron, feed,
+ * và các trình dựng trang (Elementor / Beaver / Divi / Bricks) ở chế độ chỉnh sửa.
+ */
+function vps_perf_is_frontend() {
+    if ( is_admin() || wp_doing_ajax() || wp_doing_cron() ) return false;
+    if ( defined( 'REST_REQUEST' ) && REST_REQUEST ) return false;
+    if ( defined( 'XMLRPC_REQUEST' ) && XMLRPC_REQUEST ) return false;
+    if ( defined( 'WP_CLI' ) && WP_CLI ) return false;
+    if ( isset( $GLOBALS['pagenow'] ) && in_array( $GLOBALS['pagenow'], [ 'wp-login.php', 'wp-register.php' ], true ) ) return false;
+    if ( function_exists( 'is_customize_preview' ) && is_customize_preview() ) return false;
+    if ( function_exists( 'is_feed' ) && is_feed() ) return false;
+    foreach ( [ 'elementor-preview', 'fl_builder', 'et_fb', 'bricks', 'vc_editable', 'preview' ] as $q ) {
+        if ( isset( $_GET[ $q ] ) ) return false;
+    }
+    return true;
+}
 
 // --- Preconnect & DNS-Prefetch ---
 add_action( 'wp_head', 'vps_add_resource_hints', 1 );
@@ -227,6 +316,7 @@ function vps_add_resource_hints() {
 // --- FontAwesome & ElementsKit CSS: async (không render-blocking) ---
 add_filter( 'style_loader_tag', 'vps_async_render_blocking_css', 10, 4 );
 function vps_async_render_blocking_css( $tag, $handle, $href, $media ) {
+    if ( ! vps_perf_is_frontend() ) return $tag;
     $async_handles = [
         'font-awesome', 'font-awesome-5', 'fontawesome-all', 'fa-free',
         'elementor-icons', 'elementor-frontend',
@@ -245,17 +335,47 @@ function vps_async_render_blocking_css( $tag, $handle, $href, $media ) {
 // --- Defer JS (trừ jQuery và wc-cart-fragments) ---
 add_filter( 'script_loader_tag', 'vps_defer_js_except_critical', 10, 3 );
 function vps_defer_js_except_critical( $tag, $handle, $src ) {
+    if ( ! vps_perf_is_frontend() ) return $tag;
     $no_defer = [
         'jquery-core', 'jquery', 'jquery-migrate',
         'wc-cart-fragments', 'js_composer', 'revslider',
+        'wp-i18n', 'wp-hooks', 'wp-polyfill',
     ];
     if ( in_array( $handle, $no_defer, true ) ) {
         return $tag;
     }
-    if ( strpos( $tag, 'defer' ) === false ) {
-        $tag = str_replace( ' src=', ' defer src=', $tag );
+    // Script module / đã async / đã defer: giữ nguyên
+    if ( strpos( $tag, ' defer' ) !== false || strpos( $tag, ' async' ) !== false || strpos( $tag, 'type="module"' ) !== false || strpos( $tag, "type='module'" ) !== false ) {
+        return $tag;
     }
-    return $tag;
+    // Script có inline "after" (wp_add_inline_script) phải chạy NGAY SAU file này.
+    // Nếu defer file chính, đoạn inline sẽ chạy trước và báo lỗi "... is not defined" -> không defer.
+    $wp_scripts = wp_scripts();
+    if ( $wp_scripts->get_data( $handle, 'after' ) ) {
+        return $tag;
+    }
+    // Script mà một script KHÔNG defer khác phụ thuộc vào (vd phụ thuộc của script có inline "after")
+    static $needed_sync = null;
+    if ( null === $needed_sync ) {
+        $needed_sync = [];
+        foreach ( array_keys( (array) $wp_scripts->registered ) as $h ) {
+            if ( in_array( $h, $no_defer, true ) || $wp_scripts->get_data( $h, 'after' ) ) {
+                $stack = isset( $wp_scripts->registered[ $h ] ) ? (array) $wp_scripts->registered[ $h ]->deps : [];
+                while ( $stack ) {
+                    $d = array_pop( $stack );
+                    if ( isset( $needed_sync[ $d ] ) ) continue;
+                    $needed_sync[ $d ] = true;
+                    if ( isset( $wp_scripts->registered[ $d ] ) ) {
+                        $stack = array_merge( $stack, (array) $wp_scripts->registered[ $d ]->deps );
+                    }
+                }
+            }
+        }
+    }
+    if ( isset( $needed_sync[ $handle ] ) ) {
+        return $tag;
+    }
+    return str_replace( ' src=', ' defer src=', $tag );
 }
 
 // --- font-display: swap cho Google Fonts ---
@@ -267,62 +387,67 @@ function vps_gfonts_display_swap( $href ) {
     return $href;
 }
 PHPEOF
+    chown "$site_user:$site_user" "$mu_dir" "$mu_dir/vps-performance-hints.php" 2>/dev/null || true
     echo -e "  ${GREEN}✓${NC} MU Plugin tạo xong: $mu_dir/vps-performance-hints.php"
 
     # ── 2. Nginx: Thêm Preload & performance snippet cho vhost ──────────────────
     log_info "2. Thêm Nginx performance snippet cho $domain..."
     local snippet_file="/etc/nginx/snippets/vps-tbt-${domain}.conf"
+    local nginx_ok=0
     if [[ -f "$nginx_conf" ]]; then
-        # Tạo snippet file với các headers cần thiết
         mkdir -p /etc/nginx/snippets
+        # Chỉ header Link (preconnect). X-Content-Type-Options đã có trong security-headers.conf.
         cat > "$snippet_file" << 'SNIPEOF'
 # vps-manager-tbt: Performance Headers (Nginx-native)
 add_header Link "<https://fonts.googleapis.com>; rel=preconnect" always;
 add_header Link "<https://fonts.gstatic.com>; rel=preconnect; crossorigin=anonymous" always;
-add_header X-Content-Type-Options "nosniff" always;
 SNIPEOF
         echo -e "  ${GREEN}✓${NC} Snippet tạo xong: $snippet_file"
 
-        # Include snippet vào site config nếu chưa có
-        if ! grep -q "vps-tbt-${domain}" "$nginx_conf"; then
-            sed -i "/server_name/a\\    include /etc/nginx/snippets/vps-tbt-${domain}.conf;" "$nginx_conf" 2>/dev/null || true
-            echo -e "  ${GREEN}✓${NC} Nginx include snippet đã thêm"
-        else
-            echo -e "  ${YELLOW}→${NC} Snippet đã được include, bỏ qua"
+        # Include có test + tự hoàn tác vhost nếu nginx -t lỗi
+        if grep -qF "include $snippet_file;" "$nginx_conf"; then
+            echo -e "  ${YELLOW}→${NC} Snippet đã được include"
+            nginx_test_reload && nginx_ok=1
+        elif nginx_add_include "$nginx_conf" "$snippet_file"; then
+            nginx_ok=1
         fi
-
-        nginx -t > /dev/null 2>&1 && systemctl reload nginx > /dev/null 2>&1 && \
-            echo -e "  ${GREEN}✓${NC} Nginx reload thành công" || \
-            echo -e "  ${RED}✗${NC} Nginx config lỗi – kiểm tra lại: nginx -t"
+        if [[ "$nginx_ok" -eq 1 ]]; then
+            echo -e "  ${GREEN}✓${NC} Nginx reload thành công"
+        else
+            echo -e "  ${RED}✗${NC} Nginx chưa nhận snippet (vhost đã được giữ nguyên) – xem lỗi ở trên"
+        fi
     else
         log_warn "Không tìm thấy Nginx config: $nginx_conf"
     fi
 
     # ── 3. WP-CLI: Flush permalink & cache ────────────────────────────────────
-    if command -v wp > /dev/null 2>&1; then
+    local WEB_ROOT WP_CMD
+    if _wp_prepare_cli "$domain"; then
         log_info "3. Flush permalink và transient cache..."
-        wp rewrite flush --path="$site_root" --allow-root > /dev/null 2>&1 && \
+        $WP_CMD rewrite flush > /dev/null 2>&1 && \
             echo -e "  ${GREEN}✓${NC} Permalink flush xong"
-        wp transient delete --all --path="$site_root" --allow-root > /dev/null 2>&1 && \
+        $WP_CMD transient delete --all > /dev/null 2>&1 && \
             echo -e "  ${GREEN}✓${NC} Transient cache đã xóa"
-        # Xóa cache nếu dùng W3 Total Cache, WP Super Cache hoặc WP Fastest Cache
-        wp w3-total-cache flush all --path="$site_root" --allow-root > /dev/null 2>&1 || true
-        wp cache flush --path="$site_root" --allow-root > /dev/null 2>&1 && \
+        $WP_CMD cache flush > /dev/null 2>&1 && \
             echo -e "  ${GREEN}✓${NC} Object cache flush xong"
     else
-        log_warn "WP-CLI không có – bỏ qua bước flush cache."
+        log_warn "WP-CLI chưa dùng được – bỏ qua bước flush cache."
     fi
 
     echo ""
     echo -e "${GREEN}=================================================${NC}"
     echo -e "${GREEN} ✓ Fix TBT Nâng Cao (Nginx) hoàn tất cho $domain!${NC}"
     echo -e "${GREEN}=================================================${NC}"
-    echo -e "  ${GREEN}✓${NC} MU Plugin async CSS/JS: ĐÃ TẠO"
+    echo -e "  ${GREEN}✓${NC} MU Plugin async CSS/JS: ĐÃ TẠO (chỉ chạy ở front-end, không ảnh hưởng wp-admin)"
     echo -e "  ${GREEN}✓${NC} FontAwesome + ElementsKit: ASYNC (không render-blocking)"
-    echo -e "  ${GREEN}✓${NC} Defer JS (trừ jQuery, WC fragments): ĐÃ BẬT"
+    echo -e "  ${GREEN}✓${NC} Defer JS (trừ jQuery, WC fragments, script có inline phụ thuộc): ĐÃ BẬT"
     echo -e "  ${GREEN}✓${NC} Google Fonts display=swap: ĐÃ BẬT"
     echo -e "  ${GREEN}✓${NC} Preconnect hints: ĐÃ THÊM vào <head>"
-    echo -e "  ${GREEN}✓${NC} Nginx reload: XONG"
+    if [[ "$nginx_ok" -eq 1 ]]; then
+        echo -e "  ${GREEN}✓${NC} Nginx header preconnect: ĐÃ ÁP DỤNG"
+    else
+        echo -e "  ${YELLOW}!${NC} Nginx header preconnect: CHƯA áp dụng"
+    fi
     echo ""
     echo -e "${YELLOW}Dự kiến kết quả:${NC}"
     echo -e "  TBT: 720ms → <200ms"
@@ -336,154 +461,51 @@ SNIPEOF
 }
 
 
-# 12. Optimize System Kernel - toan dien
+# 8. System Kernel Tuning
+# Chỉ có MỘT bộ tối ưu kernel: core/kernel_tuning.sh (run_system_optimization).
+# Hàm này gọi lại bộ đó và dọn các file trùng lặp do phiên bản cũ của menu này tạo ra.
 optimize_system_kernel() {
-    log_info "Dang toi uu hoa he thong (Kernel & Network - Toan dien)..."
+    log_info "Tối ưu hệ thống (Kernel, TCP, THP, File limits)..."
 
-    local SYSCTL_FILE="/etc/sysctl.d/101-vpsmanager.conf"
-
-    if grep -q "vpsmanager-kernel" "$SYSCTL_FILE" 2>/dev/null; then
-        log_info "Kernel da duoc toi uu toan dien tu truoc. Bo qua."
-        pause; return
+    if ! declare -F run_system_optimization >/dev/null; then
+        # shellcheck disable=SC1091
+        source "$(dirname "${BASH_SOURCE[0]}")/../core/kernel_tuning.sh" 2>/dev/null
+    fi
+    if ! declare -F run_system_optimization >/dev/null; then
+        log_error "Không nạp được core/kernel_tuning.sh."
+        pause; return 1
     fi
 
-    # --- File limits ---
-    if ! grep -q "* hard nofile 524288" /etc/security/limits.conf 2>/dev/null; then
-        echo "* soft nofile 524288" >> /etc/security/limits.conf
-        echo "* hard nofile 524288" >> /etc/security/limits.conf
-        ulimit -n 524288
-        log_info "  v File limits: 524288"
+    # Dọn bản trùng lặp cũ: /etc/sysctl.d/101-vpsmanager.conf và vpsmanager-disable-thp.service
+    local old_sysctl="/etc/sysctl.d/101-vpsmanager.conf"
+    local old_thp="/etc/systemd/system/vpsmanager-disable-thp.service"
+    if [[ -f "$old_sysctl" ]] && grep -q "vpsmanager-kernel" "$old_sysctl" 2>/dev/null; then
+        rm -f "$old_sysctl"
+        log_info "Đã gỡ file sysctl trùng lặp cũ: $old_sysctl"
     fi
-
-    # --- Kernel params (kernel_tcp_toi_uu) ---
-    if [[ ! -f /proc/user_beancounters ]]; then   # skip container ao hoa 1 phan
-        touch "$SYSCTL_FILE"
-        # Hashsize cho nf_conntrack
-        echo 131072 > /sys/module/nf_conntrack/parameters/hashsize 2>/dev/null || true
-        if [[ ! -f /etc/modprobe.d/nf_conntrack.conf ]]; then
-            echo "options nf_conntrack hashsize=131072" > /etc/modprobe.d/nf_conntrack.conf
-        fi
-
-        cat >> "$SYSCTL_FILE" << 'SYSEOF'
-# vpsmanager-kernel
-kernel.pid_max=65536
-kernel.printk=4 1 1 7
-fs.nr_open=12000000
-fs.file-max=9000000
-net.core.wmem_max=16777216
-net.core.rmem_max=16777216
-net.ipv4.tcp_rmem=8192 87380 16777216
-net.ipv4.tcp_wmem=8192 65536 16777216
-net.core.netdev_max_backlog=65536
-net.core.somaxconn=65535
-net.core.optmem_max=8192
-net.ipv4.tcp_fin_timeout=10
-net.ipv4.tcp_keepalive_intvl=30
-net.ipv4.tcp_keepalive_probes=3
-net.ipv4.tcp_keepalive_time=240
-net.ipv4.tcp_max_syn_backlog=65536
-net.ipv4.tcp_sack=1
-net.ipv4.tcp_syn_retries=3
-net.ipv4.tcp_synack_retries=2
-net.ipv4.tcp_tw_reuse=0
-net.ipv4.tcp_max_tw_buckets=1440000
-vm.swappiness=10
-vm.min_free_kbytes=65536
-vm.vfs_cache_pressure=150
-net.ipv4.ip_local_port_range=1024 65535
-net.ipv4.tcp_slow_start_after_idle=0
-net.ipv4.tcp_limit_output_bytes=65536
-net.ipv4.tcp_rfc1337=1
-net.ipv4.conf.all.accept_redirects=0
-net.ipv4.conf.all.accept_source_route=0
-net.ipv4.conf.all.log_martians=1
-net.ipv4.conf.all.rp_filter=1
-net.ipv4.conf.all.secure_redirects=0
-net.ipv4.conf.all.send_redirects=0
-net.ipv4.conf.default.accept_redirects=0
-net.ipv4.conf.default.log_martians=1
-net.ipv4.conf.default.rp_filter=1
-net.ipv4.icmp_echo_ignore_broadcasts=1
-net.ipv4.icmp_ignore_bogus_error_responses=1
-net.netfilter.nf_conntrack_helper=0
-net.nf_conntrack_max=524288
-net.netfilter.nf_conntrack_tcp_timeout_established=28800
-net.netfilter.nf_conntrack_generic_timeout=60
-net.ipv4.tcp_challenge_ack_limit=999999999
-net.ipv4.tcp_mtu_probing=1
-net.ipv4.tcp_base_mss=1024
-net.unix.max_dgram_qlen=4096
-net.core.default_qdisc=fq
-net.ipv4.tcp_congestion_control=bbr
-net.ipv4.tcp_fastopen=3
-kernel.panic=10
-SYSEOF
-
-        # AMD EPYC fix
-        if [[ "$(grep -o 'AMD EPYC' /proc/cpuinfo | sort -u)" == "AMD EPYC" ]]; then
-            echo "kernel.watchdog_thresh=20" >> "$SYSCTL_FILE"
-        fi
-
-        sysctl -p "$SYSCTL_FILE" >/dev/null 2>&1
-        log_info "  v Kernel TCP/IP: 34 params ap dung"
-    fi
-
-    # --- Disable THP (Transparent Huge Pages) cho MariaDB/OLS/Redis ---
-    if [[ ! -f /etc/systemd/system/vpsmanager-disable-thp.service ]]; then
-        cat > /etc/systemd/system/vpsmanager-disable-thp.service << 'THPEOF'
-[Unit]
-Description=Disable Transparent Huge Pages for VPS-Manager
-DefaultDependencies=no
-After=sysinit.target local-fs.target
-Before=mariadb.service
-
-[Service]
-Type=oneshot
-ExecStart=/bin/sh -c 'echo never > /sys/kernel/mm/transparent_hugepage/enabled 2>/dev/null || true'
-ExecStart=/bin/sh -c 'echo never > /sys/kernel/mm/transparent_hugepage/defrag 2>/dev/null || true'
-
-[Install]
-WantedBy=basic.target
-THPEOF
+    if [[ -f "$old_thp" ]]; then
+        systemctl disable vpsmanager-disable-thp.service >/dev/null 2>&1
+        rm -f "$old_thp"
         systemctl daemon-reload
-        systemctl enable --now vpsmanager-disable-thp.service >/dev/null 2>&1
-        log_info "  v Disable THP: MariaDB se nhanh hon 15-20%"
+        log_info "Đã gỡ unit THP trùng lặp cũ: vpsmanager-disable-thp.service"
     fi
 
-    # --- CPU Performance mode ---
-    if command -v tuned-adm &>/dev/null; then
-        tuned-adm profile latency-performance >/dev/null 2>&1
-        log_info "  v CPU: latency-performance mode"
-    fi
+    run_system_optimization
+    sysctl --system >/dev/null 2>&1 || true
 
-    # --- DNS nhanh (Cloudflare + Google) ---
-    if ! grep -q "1.1.1.1" /etc/resolv.conf 2>/dev/null; then
-        echo -e "nameserver 1.1.1.1
-nameserver 8.8.8.8" | tee /etc/resolv.conf > /dev/null
-        log_info "  v DNS: Cloudflare 1.1.1.1 + Google 8.8.8.8"
-    fi
-
-    echo ""
-    echo -e "${GREEN}=================================================${NC}"
-    echo -e "${GREEN} v Kernel Toan Dien hoan tat!${NC}"
-    echo -e "${GREEN}=================================================${NC}"
-    echo -e "  v 34 TCP/IP params toi uu"
-    echo -e "  v File limits: 524288"
-    echo -e "  v Disable THP (MariaDB +15-20%)"
-    echo -e "  v TCP BBR + FastOpen"
-    echo -e "  v tcp_fin_timeout: 60s -> 10s"
-    echo -e "  v somaxconn: 65535"
+    echo -e "${YELLOW}Ghi chú: menu này KHÔNG còn ghi đè /etc/resolv.conf. Nếu bản cũ đã đổi DNS sang 1.1.1.1/8.8.8.8"
+    echo -e "và máy chủ cần DNS nội bộ của nhà cung cấp, hãy khôi phục /etc/resolv.conf thủ công.${NC}"
     pause
 }
 
-# 15. Preload Cache - Warm-up toan bo Sitemap
+# 14. Preload Cache - Warm-up toàn bộ Sitemap
 preload_cache_sitemap() {
     clear
     echo -e "${BLUE}=================================================${NC}"
     echo -e "${GREEN}    🔥 Preload Cache - Warm-up Sitemap${NC}"
     echo -e "${BLUE}=================================================${NC}"
-    echo -e "Chuc nang nay crawl toan bo sitemap.xml de dien vao LSCache"
-    echo -e "Ket qua: LCP giam tu 16.7s -> <2s ngay lan dau Google test"
+    echo -e "Chức năng này crawl toàn bộ sitemap.xml để làm nóng Nginx FastCGI Cache"
+    echo -e "Kết quả: khách (và Google) nhận trang từ cache ngay lần truy cập đầu tiên"
     echo ""
 
     source "$(dirname "${BASH_SOURCE[0]}")/wordpress_tool.sh" 2>/dev/null || true
@@ -563,7 +585,7 @@ preload_cache_sitemap() {
 
         # Desktop request
         local status
-        status=$(curl -sk --max-time 10             --connect-to "${domain_host}::127.0.0.1:443"             --connect-to "${domain_host}::127.0.0.1:80"             -o /dev/null -w "%{http_code}"             -H "User-Agent: lscache_runner"             -H "Accept-Encoding: gzip, deflate, br"             "$url" 2>/dev/null)
+        status=$(curl -sk --max-time 10             --connect-to "${domain_host}::127.0.0.1:443"             --connect-to "${domain_host}::127.0.0.1:80"             -o /dev/null -w "%{http_code}"             -H "User-Agent: vps-manager-cache-warmer"             -H "Accept-Encoding: gzip, deflate, br"             "$url" 2>/dev/null)
 
         if [[ "$status" == "200" ]]; then
             echo -e "  ${GREEN}[$count/$total_urls]${NC} $url -> ${GREEN}OK${NC}"
@@ -573,7 +595,7 @@ preload_cache_sitemap() {
 
         # Mobile request (neu chon)
         if [[ "$with_mobile" == "y" || "$with_mobile" == "Y" ]]; then
-            curl -sk --max-time 10                 --connect-to "${domain_host}::127.0.0.1:443"                 --connect-to "${domain_host}::127.0.0.1:80"                 -o /dev/null                 -H "User-Agent: lscache_runner iPhone"                 -H "Accept-Encoding: gzip, deflate, br"                 "$url" 2>/dev/null
+            curl -sk --max-time 10                 --connect-to "${domain_host}::127.0.0.1:443"                 --connect-to "${domain_host}::127.0.0.1:80"                 -o /dev/null                 -H "User-Agent: vps-manager-cache-warmer iPhone"                 -H "Accept-Encoding: gzip, deflate, br"                 "$url" 2>/dev/null
         fi
 
         sleep 0.05  # 50ms delay tranh overload
@@ -595,7 +617,7 @@ preload_cache_sitemap() {
     pause
 }
 
-# 16. Optimize Disk I/O - noatime + XFS logbsize
+# 9. Optimize Disk I/O - noatime + XFS logbsize
 optimize_disk_io() {
     log_info "Dang toi uu Disk I/O (noatime + logbsize)..."
 
@@ -620,6 +642,9 @@ optimize_disk_io() {
     cp /etc/fstab /etc/fstab.vpsmanager.bak
     log_info "Da backup /etc/fstab -> /etc/fstab.vpsmanager.bak"
 
+    local fstab_new
+    fstab_new=$(mktemp) || { log_error "Khong tao duoc file tam."; pause; return; }
+
     # Them noatime va logbsize vao fstab
     awk -v fstype="$ROOT_FSTYPE" '{
         if ($1 !~ /^#/ && $2 == "/") {
@@ -627,17 +652,17 @@ optimize_disk_io() {
             if (fstype == "xfs" && $4 !~ /logbsize=256k/) { $4 = $4 ",logbsize=256k" }
         }
         print $0
-    }' /etc/fstab > /tmp/fstab.vpsmanager.new
+    }' /etc/fstab > "$fstab_new"
 
     # Kiem tra file moi hop le
-    if [[ -s /tmp/fstab.vpsmanager.new ]]; then
-        cat /tmp/fstab.vpsmanager.new > /etc/fstab
-        rm -f /tmp/fstab.vpsmanager.new
+    if [[ -s "$fstab_new" ]]; then
+        cat "$fstab_new" > /etc/fstab
+        rm -f "$fstab_new"
         log_info "  v /etc/fstab: da them noatime"
     else
         log_error "Tao fstab moi that bai! Da hoan nguyen tu backup."
         cat /etc/fstab.vpsmanager.bak > /etc/fstab
-        rm -f /tmp/fstab.vpsmanager.new
+        rm -f "$fstab_new"
         pause; return
     fi
 
@@ -658,7 +683,7 @@ optimize_disk_io() {
     echo -e "${GREEN}=================================================${NC}"
     echo -e "  v noatime: giam ghi dia 30-40%"
     [[ "$ROOT_FSTYPE" == "xfs" ]] && echo -e "  v logbsize=256k: tang toc XFS I/O log"
-    echo -e "  v Tac dong: OLS + MariaDB + PHP doc file nhanh hon"
+    echo -e "  v Tac dong: Nginx + MariaDB + PHP doc file nhanh hon"
     echo -e "  v Backup fstab: /etc/fstab.vpsmanager.bak"
     pause
 }
@@ -672,281 +697,327 @@ auto_optimize_server() {
     echo -e "${CYAN}Các cài đặt này áp dụng cho TOÀN BỘ server${NC}"
     echo -e "(Không đụng vào wp-config.php của bất kỳ site nào)"
     echo ""
-    echo -e "Đị sẽ tối ưu:"
-    echo "  ✓ PHP-FPM (workers, memory dựa theo RAM thực tế)"
-    echo "  ✓ OPcache + JIT compilation"
-    echo "  ✓ MySQL/MariaDB InnoDB buffer (50% RAM)"
-    echo "  ✓ Nginx FastCGI Cache zone (100MB)"
+    echo -e "Sẽ tối ưu:"
+    echo "  ✓ PHP-FPM (số worker theo ngân sách RAM chung của server)"
+    echo "  ✓ OPcache"
+    echo "  ✓ MySQL/MariaDB (InnoDB buffer ~25% RAM, cùng công thức với trình cài đặt)"
+    echo "  ✓ Nginx FastCGI Cache zone"
     echo ""
-    echo -e "${YELLOW}Không ảnh hưởng đến:${NC}"
-    echo "  ✓ wp-config.php → dùng Option 9 cho từng site"
-    echo "  ✓ Database WordPress → dùng Option 8 cho từng site"
+    echo -e "${YELLOW}Các bước theo từng site nằm ở menu riêng:${NC}"
+    echo "  → Mục 10: Dọn Database từng site"
+    echo "  → Mục 11: Tắt Bloat từng site"
+    echo "  → Mục 16: Benchmark từng site"
     echo ""
     read -p "Tiếp tục? [y/N]: " confirm
     if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then return; fi
 
-    tune_php_fpm "auto"
-    optimize_opcache "auto"
-    tune_mysql "auto"
-    setup_fastcgi_microcache "auto"
+    local failed=0
+    tune_php_fpm "auto" || failed=$((failed + 1))
+    optimize_opcache "auto" || failed=$((failed + 1))
+    tune_mysql "auto" || failed=$((failed + 1))
+    setup_fastcgi_microcache "auto" || failed=$((failed + 1))
 
     echo ""
-    log_info "✅ Server optimization complete!"
-    echo -e "${YELLOW}Bước tiếp theo (per-site):${NC}"
-    echo "  → Option 8: Dọn Database từng site"
-    echo "  → Option 9: Tắt Bloat từng site"
-    echo "  → Option 11: Benchmark từng site"
+    if [[ "$failed" -eq 0 ]]; then
+        log_info "✅ Tối ưu server hoàn tất!"
+    else
+        log_warn "Tối ưu server xong nhưng có $failed bước KHÔNG áp dụng được - xem thông báo lỗi ở trên."
+    fi
     pause
 }
 
-# 2. PHP-FPM Tuning
+# 2. PHP-FPM Tuning - áp lại theo RAM cho pool mặc định (www)
+# Dùng chung ngân sách với trình cài đặt: core php_fpm_children_budget (~40% RAM cho toàn bộ PHP).
 tune_php_fpm() {
-    local auto_mode=$1
+    local auto_mode=${1:-}
     log_info "Tuning PHP-FPM for WordPress..."
 
-    # Detect active PHP-FPM version
     local php_ver
     php_ver=$(get_installed_php_version)
     if [[ -z "$php_ver" ]]; then
         log_error "Không tìm thấy PHP-FPM cài đặt!"
-        echo -e "${YELLOW}PHP đị: $(php -v 2>/dev/null | head -1)${NC}"
-        echo -e "${YELLOW}Thư mục /etc/php/: $(ls /etc/php/ 2>/dev/null || echo 'trống')${NC}"
+        [[ -z "$auto_mode" ]] && pause
         return 1
     fi
     log_info "PHP-FPM version: $php_ver"
 
-    local fpm_conf="/etc/php/${php_ver}/fpm/pool.d/www.conf"
+    local pool_dir fpm_conf php_ini
+    pool_dir=$(php_fpm_pool_dir "$php_ver")
+    fpm_conf="${pool_dir}/www.conf"
+    php_ini=$(php_ini_path "$php_ver")
     if [[ ! -f "$fpm_conf" ]]; then
-        log_error "PHP-FPM config not found: $fpm_conf"
+        log_error "Không tìm thấy cấu hình pool PHP-FPM: $fpm_conf - chưa thay đổi gì."
+        [[ -z "$auto_mode" ]] && pause
         return 1
     fi
-    
-    # Backup original
-    cp "$fpm_conf" "${fpm_conf}.bak_$(date +%s)"
-    
-    # Calculate optimal settings based on RAM
-    local total_ram=$(free -m | awk '/^Mem:/{print $2}')
-    local max_children=$((total_ram / 50))  # ~50MB per child
-    local start_servers=$((max_children / 4))
-    local min_spare=$((max_children / 4))
-    local max_spare=$((max_children / 2))
-    
-    # Apply optimizations
-    sed -i "s/^pm = .*/pm = dynamic/" "$fpm_conf"
-    sed -i "s/^pm.max_children = .*/pm.max_children = $max_children/" "$fpm_conf"
-    sed -i "s/^pm.start_servers = .*/pm.start_servers = $start_servers/" "$fpm_conf"
-    sed -i "s/^pm.min_spare_servers = .*/pm.min_spare_servers = $min_spare/" "$fpm_conf"
-    sed -i "s/^pm.max_spare_servers = .*/pm.max_spare_servers = $max_spare/" "$fpm_conf"
-    sed -i "s/^;pm.max_requests = .*/pm.max_requests = 500/" "$fpm_conf"
-    
-    # Increase memory limit for WordPress
-    local php_ini="/etc/php/${php_ver}/fpm/php.ini"
-    sed -i -E "s/^[; ]*memory_limit.*/memory_limit = 256M/" "$php_ini"
-    sed -i -E "s/^[; ]*max_execution_time.*/max_execution_time = 300/" "$php_ini"
-    sed -i -E "s/^[; ]*upload_max_filesize.*/upload_max_filesize = 128M/" "$php_ini"
-    sed -i -E "s/^[; ]*post_max_size.*/post_max_size = 128M/" "$php_ini"
-    
-    systemctl restart php${php_ver}-fpm
-    
-    log_info "PHP-FPM optimized for ${total_ram}MB RAM"
-    echo -e "${GREEN}Settings: max_children=$max_children, start=$start_servers${NC}"
-    
-    if [[ -z "$auto_mode" ]]; then pause; fi
+
+    # Backup (đặt ngoài pool.d để FPM không nạp nhầm file backup)
+    local bak_dir="/root/.vps-manager/backups"
+    mkdir -p "$bak_dir"
+    local bak="${bak_dir}/www.conf.${php_ver}.$(date +%s)"
+    cp -p "$fpm_conf" "$bak"
+    local ini_bak=""
+    if [[ -f "$php_ini" ]]; then
+        ini_bak="${bak_dir}/php.ini.${php_ver}.$(date +%s)"
+        cp -p "$php_ini" "$ini_bak"
+    fi
+
+    # Ngân sách worker cho TOÀN server. Nếu có pool riêng theo site, pool chung chỉ nhận một nửa.
+    local budget other_pools max_children start_servers min_spare max_spare
+    budget=$(php_fpm_children_budget)
+    other_pools=$(ls "$pool_dir"/*.conf 2>/dev/null | grep -vc '/www\.conf$')
+    max_children=$budget
+    if [[ "$other_pools" -gt 0 ]]; then
+        max_children=$(( budget / 2 ))
+        log_info "Có $other_pools pool riêng theo site -> pool chung nhận 1/2 ngân sách ($budget worker)."
+    fi
+    [[ "$max_children" -lt 4 ]] && max_children=4
+    start_servers=$(( max_children / 4 )); [[ "$start_servers" -lt 2 ]] && start_servers=2
+    min_spare=$(( max_children / 8 ));     [[ "$min_spare" -lt 1 ]] && min_spare=1
+    max_spare=$(( max_children / 2 ));     [[ "$max_spare" -lt "$start_servers" ]] && max_spare=$start_servers
+
+    sed -i -E "s/^[; ]*pm[ ]*=.*/pm = dynamic/" "$fpm_conf"
+    sed -i -E "s/^[; ]*pm\.max_children[ ]*=.*/pm.max_children = $max_children/" "$fpm_conf"
+    sed -i -E "s/^[; ]*pm\.start_servers[ ]*=.*/pm.start_servers = $start_servers/" "$fpm_conf"
+    sed -i -E "s/^[; ]*pm\.min_spare_servers[ ]*=.*/pm.min_spare_servers = $min_spare/" "$fpm_conf"
+    sed -i -E "s/^[; ]*pm\.max_spare_servers[ ]*=.*/pm.max_spare_servers = $max_spare/" "$fpm_conf"
+    sed -i -E "s/^[; ]*pm\.max_requests[ ]*=.*/pm.max_requests = 500/" "$fpm_conf"
+
+    if [[ -f "$php_ini" ]]; then
+        sed -i -E "s/^[; ]*memory_limit.*/memory_limit = 256M/" "$php_ini"
+        sed -i -E "s/^[; ]*max_execution_time.*/max_execution_time = 300/" "$php_ini"
+        sed -i -E "s/^[; ]*upload_max_filesize.*/upload_max_filesize = 128M/" "$php_ini"
+        sed -i -E "s/^[; ]*post_max_size.*/post_max_size = 128M/" "$php_ini"
+    else
+        log_warn "Không tìm thấy $php_ini - bỏ qua phần memory/upload limits."
+    fi
+
+    if ! php_fpm_restart_safe "$php_ver"; then
+        cp -p "$bak" "$fpm_conf"
+        [[ -n "$ini_bak" ]] && cp -p "$ini_bak" "$php_ini"
+        systemctl restart "$(php_fpm_service "$php_ver")" 2>/dev/null
+        log_error "PHP-FPM không nhận cấu hình mới - đã khôi phục cấu hình cũ."
+        [[ -z "$auto_mode" ]] && pause
+        return 1
+    fi
+
+    log_info "PHP-FPM đã áp dụng: max_children=$max_children, start=$start_servers, spare=$min_spare-$max_spare"
+    [[ -z "$auto_mode" ]] && pause
+    return 0
 }
 
 # 3. OPcache Optimization
 optimize_opcache() {
-    local auto_mode=$1
-    log_info "Optimizing OPcache for maximum performance..."
+    local auto_mode=${1:-}
+    log_info "Optimizing OPcache..."
+
+    # Dọn cấu hình PHP Preload do phiên bản cũ để lại (tính năng đã gỡ bỏ)
+    _remove_legacy_php_preload
 
     local php_ver
     php_ver=$(get_installed_php_version)
     if [[ -z "$php_ver" ]]; then
         log_error "Không tìm thấy PHP-FPM để cấu hình OPcache!"
+        [[ -z "$auto_mode" ]] && pause
         return 1
     fi
     log_info "OPcache target: PHP $php_ver"
 
-    local conf_dir="/etc/php/${php_ver}/fpm/conf.d"
+    local conf_dir
+    conf_dir=$(php_conf_d_dir "$php_ver")
     if [[ ! -d "$conf_dir" ]]; then
-        mkdir -p "$conf_dir"
+        log_error "Không tìm thấy thư mục ini của PHP-FPM: $conf_dir - chưa thay đổi gì."
+        [[ -z "$auto_mode" ]] && pause
+        return 1
     fi
-    local opcache_ini="$conf_dir/10-opcache.ini"
+    # File riêng, nạp sau cùng. KHÔNG ghi đè 10-opcache.ini của distro (file đó mới là nơi nạp extension).
+    local opcache_ini="$conf_dir/99-vps-manager-opcache.ini"
+    local had_old=0
+    [[ -f "$opcache_ini" ]] && { cp -p "$opcache_ini" "${opcache_ini}.bak"; had_old=1; }
 
-    local jit_setting="1255"
-    local jit_buffer="128M"
-    
-    # Phát hiện PHP >= 8.3 để cấu hình JIT an toàn (Tránh bug cạn bộ nhớ do lệch bytecode khi JIT + validate_timestamps=0)
-    if [[ "$php_ver" == "8.3" || "$php_ver" == "8.4" || "$php_ver" == 8.[5-9]* || "$php_ver" == [9-9]* ]]; then
-        log_warn "Phát hiện PHP $php_ver (>= 8.3). Tự động tắt JIT để tránh lỗi cạn bộ nhớ (Allowed memory size exhausted) khi chạy Web!"
-        jit_setting="off"
-        jit_buffer="0"
+    local ram_mb mem=128
+    ram_mb=$(free -m | awk '/^Mem:/{print $2}')
+    [[ "${ram_mb:-0}" -ge 3500 ]] && mem=256
+
+    # JIT: chỉ bật cho PHP 8.0-8.2. Từ 8.3 tắt để tránh lỗi "Allowed memory size exhausted" đã gặp.
+    local major minor jit_setting="off" jit_buffer="0"
+    major=${php_ver%%.*}; minor=${php_ver#*.}
+    if [[ "$major" -eq 8 && "$minor" -le 2 ]]; then
+        jit_setting="1255"; jit_buffer="64M"
     fi
-    
-    # Aggressive OPcache settings for WordPress
+
     cat > "$opcache_ini" <<EOF
-; OPcache Optimization for WordPress
-zend_extension=opcache.so
+; OPcache Optimization for WordPress (vps-manager)
 opcache.enable=1
 opcache.enable_cli=0
-opcache.memory_consumption=256
+opcache.memory_consumption=${mem}
 opcache.interned_strings_buffer=16
-opcache.max_accelerated_files=10000
+opcache.max_accelerated_files=20000
 opcache.max_wasted_percentage=5
-opcache.use_cwd=1
+; Kiểm tra file thay đổi mỗi 60 giây (trước là 2 giây): giảm I/O đĩa trên mỗi request.
+; Code mới (cập nhật plugin/theme) có hiệu lực chậm nhất sau 60 giây, không cần restart PHP.
 opcache.validate_timestamps=1
-opcache.revalidate_freq=2
+opcache.revalidate_freq=60
 opcache.save_comments=1
-opcache.fast_shutdown=1
-opcache.enable_file_override=1
-opcache.optimization_level=0x7FFEBFFF
 opcache.jit=${jit_setting}
 opcache.jit_buffer_size=${jit_buffer}
 EOF
-    
-    systemctl restart php${php_ver}-fpm
-    
-    log_info "OPcache optimized with JIT status: ${jit_setting}"
-    echo -e "${YELLOW}Note: Set opcache.validate_timestamps=1 (Currently enabled with 2s interval to prevent bytecode drift)${NC}"
-    
-    if [[ -z "$auto_mode" ]]; then pause; fi
+
+    if ! php_fpm_restart_safe "$php_ver"; then
+        if [[ "$had_old" -eq 1 ]]; then mv -f "${opcache_ini}.bak" "$opcache_ini"; else rm -f "$opcache_ini"; fi
+        systemctl restart "$(php_fpm_service "$php_ver")" 2>/dev/null
+        log_error "PHP-FPM không nhận cấu hình OPcache mới - đã hoàn tác."
+        [[ -z "$auto_mode" ]] && pause
+        return 1
+    fi
+    rm -f "${opcache_ini}.bak"
+
+    log_info "OPcache đã áp dụng (${mem}MB, JIT: ${jit_setting}) -> $opcache_ini"
+    [[ -z "$auto_mode" ]] && pause
+    return 0
 }
 
-# 4. MySQL/MariaDB Tuning
+# 4. MySQL/MariaDB Tuning - áp lại theo RAM, cùng công thức với trình cài đặt
+# (core/kernel_tuning.sh: calc_mariadb_tuning_params). Ghi vào file drop-in riêng, có rollback.
 tune_mysql() {
-    local auto_mode=$1
+    local auto_mode=${1:-}
     log_info "Tuning MySQL/MariaDB for WordPress..."
-    
-    local mysql_conf="/etc/mysql/mariadb.conf.d/50-server.cnf"
-    if [[ ! -f "$mysql_conf" ]]; then
-        mysql_conf="/etc/mysql/my.cnf"
-    fi
-    
-    # Backup
-    cp "$mysql_conf" "${mysql_conf}.bak_$(date +%s)"
-    
-    # Calculate based on RAM
-    local total_ram=$(free -m | awk '/^Mem:/{print $2}')
-    local innodb_buffer=$((total_ram / 2))  # 50% of RAM
-    
-    # Add optimizations to [mysqld] section
-    if ! grep -q "# WordPress Optimizations" "$mysql_conf"; then
-        cat >> "$mysql_conf" <<EOF
 
-# WordPress Optimizations
-[mysqld]
-innodb_buffer_pool_size = ${innodb_buffer}M
-innodb_log_file_size = 256M
-innodb_flush_log_at_trx_commit = 2
-innodb_flush_method = O_DIRECT
-query_cache_type = 1
-query_cache_limit = 2M
-query_cache_size = 64M
-max_connections = 200
-thread_cache_size = 50
-table_open_cache = 4000
-tmp_table_size = 64M
-max_heap_table_size = 64M
-EOF
+    local conf_dir
+    if ! conf_dir=$(mariadb_conf_dir); then
+        log_error "Không tìm thấy thư mục cấu hình MariaDB/MySQL - chưa thay đổi gì."
+        [[ -z "$auto_mode" ]] && pause
+        return 1
     fi
-    
-    systemctl restart mysql
-    
-    log_info "MySQL optimized with ${innodb_buffer}MB InnoDB buffer"
-    
-    if [[ -z "$auto_mode" ]]; then pause; fi
-}
 
-# 5. Nginx FastCGI Micro-Caching
-setup_fastcgi_microcache() {
-    local auto_mode=$1
-    log_info "Setting up Nginx FastCGI micro-caching..."
-    
-    # Create cache directory
-    mkdir -p /var/cache/nginx/fastcgi
-    chown -R www-data:www-data /var/cache/nginx
-    
-    # Global cache config (if not exists)
-    if [[ -f /etc/nginx/conf.d/fastcgi_cache.conf ]]; then
-        sed -i 's|/var/run/nginx-cache|/var/cache/nginx/fastcgi|g' /etc/nginx/conf.d/fastcgi_cache.conf
+    if ! declare -F calc_mariadb_tuning_params >/dev/null; then
+        # shellcheck disable=SC1091
+        source "$(dirname "${BASH_SOURCE[0]}")/../core/kernel_tuning.sh" 2>/dev/null
+    fi
+    if ! declare -F calc_mariadb_tuning_params >/dev/null; then
+        log_error "Không nạp được core/kernel_tuning.sh - chưa thay đổi gì."
+        [[ -z "$auto_mode" ]] && pause
+        return 1
+    fi
+    calc_mariadb_tuning_params
+
+    local dropin="${conf_dir}/99-vps-manager-perf.cnf"
+    local svc had_old=0
+    svc=$(mariadb_service_name)
+    [[ -f "$dropin" ]] && { cp -p "$dropin" "${dropin}.bak"; had_old=1; }
+
+    # Gỡ khối "# WordPress Optimizations" do phiên bản cũ của menu này nối vào file cấu hình chính
+    # (InnoDB 50% RAM + query cache vô điều kiện). Chỉ xoá đúng khối đó, có backup để hoàn tác.
+    local legacy legacy_bak=""
+    for legacy in /etc/mysql/mariadb.conf.d/50-server.cnf /etc/mysql/my.cnf /etc/my.cnf; do
+        if [[ -f "$legacy" ]] && grep -q "^# WordPress Optimizations$" "$legacy"; then
+            legacy_bak="${legacy}.bak_vpsmanager"
+            cp -p "$legacy" "$legacy_bak"
+            sed -i '/^# WordPress Optimizations$/,/^max_heap_table_size = 64M$/d' "$legacy"
+            log_info "Đã gỡ khối tuning cũ khỏi $legacy"
+            break
+        fi
+    done
+
+    {
+        echo "# vps-manager: MySQL/MariaDB tuning theo RAM (ghi bởi menu Performance)"
+        echo "[mysqld]"
+        echo "innodb_buffer_pool_size = ${DB_INNODB_BUFFER}"
+        echo "innodb_flush_log_at_trx_commit = 2"
+        echo "innodb_flush_method = O_DIRECT"
+        echo "innodb_file_per_table = 1"
+        echo "max_connections = ${DB_MAX_CONNECTIONS}"
+        echo "thread_cache_size = 50"
+        echo "table_open_cache = 2000"
+        echo "tmp_table_size = ${DB_TABLE_SIZE}"
+        echo "max_heap_table_size = ${DB_TABLE_SIZE}"
+        # query_cache_* chỉ tồn tại ở MariaDB (MySQL 8 sẽ không khởi động được nếu có các dòng này)
+        if is_mariadb; then
+            echo "query_cache_type = ${DB_QUERY_CACHE_TYPE:-0}"
+            echo "query_cache_size = ${DB_QUERY_CACHE_SIZE:-0}"
+        fi
+    } > "$dropin"
+
+    if ! systemctl restart "$svc" || ! systemctl is-active --quiet "$svc"; then
+        if [[ "$had_old" -eq 1 ]]; then mv -f "${dropin}.bak" "$dropin"; else rm -f "$dropin"; fi
+        [[ -n "$legacy_bak" ]] && cp -p "$legacy_bak" "${legacy_bak%.bak_vpsmanager}"
+        systemctl restart "$svc" 2>/dev/null
+        if systemctl is-active --quiet "$svc"; then
+            log_error "$svc không khởi động được với cấu hình mới - đã khôi phục cấu hình cũ, DB đang chạy lại."
+        else
+            log_error "$svc KHÔNG khởi động được kể cả sau khi khôi phục. Kiểm tra ngay: journalctl -u $svc -n 50"
+        fi
+        [[ -z "$auto_mode" ]] && pause
+        return 1
+    fi
+    rm -f "${dropin}.bak"
+
+    # Báo giá trị THỰC TẾ đang có hiệu lực (my.cnf chính có thể ghi đè file drop-in)
+    local effective=""
+    effective=$(mysql -Nse "SELECT ROUND(@@innodb_buffer_pool_size/1024/1024)" 2>/dev/null)
+    if [[ -n "$effective" ]]; then
+        log_info "MySQL/MariaDB đã restart. InnoDB buffer đang có hiệu lực: ${effective}MB (mục tiêu ${DB_INNODB_BUFFER})."
+        if [[ "${effective}M" != "${DB_INNODB_BUFFER}" ]]; then
+            log_warn "Giá trị hiệu lực khác mục tiêu: có khối cấu hình khác (vd 'vps-manager-db-tuning' trong my.cnf) đang ghi đè $dropin."
+        fi
     else
-        cat > /etc/nginx/conf.d/fastcgi_cache.conf <<EOF
-# FastCGI Cache Configuration
-fastcgi_cache_path /var/cache/nginx/fastcgi levels=1:2 keys_zone=WORDPRESS:100m inactive=60m max_size=1g;
-fastcgi_cache_key "\$scheme\$request_method\$host\$request_uri";
-fastcgi_cache_use_stale error timeout invalid_header http_500 http_503;
-fastcgi_cache_valid 200 301 302 60m;
-fastcgi_cache_valid 404 10m;
-fastcgi_ignore_headers Cache-Control Expires Set-Cookie;
-EOF
+        log_info "MySQL/MariaDB đã restart với $dropin (không đọc được giá trị hiệu lực để xác nhận)."
     fi
-    
-    log_info "FastCGI cache configured (100MB zone, 1GB max)"
-    echo -e "${YELLOW}Cache is already applied to sites via create_nginx_config${NC}"
-    
-    if [[ -z "$auto_mode" ]]; then pause; fi
+    [[ -z "$auto_mode" ]] && pause
+    return 0
 }
 
-# 8. Database Cleanup
+# 5. Nginx FastCGI Cache zone
+# Chỉ có MỘT nơi định nghĩa cache zone: site.sh (_site_setup_fastcgi_cache_global). Menu này gọi lại
+# hàm đó (tạo mới nếu thiếu, nâng cấp cấu hình cũ), rồi test + reload nginx.
+setup_fastcgi_microcache() {
+    local auto_mode=${1:-}
+    log_info "Thiết lập Nginx FastCGI Cache zone..."
+
+    local cache_conf="/etc/nginx/conf.d/fastcgi_cache.conf"
+    local bak=""
+    [[ -f "$cache_conf" ]] && bak=$(backup_nginx_config "$cache_conf")
+
+    if ! declare -F _site_setup_fastcgi_cache_global >/dev/null; then
+        # shellcheck disable=SC1091
+        source "$(dirname "${BASH_SOURCE[0]}")/site.sh" 2>/dev/null
+    fi
+    if ! declare -F _site_setup_fastcgi_cache_global >/dev/null; then
+        log_error "Không nạp được modules/site.sh - chưa thay đổi gì."
+        [[ -n "$bak" ]] && rm -f "$bak"
+        [[ -z "$auto_mode" ]] && pause
+        return 1
+    fi
+    _site_setup_fastcgi_cache_global
+
+    if ! nginx_test_reload; then
+        if [[ -n "$bak" ]]; then mv -f "$bak" "$cache_conf"; else rm -f "$cache_conf"; fi
+        log_error "Nginx không nhận cấu hình cache - đã hoàn tác $cache_conf."
+        [[ -z "$auto_mode" ]] && pause
+        return 1
+    fi
+    [[ -n "$bak" ]] && rm -f "$bak"
+
+    log_info "FastCGI cache zone sẵn sàng (response có Set-Cookie sẽ không bị cache)."
+    echo -e "${YELLOW}Mỗi site WordPress tạo từ menu Website đã tự dùng zone này trong vhost.${NC}"
+    [[ -z "$auto_mode" ]] && pause
+    return 0
+}
+
+# 11. Database Cleanup
 cleanup_wordpress_db() {
     clear
     echo -e "${BLUE}=================================================${NC}"
     echo -e "${GREEN}     🧹 Database Cleanup & Optimization${NC}"
     echo -e "${BLUE}=================================================${NC}"
-    echo -e "Phạm vi áp dụng:"
-    echo -e "  1. Chọn 1 website cụ thể"
-    echo -e "  2. Áp dụng cho TẤT CẢ WordPress sites"
-    echo -e "  0. Hủy"
-    read -p "Chọn: " scope
-
-    case $scope in
-        1)
-            source "$(dirname "${BASH_SOURCE[0]}")/wordpress_tool.sh"
-            select_wp_site || return
-            ensure_wp_cli
-            _do_db_cleanup "$SELECTED_DOMAIN"
-            ;;
-        2)
-            echo -e "${YELLOW}Sẽ dọn database TẤT CẢ WordPress sites:${NC}"
-            local found=0
-            for d in /var/www/*/public_html/wp-config.php; do
-                [ ! -f "$d" ] && continue
-                local domain
-                domain=$(basename "$(dirname "$(dirname "$d")")")
-                echo "  → $domain"
-                found=$((found+1))
-            done
-            [ "$found" -eq 0 ] && echo -e "${RED}Không có site WordPress nào.${NC}" && pause && return
-            echo ""
-            read -p "Tiếp tục dọn $found site? [y/N]: " c
-            [[ "$c" != "y" && "$c" != "Y" ]] && return
-            for d in /var/www/*/public_html/wp-config.php; do
-                [ ! -f "$d" ] && continue
-                local domain
-                domain=$(basename "$(dirname "$(dirname "$d")")")
-                _do_db_cleanup "$domain"
-            done
-            ;;
-        0) return ;;
-    esac
+    _wp_run_scoped _do_db_cleanup
     pause
 }
 
 _do_db_cleanup() {
     local domain=$1
-    local WEB_ROOT="/var/www/$domain/public_html"
-    
-    local WP_PHP_BIN="php"
-    if ! _wp_resolve_php_bin_for_site "$domain" WP_PHP_BIN; then
-        log_warn "[$domain] PHP CLI van thieu mysqli/pdo_mysql sau auto-fix -- bo qua."
-        return
-    fi
-    local WP_CMD="$WP_PHP_BIN -d display_errors=0 /usr/local/bin/wp --path=$WEB_ROOT --allow-root"
-
-    if [[ ! -f "$WEB_ROOT/wp-config.php" ]]; then
-        echo -e "${RED}$domain không phải WordPress site.${NC}"
-        return
-    fi
+    local WEB_ROOT WP_CMD
+    _wp_prepare_cli "$domain" || return
 
     log_info "Dọn database: $domain"
     $WP_CMD transient delete --all 2>/dev/null && echo "  ✓ Transients"
@@ -963,411 +1034,40 @@ _do_db_cleanup() {
     log_info "✅ $domain: Database cleaned"
 }
 
-install_valkey() {
-    log_info "Installing Valkey Server..."
 
-    # Xử lý xung đột Engine: Tắt Redis/KeyDB nếu đang chạy
-    for svc in redis-server redis keydb memcached; do
-        if systemctl is-active --quiet "$svc" 2>/dev/null || systemctl is-enabled --quiet "$svc" 2>/dev/null; then
-            log_warn "Phát hiện $svc đang hiện diện. Tự động tắt để nhường chỗ cho Valkey..."
-            systemctl stop "$svc" 2>/dev/null
-            systemctl disable "$svc" 2>/dev/null
-        fi
-    done
-
-    pkg_update
-    pkg_install valkey
-    if ! command -v valkey-server &>/dev/null && ! command -v valkey &>/dev/null; then
-        log_warn "Không tìm thấy package valkey. Đang thử cài đặt valkey-server..."
-        pkg_install valkey-server
-    fi
-    
-    # Đảm bảo thư mục socket tồn tại sau khi reboot (vì /var/run là tmpfs)
-    echo "d /var/run/valkey 0755 valkey valkey -" > /etc/tmpfiles.d/valkey.conf
-    systemd-tmpfiles --create /etc/tmpfiles.d/valkey.conf 2>/dev/null || mkdir -p /var/run/valkey && chown valkey:valkey /var/run/valkey
-    
-    # Configure Unix Socket for Object Cache
-    local vconf="/etc/valkey/valkey.conf"
-    if [[ ! -f "$vconf" ]]; then vconf="/etc/valkey/valkey-server.conf"; fi
-    if [[ -f "$vconf" ]]; then
-        if grep -q "^unixsocket " "$vconf"; then
-            sed -i "s|^unixsocket .*|unixsocket /var/run/valkey/valkey.sock|g" "$vconf"
-        else
-            echo "unixsocket /var/run/valkey/valkey.sock" >> "$vconf"
-        fi
-        if grep -q "^unixsocketperm " "$vconf"; then
-            sed -i "s|^unixsocketperm .*|unixsocketperm 777|g" "$vconf"
-        else
-            echo "unixsocketperm 777" >> "$vconf"
-        fi
-        # Optional: memory optimization
-        if ! grep -q "^maxmemory " "$vconf"; then
-            echo "maxmemory 256mb" >> "$vconf"
-            echo "maxmemory-policy allkeys-lru" >> "$vconf"
-        fi
-    fi
-    # Phân quyền user cho an toàn dự phòng
-    usermod -aG valkey www-data 2>/dev/null || true
-    usermod -aG valkey nobody 2>/dev/null || true
-
-    systemctl daemon-reload 2>/dev/null
-    systemctl enable valkey 2>/dev/null || systemctl enable valkey-server 2>/dev/null
-    systemctl restart valkey 2>/dev/null || systemctl restart valkey-server 2>/dev/null
-
-    local php_ver=$(get_installed_php_version)
-    if [[ "$OS_FAMILY" == "rhel" ]]; then
-        pkg_install php-pecl-redis5
-        systemctl restart php-fpm
-    else
-        pkg_install php${php_ver}-redis
-        phpenmod -v ${php_ver} redis 2>/dev/null
-        systemctl daemon-reload 2>/dev/null
-        systemctl restart php${php_ver}-fpm 2>/dev/null || systemctl restart lshttpd 2>/dev/null
-    fi
-    log_info "Valkey installed and enabled (sử dụng php-redis module)."
-}
-
-install_redis() {
-    if ! command -v redis-server &>/dev/null; then
-        log_info "Installing Redis..."
-
-        # Xử lý xung đột Engine: Tắt Valkey/KeyDB nếu đang chạy
-        for svc in valkey-server valkey keydb memcached; do
-            if systemctl is-active --quiet "$svc" 2>/dev/null || systemctl is-enabled --quiet "$svc" 2>/dev/null; then
-                log_warn "Phát hiện $svc đang hiện diện. Tự động tắt để nhường chỗ cho Redis..."
-                systemctl stop "$svc" 2>/dev/null
-                systemctl disable "$svc" 2>/dev/null
-            fi
-        done
-
-        pkg_update
-        pkg_install redis-server
-        
-        # Đảm bảo thư mục socket tồn tại sau khi reboot
-        echo "d /var/run/redis 0755 redis redis -" > /etc/tmpfiles.d/redis.conf
-        systemd-tmpfiles --create /etc/tmpfiles.d/redis.conf 2>/dev/null || mkdir -p /var/run/redis && chown redis:redis /var/run/redis
-        
-        # Configure Unix Socket for Object Cache
-        local rconf="/etc/redis/redis.conf"
-        if [[ -f "$rconf" ]]; then
-            if grep -q "^unixsocket " "$rconf"; then
-                sed -i "s|^unixsocket .*|unixsocket /var/run/redis/redis.sock|g" "$rconf"
-            else
-                echo "unixsocket /var/run/redis/redis.sock" >> "$rconf"
-            fi
-            if grep -q "^unixsocketperm " "$rconf"; then
-                sed -i "s|^unixsocketperm .*|unixsocketperm 777|g" "$rconf"
-            else
-                echo "unixsocketperm 777" >> "$rconf"
-            fi
-            if ! grep -q "^maxmemory " "$rconf"; then
-                echo "maxmemory 256mb" >> "$rconf"
-                echo "maxmemory-policy allkeys-lru" >> "$rconf"
-            fi
-        fi
-        usermod -aG redis www-data 2>/dev/null || true
-        usermod -aG redis nobody 2>/dev/null || true
-        
-        systemctl enable redis-server
-        systemctl restart redis-server
-    else
-        log_warn "Redis is already installed."
-        local rconf="/etc/redis/redis.conf"
-        sed -i 's/^unixsocketperm.*/unixsocketperm 777/g' "$rconf" 2>/dev/null
-        echo "d /var/run/redis 0755 redis redis -" > /etc/tmpfiles.d/redis.conf
-        systemd-tmpfiles --create /etc/tmpfiles.d/redis.conf 2>/dev/null || mkdir -p /var/run/redis && chown redis:redis /var/run/redis
-        systemctl restart redis-server 2>/dev/null
-    fi
-    
-    local php_ver=$(get_installed_php_version)
-    if [[ "$OS_FAMILY" == "rhel" ]]; then
-        pkg_install php-pecl-redis5
-        systemctl restart php-fpm
-    else
-        pkg_install php${php_ver}-redis
-        phpenmod -v ${php_ver} redis 2>/dev/null
-        systemctl restart php${php_ver}-fpm 2>/dev/null || systemctl restart lshttpd 2>/dev/null
-    fi
-    log_info "Redis installed and enabled."
-}
-
-install_memcached() {
-    if ! command -v memcached &>/dev/null; then
-        log_info "Installing Memcached..."
-
-        # Xử lý xung đột Engine: Tắt Redis/Valkey/KeyDB nếu đang chạy
-        for svc in redis-server redis valkey-server valkey keydb; do
-            if systemctl is-active --quiet "$svc" 2>/dev/null || systemctl is-enabled --quiet "$svc" 2>/dev/null; then
-                log_warn "Phát hiện $svc. Tự động tắt để nhường chỗ cho Memcached..."
-                systemctl stop "$svc" 2>/dev/null
-                systemctl disable "$svc" 2>/dev/null
-            fi
-        done
-
-        pkg_update
-        pkg_install memcached
-        systemctl enable memcached
-        systemctl start memcached
-    fi
-    
-    local php_ver=$(get_installed_php_version)
-    if [[ "$OS_FAMILY" == "rhel" ]]; then
-        pkg_install php-pecl-memcached
-        systemctl restart php-fpm
-    else
-        pkg_install php${php_ver}-memcached
-        phpenmod -v ${php_ver} memcached 2>/dev/null
-        systemctl restart php${php_ver}-fpm
-    fi
-    log_info "Memcached installed and enabled."
-}
-
-# 6. Object Cache Setup
-setup_object_cache() {
-    clear
-    echo -e "${BLUE}=================================================${NC}"
-    echo -e "${GREEN}    ðŸ“¦ Enable Object Cache (Redis/Valkey/Memcached)${NC}"
-    echo -e "${BLUE}=================================================${NC}"
-    echo -e "${YELLOW}Select Object Cache Backend:${NC}"
-    echo "1. Valkey (Khuyen dung - Nhanh hon 30%, tuong thich 100% Redis)"
-    echo "2. Redis (Ban truyen thong)"
-    echo "3. Memcached"
-    echo "0. Cancel"
-    read -p "Choice: " cache_choice
-
-    case $cache_choice in
-        1)
-            install_valkey
-            _setup_wp_redis_plugin "valkey"
-            ;;
-        2)
-            install_redis
-            _setup_wp_redis_plugin "redis"
-            ;;
-        3)
-            install_memcached
-            _setup_wp_memcached_plugin
-            ;;
-        0) return ;;
-        *) echo -e "${RED}Invalid choice!${NC}" ;;
-    esac
-    pause
-}
-
-# Auto-install va kich hoat Redis Object Cache plugin cho tat ca WP sites
-_setup_wp_redis_plugin() {
-    local backend="${1:-valkey}"
-
-    if ! command -v wp &>/dev/null; then
-        log_warn "WP-CLI chua co -- bo qua cai plugin tu dong."
-        echo -e "${YELLOW}Hay cai thu cong plugin 'Redis Object Cache' trong WP Admin.${NC}"
-        return
-    fi
-
-    # Cho mot chut de dich vu khoi tao Socket sau khi restart (Fix timing issue)
-    sleep 2
-
-    # Xac dinh host/socket
-    local redis_host="127.0.0.1"
-    local redis_port="6379"
-    local redis_scheme="tcp"
-    if [[ "$backend" == "valkey" ]] && [[ -e "/var/run/valkey/valkey.sock" ]]; then
-        redis_host="/var/run/valkey/valkey.sock"; redis_scheme="unix"; redis_port="0"
-    elif [[ "$backend" == "redis" ]] && [[ -e "/var/run/redis/redis.sock" ]]; then
-        redis_host="/var/run/redis/redis.sock"; redis_scheme="unix"; redis_port="0"
-    fi
-
-    local found=0
-    for wpc in /var/www/*/public_html/wp-config.php; do
-        [[ ! -f "$wpc" ]] && continue
-        local site_root; site_root=$(dirname "$wpc")
-        local domain;   domain=$(basename "$(dirname "$site_root")")
-        found=$((found+1))
-
-        log_info "[$domain] Cai dat Redis Object Cache plugin..."
-
-        local WP_PHP_BIN="php"
-        if ! _wp_resolve_php_bin_for_site "$domain" WP_PHP_BIN; then
-            log_warn "[$domain] PHP CLI van thieu mysqli/pdo_mysql sau auto-fix -- bo qua."
-            continue
-        fi
-        local WP_CMD="$WP_PHP_BIN /usr/local/bin/wp"
-
-
-        # 1. Cai + kich hoat plugin redis-cache
-        if ! $WP_CMD plugin is-installed redis-cache --path="$site_root" --allow-root 2>/dev/null; then
-            if $WP_CMD plugin install redis-cache --activate --path="$site_root" --allow-root; then
-                echo "  v Plugin redis-cache: CAI + KICH HOAT"
-                # Fix ownership
-                chown -R www-data:www-data "$site_root/wp-content/plugins/redis-cache" 2>/dev/null || chown -R nobody:nobody "$site_root/wp-content/plugins/redis-cache" 2>/dev/null
-            else
-                log_warn "[$domain] Cai plugin that bai (xem loi ben tren) -- bo qua."
-                continue
-            fi
-        else
-            $WP_CMD plugin activate redis-cache --path="$site_root" --allow-root 2>/dev/null
-            echo "  v Plugin redis-cache: KICH HOAT"
-        fi
-
-        # 2. Ghi hang so vao wp-config.php
-        $WP_CMD config set WP_REDIS_SCHEME "$redis_scheme" --type=constant --path="$site_root" --allow-root 2>/dev/null
-        $WP_CMD config set WP_REDIS_HOST   "$redis_host"   --type=constant --path="$site_root" --allow-root 2>/dev/null
-        $WP_CMD config set WP_REDIS_PORT   "$redis_port"   --raw --type=constant --path="$site_root" --allow-root 2>/dev/null
-        $WP_CMD config set WP_CACHE        "true"          --raw --type=constant --path="$site_root" --allow-root 2>/dev/null
-        echo "  v wp-config.php: WP_REDIS_HOST / WP_CACHE da ghi"
-
-        # 3. Enable drop-in (object-cache.php)
-        # Xoa drop-in cu (tu LSCache, Memcached...) de tranh loi "Drop-in is invalid"
-        rm -f "$site_root/wp-content/object-cache.php" 2>/dev/null
-        
-        $WP_CMD redis enable --path="$site_root" --allow-root 2>/dev/null \
-            && echo "  v Object Cache drop-in: DA BAT" \
-            || echo "  ! Chay 'wp redis enable' thu cong trong WP Admin"
-
-        echo ""
-    done
-
-    if [[ $found -eq 0 ]]; then
-        log_warn "Khong tim thay WordPress site nao tai /var/www/*/public_html/"
-        echo -e "${YELLOW}Hay cai plugin 'Redis Object Cache' thu cong trong WP Admin.${NC}"
-        return
-    fi
-
-    echo -e "${GREEN}=================================================${NC}"
-    echo -e "${GREEN} v Redis Object Cache da cai xong cho $found site(s)!${NC}"
-    echo -e "${GREEN}=================================================${NC}"
-    if [[ "$redis_scheme" == "unix" ]]; then
-        echo -e "  Backend : ${CYAN}$backend (Unix Socket)${NC}"
-        echo -e "  Socket  : ${CYAN}$redis_host${NC}"
-    else
-        echo -e "  Backend : ${CYAN}$backend (TCP 127.0.0.1:6379)${NC}"
-    fi
-    echo -e "${YELLOW}Luu y: Vao WP Admin -> Settings -> Redis -> kiem tra ket noi.${NC}"
-}
-
-# Cai va kich hoat Memcached Object Cache cho tat ca WP sites
-_setup_wp_memcached_plugin() {
-    if ! command -v wp &>/dev/null; then
-        log_warn "WP-CLI chua co -- bo qua cai plugin tu dong."
-        echo -e "${YELLOW}Hay cai thu cong plugin 'Memcached Object Cache' trong WP Admin.${NC}"
-        return
-    fi
-
-    local found=0
-    for wpc in /var/www/*/public_html/wp-config.php; do
-        [[ ! -f "$wpc" ]] && continue
-        local site_root; site_root=$(dirname "$wpc")
-        local domain;   domain=$(basename "$(dirname "$site_root")")
-        found=$((found+1))
-
-        log_info "[$domain] Cai dat Memcached Object Cache..."
-        
-        local WP_PHP_BIN="php"
-        if ! _wp_resolve_php_bin_for_site "$domain" WP_PHP_BIN; then
-            log_warn "[$domain] PHP CLI van thieu mysqli/pdo_mysql sau auto-fix -- bo qua."
-            continue
-        fi
-        local WP_CMD="$WP_PHP_BIN /usr/local/bin/wp"
-
-        local mc_dropin="$site_root/wp-content/object-cache.php"
-        if [[ ! -f "$mc_dropin" ]]; then
-            curl -fsSL "https://raw.githubusercontent.com/Ipstenu/memcached-redux/master/object-cache.php" \
-                -o "$mc_dropin" 2>/dev/null \
-                && echo "  v Memcached object-cache.php: TAI XONG" \
-                || { log_warn "[$domain] Tai drop-in that bai."; continue; }
-            chown www-data:www-data "$mc_dropin" 2>/dev/null || chown nobody:nobody "$mc_dropin" 2>/dev/null
-        else
-            echo "  v object-cache.php: DA CO"
-        fi
-        $WP_CMD config set WP_CACHE "true" --raw --type=constant --path="$site_root" --allow-root 2>/dev/null
-        echo "  v WP_CACHE=true: GHI VAO wp-config.php"
-        echo ""
-    done
-
-    if [[ $found -eq 0 ]]; then
-        log_warn "Khong tim thay WordPress site nao."
-        return
-    fi
-
-    echo -e "${GREEN}=================================================${NC}"
-    echo -e "${GREEN} v Memcached Object Cache da cai xong cho $found site(s)!${NC}"
-    echo -e "${GREEN}=================================================${NC}"
-}
-
-# 9. Disable WordPress Bloat
+# 12. Disable WordPress Bloat
 disable_wordpress_bloat() {
     clear
     echo -e "${BLUE}=================================================${NC}"
     echo -e "${GREEN}     🎯 Disable WordPress Bloat${NC}"
     echo -e "${BLUE}=================================================${NC}"
-    echo -e "Sẽ tắt: Heartbeat limits, Embeds, Post Revisions (wp-config.php)"
+    echo -e "Sẽ đặt trong wp-config.php: giới hạn Post Revisions, giãn Autosave, tự dọn Trash."
     echo ""
-    echo -e "Phạm vi áp dụng:"
-    echo -e "  1. Chọn 1 website cụ thể"
-    echo -e "  2. Áp dụng cho TẤT CẢ WordPress sites"
-    echo -e "  0. Hủy"
-    read -p "Chọn: " scope
-
-    case $scope in
-        1)
-            source "$(dirname "${BASH_SOURCE[0]}")/wordpress_tool.sh"
-            select_wp_site || return
-            ensure_wp_cli
-            _do_disable_bloat "$SELECTED_DOMAIN"
-            ;;
-        2)
-            echo -e "${YELLOW}Áp dụng cho TẤT CẢ WordPress sites:${NC}"
-            local found=0
-            for d in /var/www/*/public_html/wp-config.php; do
-                [ ! -f "$d" ] && continue
-                local domain
-                domain=$(basename "$(dirname "$(dirname "$d")")")
-                echo "  → $domain"
-                found=$((found+1))
-            done
-            [ "$found" -eq 0 ] && echo -e "${RED}Không có site WordPress nào.${NC}" && pause && return
-            echo ""
-            read -p "Tiếp tục cho $found site? [y/N]: " c
-            [[ "$c" != "y" && "$c" != "Y" ]] && return
-            for d in /var/www/*/public_html/wp-config.php; do
-                [ ! -f "$d" ] && continue
-                local domain
-                domain=$(basename "$(dirname "$(dirname "$d")")")
-                _do_disable_bloat "$domain"
-            done
-            ;;
-        0) return ;;
-    esac
+    _wp_run_scoped _do_disable_bloat
     pause
 }
 
 _do_disable_bloat() {
     local domain=$1
-    local WEB_ROOT="/var/www/$domain/public_html"
-    
-    local WP_PHP_BIN="php"
-    if ! _wp_resolve_php_bin_for_site "$domain" WP_PHP_BIN; then
-        log_warn "[$domain] PHP CLI van thieu mysqli/pdo_mysql sau auto-fix -- bo qua."
-        return
-    fi
-    local WP_CMD="$WP_PHP_BIN -d display_errors=0 /usr/local/bin/wp --path=$WEB_ROOT --allow-root"
-
-    if [[ ! -f "$WEB_ROOT/wp-config.php" ]]; then
-        echo -e "${RED}$domain không phải WordPress site.${NC}"
-        return
-    fi
+    local WEB_ROOT WP_CMD
+    _wp_prepare_cli "$domain" || return
 
     log_info "Disable Bloat: $domain"
-    $WP_CMD config set WP_POST_REVISIONS 3 --raw --type=constant 2>/dev/null && echo "  ✓ Revisions limit = 3"
-    $WP_CMD config set AUTOSAVE_INTERVAL 300 --raw --type=constant 2>/dev/null && echo "  ✓ Autosave = 5 phút"
-    $WP_CMD config set EMPTY_TRASH_DAYS 7 --raw --type=constant 2>/dev/null && echo "  ✓ Trash = 7 ngày"
-    $WP_CMD config set WP_CRON_LOCK_TIMEOUT 60 --raw --type=constant 2>/dev/null && echo "  ✓ Cron timeout"
-    log_info "✅ $domain: Bloat disabled"
+    local ok=0
+    $WP_CMD config set WP_POST_REVISIONS 3 --raw --type=constant 2>/dev/null && { echo "  ✓ Revisions limit = 3"; ok=$((ok+1)); }
+    $WP_CMD config set AUTOSAVE_INTERVAL 300 --raw --type=constant 2>/dev/null && { echo "  ✓ Autosave = 5 phút"; ok=$((ok+1)); }
+    $WP_CMD config set EMPTY_TRASH_DAYS 7 --raw --type=constant 2>/dev/null && { echo "  ✓ Trash = 7 ngày"; ok=$((ok+1)); }
+    $WP_CMD config set WP_CRON_LOCK_TIMEOUT 60 --raw --type=constant 2>/dev/null && { echo "  ✓ Cron timeout"; ok=$((ok+1)); }
+    if [[ "$ok" -eq 4 ]]; then
+        log_info "✅ $domain: Bloat disabled"
+    else
+        log_warn "$domain: chỉ ghi được $ok/4 thiết lập (kiểm tra quyền ghi wp-config.php)."
+    fi
     echo -e "${YELLOW}Gợi ý: Dùng plugin (Perfmatters / Asset CleanUp) để tắt Heartbeat, Embeds per-page${NC}"
 }
 
 
-# 10. Image Optimization Setup
+# 13. Image Optimization Setup
 setup_image_optimization() {
     clear
     echo -e "${BLUE}=================================================${NC}"
@@ -1376,99 +1076,46 @@ setup_image_optimization() {
     echo -e "Script sẽ đảm bảo cài đặt thư viện WebP trên server và"
     echo -e "tự động cài plugin Imagify vào website WordPress của bạn."
     echo ""
-    echo -e "Phạm vi áp dụng:"
-    echo -e "  1. Chọn 1 website cụ thể"
-    echo -e "  2. Áp dụng cho TẤT CẢ WordPress sites"
-    echo -e "  0. Hủy"
-    read -p "Chọn: " scope
-
-    case $scope in
-        1)
-            source "$(dirname "${BASH_SOURCE[0]}")/wordpress_tool.sh"
-            select_wp_site || return
-            ensure_wp_cli
-            _install_webp_server
-            _do_image_optimization "$SELECTED_DOMAIN"
-            ;;
-        2)
-            echo -e "${YELLOW}Áp dụng cho TẤT CẢ WordPress sites:${NC}"
-            local found=0
-            for d in /var/www/*/public_html/wp-config.php; do
-                [ ! -f "$d" ] && continue
-                local domain
-                domain=$(basename "$(dirname "$(dirname "$d")")")
-                echo "  → $domain"
-                found=$((found+1))
-            done
-            [ "$found" -eq 0 ] && echo -e "${RED}Không có site WordPress nào.${NC}" && pause && return
-            
-            echo ""
-            read -p "Tiếp tục cho $found site? [y/N]: " c
-            [[ "$c" != "y" && "$c" != "Y" ]] && return
-            
-            _install_webp_server
-            
-            for d in /var/www/*/public_html/wp-config.php; do
-                [ ! -f "$d" ] && continue
-                local domain
-                domain=$(basename "$(dirname "$(dirname "$d")")")
-                _do_image_optimization "$domain"
-            done
-            ;;
-        0) return ;;
-    esac
+    _wp_run_scoped _do_image_optimization _install_webp_server
     pause
 }
 
 _install_webp_server() {
-    local php_ver=$(get_installed_php_version)
+    local php_ver gd_pkg webp_pkg
+    php_ver=$(get_installed_php_version)
     if [[ "$OS_FAMILY" == "rhel" ]]; then
-        if ! command -v cwebp >/dev/null 2>&1 || ! rpm -q php-gd >/dev/null 2>&1; then
-            log_info "Đang cài đặt Server-side WebP support..."
-            pkg_install libwebp php-gd >/dev/null 2>&1
-            systemctl restart php-fpm >/dev/null 2>&1
-            log_info "WebP support installed."
-        else
-            log_info "Server đã hỗ trợ WebP."
-        fi
+        gd_pkg="php-gd"; webp_pkg="libwebp-tools"
     else
-        if ! command -v cwebp >/dev/null 2>&1 || ! dpkg -l | grep -q "php${php_ver}-gd"; then
-            log_info "Đang cài đặt Server-side WebP support..."
-            export DEBIAN_FRONTEND=noninteractive
-            pkg_install php${php_ver}-gd webp >/dev/null 2>&1
-            systemctl restart php${php_ver}-fpm >/dev/null 2>&1
-            log_info "WebP support installed."
-        else
-            log_info "Server đã hỗ trợ WebP."
-        fi
+        gd_pkg="php${php_ver}-gd"; webp_pkg="webp"
     fi
+
+    if command -v cwebp >/dev/null 2>&1 && is_installed "$gd_pkg"; then
+        log_info "Server đã hỗ trợ WebP."
+        return 0
+    fi
+
+    log_info "Đang cài đặt Server-side WebP support..."
+    pkg_install "$gd_pkg" "$webp_pkg" >/dev/null 2>&1
+    if ! is_installed "$gd_pkg"; then
+        log_warn "Chưa cài được $gd_pkg - WordPress có thể không tạo được ảnh WebP."
+        return 1
+    fi
+    php_fpm_restart_safe "$php_ver" || return 1
+    log_info "WebP support installed."
 }
 
 _do_image_optimization() {
     local domain=$1
-    local WEB_ROOT="/var/www/$domain/public_html"
-    
-    local WP_PHP_BIN="php"
-    if ! _wp_resolve_php_bin_for_site "$domain" WP_PHP_BIN; then
-        log_warn "[$domain] PHP CLI van thieu mysqli/pdo_mysql sau auto-fix -- bo qua."
-        return
-    fi
-    local WP_CMD="$WP_PHP_BIN -d display_errors=0 /usr/local/bin/wp --path=$WEB_ROOT --allow-root"
-
-    if [[ ! -f "$WEB_ROOT/wp-config.php" ]]; then
-        echo -e "${RED}$domain không phải WordPress site.${NC}"
-        return
-    fi
+    local WEB_ROOT WP_CMD
+    _wp_prepare_cli "$domain" || return
 
     log_info "Cài đặt Plugin tối ưu ảnh: $domain"
-    
+
     if $WP_CMD plugin is-installed imagify 2>/dev/null; then
         echo "  ✓ Imagify plugin đã có sẵn."
         $WP_CMD plugin activate imagify 2>/dev/null
     elif $WP_CMD plugin is-installed shortpixel-image-optimiser 2>/dev/null; then
         echo "  ✓ ShortPixel plugin đã có sẵn."
-    elif $WP_CMD plugin is-installed litespeed-cache 2>/dev/null; then
-        echo "  ✓ LiteSpeed Cache đã có sẵn."
     else
         echo "  - Đang tải và cài đặt Imagify..."
         if $WP_CMD plugin install imagify --activate 2>/dev/null; then
@@ -1477,11 +1124,11 @@ _do_image_optimization() {
             echo "  ✗ Lỗi khi cài đặt Imagify."
         fi
     fi
-    
+
     echo -e "${YELLOW}Gợi ý: Hãy đăng nhập WP Admin -> Settings -> Imagify để lấy API Key miễn phí và kích hoạt WebP!${NC}"
 }
 
-# 10. HTTP/2 & Brotli
+# 6. HTTP/2 & Brotli
 enable_http2_brotli() {
     log_info "Enabling HTTP/2 and Brotli compression..."
 
@@ -1494,8 +1141,14 @@ enable_http2_brotli() {
 
     # ── Brotli check ─────────────────────────────────────────
     local brotli_ok=0
-    # Strict check: Test config with brotli directive before enabling
-    if nginx -V 2>&1 | grep -qi "brotli"; then
+    local created_files=()
+    # Đã có brotli.conf và nginx đang chạy tốt với nó -> module hoạt động.
+    # (Không test bằng file tạm trong trường hợp này: "brotli on;" lặp 2 lần sẽ báo lỗi giả
+    #  và khiến brotli.conf đang chạy tốt bị xoá nhầm.)
+    if [[ -f /etc/nginx/conf.d/brotli.conf ]] && nginx -t &>/dev/null; then
+        brotli_ok=1
+        log_info "Brotli module: ✅ Đang hoạt động (brotli.conf đã có)"
+    elif nginx -V 2>&1 | grep -qi "brotli"; then
         # Create temp config to test
         echo "brotli on;" > /etc/nginx/conf.d/brotli_test_temp.conf
         if nginx -t &>/dev/null; then
@@ -1558,13 +1211,15 @@ gzip_types
     application/rss+xml application/atom+xml
     image/svg+xml font/woff2 font/woff font/ttf;
 GEOF
+        created_files+=(/etc/nginx/conf.d/gzip.conf)
         log_info "Gzip config tạo tại /etc/nginx/conf.d/gzip.conf"
     else
         log_info "Gzip đã được cấu hình"
     fi
 
-    # ── Brotli config (chỉ khi module có mặt) ─────────────
-    if [[ "$brotli_ok" -eq 1 ]]; then
+    # ── Brotli config (chỉ khi module có mặt, và chưa có file) ─────────────
+    if [[ "$brotli_ok" -eq 1 ]] && [[ ! -f /etc/nginx/conf.d/brotli.conf ]]; then
+        created_files+=(/etc/nginx/conf.d/brotli.conf)
         cat > /etc/nginx/conf.d/brotli.conf << 'BEOF'
 # Brotli Compression
 brotli on;
@@ -1593,21 +1248,32 @@ CEOF
 
     # ── Test & Reload ─────────────────────────────────────
     echo ""
-    if nginx -t; then
-        systemctl reload nginx
+    if nginx_test_reload; then
         log_info "✅ Compression đã áp dụng thành công"
         echo -e "${YELLOW}Note: HTTP/2 cần SSL certificate (HTTPS)${NC}"
-        [ "$brotli_ok" -eq 1 ] \
-            && echo -e "${GREEN}  → Brotli + Gzip: cả hai đang hoạt động${NC}" \
-            || echo -e "${YELLOW}  → Chỉ Gzip: Brotli cần module riêng${NC}"
+        if [[ "$brotli_ok" -eq 1 ]]; then
+            echo -e "${GREEN}  → Brotli + Gzip: cả hai đang hoạt động${NC}"
+        else
+            echo -e "${YELLOW}  → Chỉ Gzip: Brotli cần module riêng${NC}"
+        fi
     else
-        log_error "Nginx config lỗi. Kiểm tra /etc/nginx/conf.d/"
+        # Hoàn tác: gỡ các file vừa tạo trong lần chạy này để các lần reload sau không bị kẹt
+        local cf
+        for cf in "${created_files[@]}"; do
+            rm -f "$cf"
+            log_warn "Đã gỡ $cf (vừa tạo, gây lỗi cấu hình)."
+        done
+        if nginx -t &>/dev/null; then
+            log_error "Compression chưa được áp dụng; cấu hình Nginx đã trở lại trạng thái hợp lệ."
+        else
+            log_error "Nginx config vẫn lỗi vì nguyên nhân có từ trước. Kiểm tra: nginx -t"
+        fi
     fi
     pause
 }
 
 
-# 11. Benchmark Test
+# 17. Benchmark Test
 benchmark_wordpress() {
     source "$(dirname "${BASH_SOURCE[0]}")/wordpress_tool.sh"
     select_wp_site || return
@@ -1631,268 +1297,62 @@ benchmark_wordpress() {
     
     echo ""
     echo -e "${YELLOW}Recommended tools for detailed testing:${NC}"
-    echo "  \u2022 GTmetrix (https://gtmetrix.com)"
-    echo "  \u2022 Google PageSpeed Insights"
-    echo "  \u2022 WebPageTest.org"
+    echo "  • GTmetrix (https://gtmetrix.com)"
+    echo "  • Google PageSpeed Insights"
+    echo "  • WebPageTest.org"
     pause
 }
 
 # ==============================================================================
-# 13. PHP PRELOAD
-# Nạp trước file PHP vào OPcache khi PHP-FPM khởi động
-# Yêu cầu PHP >= 7.4
+# PHP Preload: tính năng đã gỡ bỏ (lợi ích nhỏ với WordPress, mỗi phiên bản PHP chỉ preload được
+# một site, và code preload cũ gây lỗi fatal sau khi WordPress tự cập nhật core).
+# Hàm dưới đây dọn cấu hình preload do các phiên bản trước để lại; được gọi từ optimize_opcache.
 # ==============================================================================
-
-php_preload_menu() {
-    while true; do
-        clear
-        echo -e "${BLUE}=================================================${NC}"
-        echo -e "${GREEN}    🎀 PHP Preload Manager${NC}"
-        echo -e "${BLUE}=================================================${NC}"
-        echo -e "PHP Preload nạp trước file PHP vào OPcache khi kh\u1edfi đ\u1ed9ng."
-        echo -e "Gi\u1ea3m \u0111\u1ed9 tr\u1ec5 c\u1ee7a request đ\u1ea7u ti\u00ean, t\u0103ng t\u1ed1c đ\u1ed9 x\u1eed l\u00fd PHP."
-        echo -e "${YELLOW}(Y\u00eau c\u1ea7u PHP >= 7.4 v\u00e0 PHP-FPM)${NC}"
-        echo ""
-        echo -e "1. B\u1eadt PHP Preload cho site WordPress"
-        echo -e "2. T\u1eaft PHP Preload cho site"
-        echo -e "3. Xem tr\u1ea1ng th\u00e1i Preload (s\u1ed1 file đ\u00e3 n\u1ea1p)"
-        echo -e "4. Xem danh s\u00e1ch site \u0111ang d\u00f9ng Preload"
-        echo -e "0. Quay l\u1ea1i"
-        echo -e "${BLUE}=================================================${NC}"
-        read -p "Ch\u1ecdn [0-4]: " choice
-
-        case $choice in
-            1) enable_php_preload ;;
-            2) disable_php_preload ;;
-            3) show_preload_status ;;
-            4) list_preload_sites ;;
-            0) return ;;
-            *) echo -e "${RED}L\u1ef1a ch\u1ecdn kh\u00f4ng h\u1ee3p l\u1ec7!${NC}"; pause ;;
-        esac
-    done
-}
-
-enable_php_preload() {
-    # Ch\u1ecdn site
-    source "$(dirname "${BASH_SOURCE[0]}")/wordpress_tool.sh"
-    select_wp_site || return
-    local domain="$SELECTED_DOMAIN"
-    local site_root="/var/www/${domain}/public_html"
-
-    if [[ ! -f "${site_root}/wp-config.php" ]]; then
-        log_error "${domain} kh\u00f4ng ph\u1ea3i WordPress site!"
-        pause; return
-    fi
-
-    # L\u1ea5y PHP version c\u1ee7a site
-    local php_ver
-    php_ver=$(get_installed_php_version)
-    [[ -z "$php_ver" ]] && { log_error "Kh\u00f4ng t\u00ecm th\u1ea5y PHP-FPM!"; pause; return; }
-
-    # Ki\u1ec3m tra PHP version >= 7.4
-    local major minor
-    major=$(echo "$php_ver" | cut -d. -f1)
-    minor=$(echo "$php_ver" | cut -d. -f2)
-    if [[ "$major" -lt 7 ]] || { [[ "$major" -eq 7 ]] && [[ "$minor" -lt 4 ]]; }; then
-        log_error "PHP Preload y\u00eau c\u1ea7u PHP >= 7.4. PHP hi\u1ec7n t\u1ea1i: ${php_ver}"
-        pause; return
-    fi
-
-    # T\u1ea1o script preload
-    local preload_dir="/etc/php-preload"
-    mkdir -p "$preload_dir"
-    local preload_script="${preload_dir}/${domain}.php"
-
-    cat > "$preload_script" <<PRELOAD_EOF
-<?php
-/**
- * PHP Preload Script cho: ${domain}
- * Tá»± Ä‘á»™ng náº¡p trÆ°á»›c cÃ¡c file PHP cá»‘t lÃµi cá»§a WordPress vÃ o OPcache.
- * Loáº¡i trá»« cÃ¡c file dÃ¹ng require (thay vÃ¬ require_once) Ä‘á»ƒ trÃ¡nh lá»—i Redeclare (nhÆ° load-styles/scripts.php)
- */
-
-\$wp_includes = '${site_root}/wp-includes';
-if (is_dir(\$wp_includes)) {
-    // Danh sÃ¡ch file loáº¡i trá»« Ä‘á»ƒ trÃ¡nh lá»—i redeclare hoáº·c crash admin
-    \$exclusions = [
-        'l10n.php',
-        'general-template.php',
-        'link-template.php',
-        'version.php',
-        'script-loader.php',
-        'compat.php',
-        'class-wp-dependencies.php',
-        'class-wp-scripts.php',
-        'class-wp-styles.php',
-        'functions.php',
-        'formatting.php',
-        'meta.php',
-        'class-wp-meta-query.php',
-        'class-wp-matchesmapregex.php',
-        'class-wp.php',
-        'class-wp-error.php',
-        'capabilities.php',
-        'theme.php',
-        'class-wp-theme.php',
-        'user.php',
-        'class-wp-user.php',
-        'class-wp-roles.php',
-        'class-wp-role.php',
-        'load-styles.php',
-        'load-scripts.php',
-        'ms-files.php',
-        'rss.php'
-    ];
-
-    \$it = new RecursiveIteratorIterator(
-        new RecursiveDirectoryIterator(\$wp_includes, RecursiveDirectoryIterator::SKIP_DOTS)
-    );
-    foreach (\$it as \$file) {
-        if (\$file->isFile() && \$file->getExtension() === 'php') {
-            \$filename = \$file->getFilename();
-            // Bá» qua cÃ¡c file trong danh sÃ¡ch loáº¡i trá»«
-            if (in_array(\$filename, \$exclusions)) {
-                continue;
-            }
-            
-            // Bá» qua thÆ° má»¥c pomo (chá»©a thÆ° viá»‡n dá»‹ch thuáº­t cÃ³ thá»ƒ gÃ¢y lá»—i)
-            \$path = \$file->getPathname();
-            if (strpos(\$path, '/wp-includes/pomo/') !== false) {
-                continue;
-            }
-
-            @opcache_compile_file(\$path);
-        }
-    }
-}
-PRELOAD_EOF
-
-    # C\u1ea5u h\u00ecnh php.ini
-    local php_ini="/etc/php/${php_ver}/fpm/php.ini"
-    if [[ ! -f "$php_ini" ]]; then
-        log_error "Kh\u00f4ng t\u00ecm th\u1ea5y: $php_ini"
-        pause; return
-    fi
-
-    # Backup
-    cp "$php_ini" "${php_ini}.preload_bak_$(date +%s)"
-
-    # Set opcache.preload (thay ho\u1eb7c th\u00eam m\u1edbi)
-    if grep -q "^opcache.preload" "$php_ini"; then
-        sed -i "s|^opcache.preload.*|opcache.preload=${preload_script}|" "$php_ini"
-    else
-        echo "opcache.preload=${preload_script}" >> "$php_ini"
-    fi
-
-    # Set opcache.preload_user (www-data ho\u1eb7c nobody)
-    local fpm_user="www-data"
-    if [[ "$OS_FAMILY" == "rhel" ]]; then
-        fpm_user="nginx"
-    fi
-    if grep -q "^opcache.preload_user" "$php_ini"; then
-        sed -i "s|^opcache.preload_user.*|opcache.preload_user=${fpm_user}|" "$php_ini"
-    else
-        echo "opcache.preload_user=${fpm_user}" >> "$php_ini"
-    fi
-
-    # \u0110\u1ea3m b\u1ea3o OPcache \u0111\u01b0\u1ee3c b\u1eadt
-    if grep -q "^opcache.enable" "$php_ini"; then
-        sed -i "s|^opcache.enable.*|opcache.enable=1|" "$php_ini"
-    else
-        echo "opcache.enable=1" >> "$php_ini"
-    fi
-
-    # Restart PHP-FPM
-    if [[ "$OS_FAMILY" == "rhel" ]]; then
-        systemctl restart php-fpm
-    else
-        systemctl restart "php${php_ver}-fpm"
-    fi
-
-    log_info "\u2705 PHP Preload đ\u00e3 b\u1eadt cho ${domain}!"
-    echo -e "${YELLOW}Preload script: ${preload_script}${NC}"
-    echo -e "${YELLOW}PHP version:    ${php_ver}${NC}"
-    echo -e "${YELLOW}Preload user:   ${fpm_user}${NC}"
-    echo -e ""
-    echo -e "${CYAN}L\u01b0u \u00fd: Preload ch\u1ea1y khi PHP-FPM kh\u1eedi đ\u1ed9ng. Ki\u1ec3m tra status sau v\u00e0i gi\u00e2y.${NC}"
-    pause
-}
-
-disable_php_preload() {
-    local php_ver
-    php_ver=$(get_installed_php_version)
-    [[ -z "$php_ver" ]] && { log_error "Kh\u00f4ng t\u00ecm th\u1ea5y PHP!"; pause; return; }
-
-    local php_ini="/etc/php/${php_ver}/fpm/php.ini"
-
-    # X\u00f3a/comment out c\u00e2u l\u1ec7nh preload
-    if grep -q "^opcache.preload" "$php_ini"; then
-        sed -i 's|^opcache.preload|;opcache.preload|' "$php_ini"
-        sed -i 's|^opcache.preload_user|;opcache.preload_user|' "$php_ini"
-
-        if [[ "$OS_FAMILY" == "rhel" ]]; then
-            systemctl restart php-fpm
-        else
-            systemctl restart "php${php_ver}-fpm"
+_remove_legacy_php_preload() {
+    local ini php_ini ver changed
+    for php_ini in /etc/php/*/fpm/php.ini /etc/php.ini; do
+        [[ -f "$php_ini" ]] || continue
+        changed=0
+        ver=$(echo "$php_ini" | grep -oE '[0-9]+\.[0-9]+' | head -1)
+        ini="$(php_conf_d_dir "$ver")/99-vps-manager-preload.ini"
+        if [[ -f "$ini" ]]; then rm -f "$ini"; changed=1; fi
+        if grep -qE '^opcache\.preload(_user)?=' "$php_ini"; then
+            sed -i -E 's|^(opcache\.preload(_user)?=)|;\1|' "$php_ini"; changed=1
         fi
-        log_info "\u2705 PHP Preload đ\u00e3 đ\u01b0\u1ee3c t\u1eaft."
-    else
-        log_warn "PHP Preload ch\u01b0a đ\u01b0\u1ee3c c\u1ea5u h\u00ecnh."
-    fi
-    pause
+        if [[ "$changed" -eq 1 ]]; then
+            php_fpm_restart_safe "$ver" && log_info "Đã gỡ cấu hình PHP Preload cũ (PHP ${ver:-mặc định})."
+        fi
+    done
+    return 0
 }
 
-show_preload_status() {
-    local php_ver
-    php_ver=$(get_installed_php_version)
-    [[ -z "$php_ver" ]] && { log_error "Kh\u00f4ng t\u00ecm th\u1ea5y PHP!"; pause; return; }
+# ==============================================================================
+# 10. RAM Disk cho FastCGI Cache (tmpfs)
+# ==============================================================================
 
-    echo -e "${BLUE}==== Tr\u1ea1ng th\u00e1i PHP Preload ====${NC}"
-    echo -e "${YELLOW}PHP Version: ${php_ver}${NC}"
-
-    local php_ini="/etc/php/${php_ver}/fpm/php.ini"
-    local preload_script
-    preload_script=$(grep "^opcache.preload" "$php_ini" 2>/dev/null | cut -d= -f2 | tr -d ' ')
-
-    if [[ -n "$preload_script" ]]; then
-        echo -e "${GREEN}\u2713 Preload đ\u01b0\u1ee3c c\u1ea5u h\u00ecnh: ${preload_script}${NC}"
-    else
-        echo -e "${YELLOW}\u26a0 PHP Preload ch\u01b0a đ\u01b0\u1ee3c b\u1eadt.${NC}"
-        pause; return
-    fi
-
-    # Ki\u1ec3m tra status OPcache qua php -r
-    local preload_count
-    preload_count=$(php${php_ver} -r "
-        \$s = opcache_get_status(true);
-        if (\$s && isset(\$s['preload_statistics']['functions'])) {
-            echo count(\$s['preload_statistics']['functions']);
-        } else {
-            echo '0 hoac chua co du lieu';
-        }
-    " 2>/dev/null)
-
-    echo -e "${GREEN}File/function đ\u00e3 preload: ${preload_count}${NC}"
-    echo ""
-    echo -e "${CYAN}L\u01b0u \u00fd: K\u1ebft qu\u1ea3 tr\u00ean l\u00e0 t\u1eeb PHP CLI; FPM c\u00f3 th\u1ec3 c\u00f3 s\u1ed1 kh\u00e1c.${NC}"
-    pause
+# Đặt max_size của cache zone (MB) trong fastcgi_cache.conf - phải nhỏ hơn dung lượng tmpfs,
+# nếu không nginx sẽ ghi đầy tmpfs (ENOSPC) trước khi kịp dọn cache.
+_tmpfs_set_cache_max_size() {
+    local size=$1
+    local cache_conf="/etc/nginx/conf.d/fastcgi_cache.conf"
+    [[ -f "$cache_conf" ]] || return 0
+    sed -i -E "/^[[:space:]]*fastcgi_cache_path/ s/max_size=[0-9]+[kKmMgG]?/max_size=${size}/" "$cache_conf"
 }
 
-list_preload_sites() {
-    local preload_dir="/etc/php-preload"
-    echo -e "${YELLOW}C\u00e1c site đang d\u00f9ng PHP Preload:${NC}"
-    if [[ -d "$preload_dir" ]]; then
-        local count=0
-        for f in "$preload_dir"/*.php; do
-            [[ ! -f "$f" ]] && continue
-            echo -e "  \u2022 $(basename "$f" .php)"
-            count=$((count+1))
-        done
-        [[ $count -eq 0 ]] && echo -e "  ${YELLOW}Ch\u01b0a c\u00f3 site n\u00e0o.${NC}"
-    else
-        echo -e "  ${YELLOW}Ch\u01b0a c\u00f3 site n\u00e0o.${NC}"
+# Ghi lại /etc/fstab: bỏ dòng tmpfs cũ của cache, thêm dòng mới nếu có. Dùng file tạm, giữ backup.
+_tmpfs_update_fstab() {
+    local new_line=${1:-}
+    local tmp
+    tmp=$(mktemp) || return 1
+    cp -p /etc/fstab /etc/fstab.vpsmanager.bak
+    grep -v '/var/cache/nginx/fastcgi' /etc/fstab > "$tmp"
+    [[ -n "$new_line" ]] && echo "$new_line" >> "$tmp"
+    if [[ ! -s "$tmp" ]]; then
+        rm -f "$tmp"
+        return 1
     fi
-    pause
+    cat "$tmp" > /etc/fstab
+    rm -f "$tmp"
 }
 
 setup_tmpfs_fastcgi_cache() {
@@ -1901,65 +1361,110 @@ setup_tmpfs_fastcgi_cache() {
     echo -e "${GREEN}   🧠 Cấu hình RAM Disk cho FastCGI Cache (tmpfs)${NC}"
     echo -e "${BLUE}=================================================${NC}"
     echo -e "Công nghệ này đưa toàn bộ thư mục /var/cache/nginx/fastcgi lên RAM (tmpfs):"
-    echo -e "  • Lợi ích: Tốc độ đọc cache đạt hàng chục GB/s, không phụ thuộc ổ cứng."
-    echo -e "  • Hiệu quả: TTFB giảm từ ~80ms xuống chỉ còn ${GREEN}5ms – 15ms${NC}!"
-    echo -e "  • An toàn: Tự động ghi vào /etc/fstab để duy trì sau mỗi lần khởi động lại."
+    echo -e "  • Lợi ích: Đọc cache không phụ thuộc ổ cứng."
+    echo -e "  • Đánh đổi: Cache mất khi reboot và chiếm RAM thật của máy."
+    echo -e "  • Tự động ghi vào /etc/fstab (có nofail) để duy trì sau khi khởi động lại."
     echo -e "${BLUE}=================================================${NC}"
 
+    local cache_dir="/var/cache/nginx/fastcgi"
     local is_mounted=0
-    if mount | grep -q "/var/cache/nginx/fastcgi.*tmpfs"; then
+    if mountpoint -q "$cache_dir" 2>/dev/null && [[ "$(findmnt -n -o FSTYPE "$cache_dir" 2>/dev/null)" == "tmpfs" ]]; then
         is_mounted=1
         echo -e "Trạng thái hiện tại: ${GREEN}● ĐÃ BẬT RAM Disk (tmpfs)${NC}"
-        df -h /var/cache/nginx/fastcgi 2>/dev/null | tail -n 1 | awk '{print "  Dung lượng đã dùng: " $3 " / " $2 " (" $5 ")"}'
+        df -h "$cache_dir" 2>/dev/null | tail -n 1 | awk '{print "  Dung lượng đã dùng: " $3 " / " $2 " (" $5 ")"}'
     else
         echo -e "Trạng thái hiện tại: ${YELLOW}○ ĐANG DÙNG Ổ CỨNG VẬT LÝ (SSD/NVMe)${NC}"
     fi
 
     echo ""
-    echo -e "1. Bật RAM Disk FastCGI Cache (Khuyến nghị 256MB - 512MB)"
+    echo -e "1. Bật / đổi dung lượng RAM Disk FastCGI Cache (Khuyến nghị 256MB - 512MB)"
     echo -e "2. Tắt RAM Disk (Chuyển lại về lưu trên ổ SSD)"
     echo -e "0. Quay lại"
     read -p "Chọn [0-2]: " t_choice
 
+    local cache_user cache_uid cache_gid
+    cache_user=$(nginx_worker_user)
+    cache_uid=$(id -u "$cache_user" 2>/dev/null)
+    cache_gid=$(id -g "$cache_user" 2>/dev/null)
+
     case $t_choice in
         1)
-            local ram_mb
+            if [[ -z "$cache_uid" || -z "$cache_gid" ]]; then
+                log_error "Không xác định được user của nginx worker ($cache_user)."
+                pause; return
+            fi
+
+            local ram_mb def_size=256 user_size
             ram_mb=$(free -m | awk '/^Mem:/{print $2}')
-            local def_size=256
             [[ "$ram_mb" -ge 4000 ]] && def_size=512
             [[ "$ram_mb" -ge 8000 ]] && def_size=1024
-            
-            read -p "Nhập dung lượng RAM cấp cho Cache (MB) [Mặc định $def_size]: " user_size
+
+            read -p "Nhập dung lượng RAM cấp cho Cache (MB, chỉ nhập số) [Mặc định $def_size]: " user_size
             [[ -z "$user_size" ]] && user_size=$def_size
-
-            mkdir -p /var/cache/nginx/fastcgi
-            if [[ "$is_mounted" -eq 1 ]]; then
-                umount /var/cache/nginx/fastcgi 2>/dev/null || true
+            if ! valid_uint "$user_size"; then
+                log_error "Dung lượng không hợp lệ: '$user_size' (chỉ nhập số nguyên dương, đơn vị MB)."
+                pause; return
             fi
-            
-            log_info "Đang mount tmpfs ${user_size}M vào /var/cache/nginx/fastcgi..."
-            mount -t tmpfs -o size=${user_size}M,noatime,mode=0700,uid=www-data,gid=www-data tmpfs /var/cache/nginx/fastcgi
-            chown -R www-data:www-data /var/cache/nginx
+            if [[ "$user_size" -lt 32 ]] || [[ "$user_size" -gt $(( ram_mb / 2 )) ]]; then
+                log_error "Dung lượng phải từ 32MB đến $(( ram_mb / 2 ))MB (tối đa 1/2 RAM của máy)."
+                pause; return
+            fi
 
-            sed -i '\|/var/cache/nginx/fastcgi|d' /etc/fstab
-            echo "tmpfs /var/cache/nginx/fastcgi tmpfs defaults,noatime,mode=0700,uid=www-data,gid=www-data,size=${user_size}M 0 0" >> /etc/fstab
+            mkdir -p "$cache_dir"
+            local opts="size=${user_size}M,noatime,mode=0700,uid=${cache_uid},gid=${cache_gid}"
+            log_info "Đang mount tmpfs ${user_size}M vào $cache_dir..."
+            if [[ "$is_mounted" -eq 1 ]]; then
+                mount -o "remount,${opts}" "$cache_dir"
+            else
+                # Cache cũ trên đĩa bị che khuất sau khi mount -> xoá trước cho gọn
+                find "$cache_dir" -mindepth 1 -delete 2>/dev/null
+                mount -t tmpfs -o "$opts" tmpfs "$cache_dir"
+            fi
+            if [[ $? -ne 0 ]] || ! mountpoint -q "$cache_dir"; then
+                log_error "Mount tmpfs THẤT BẠI - không ghi gì vào /etc/fstab."
+                pause; return
+            fi
 
-            systemctl reload nginx 2>/dev/null || systemctl restart nginx 2>/dev/null
-            log_info "✅ Đã kích hoạt RAM Disk FastCGI Cache thành công!"
+            # nofail: nếu dòng này lỗi khi boot, máy vẫn khởi động bình thường (không rơi vào emergency mode)
+            if ! _tmpfs_update_fstab "tmpfs $cache_dir tmpfs defaults,nofail,${opts} 0 0"; then
+                log_error "Không cập nhật được /etc/fstab (RAM Disk đang chạy nhưng sẽ mất sau reboot)."
+            fi
+
+            # max_size của cache zone = 80% tmpfs
+            local cache_conf="/etc/nginx/conf.d/fastcgi_cache.conf" bak=""
+            [[ -f "$cache_conf" ]] && bak=$(backup_nginx_config "$cache_conf")
+            _tmpfs_set_cache_max_size "$(( user_size * 80 / 100 ))m"
+            if nginx_test_reload; then
+                [[ -n "$bak" ]] && rm -f "$bak"
+                log_info "✅ Đã kích hoạt RAM Disk FastCGI Cache (${user_size}MB, cache tối đa $(( user_size * 80 / 100 ))MB)."
+            else
+                [[ -n "$bak" ]] && mv -f "$bak" "$cache_conf"
+                log_error "RAM Disk đã mount nhưng Nginx chưa reload được - xem lỗi ở trên."
+            fi
             pause
             ;;
         2)
             if [[ "$is_mounted" -eq 0 ]]; then
                 echo -e "${YELLOW}RAM Disk chưa được bật.${NC}"
+                # Vẫn dọn dòng fstab cũ nếu còn sót
+                grep -q '/var/cache/nginx/fastcgi' /etc/fstab && _tmpfs_update_fstab ""
                 pause; return
             fi
             log_info "Đang gỡ bỏ RAM Disk..."
-            umount /var/cache/nginx/fastcgi 2>/dev/null || true
-            sed -i '\|/var/cache/nginx/fastcgi|d' /etc/fstab
-            mkdir -p /var/cache/nginx/fastcgi
-            chown -R www-data:www-data /var/cache/nginx
-            systemctl reload nginx 2>/dev/null || true
-            log_info "Đã hoàn nguyên về lưu trữ trên ổ đĩa SSD."
+            if ! umount "$cache_dir" 2>/dev/null && ! umount -l "$cache_dir" 2>/dev/null; then
+                log_error "Không umount được $cache_dir - chưa thay đổi /etc/fstab."
+                pause; return
+            fi
+            _tmpfs_update_fstab "" || log_warn "Không cập nhật được /etc/fstab - hãy xoá dòng tmpfs của $cache_dir thủ công."
+            mkdir -p "$cache_dir"
+            chown "$cache_user" "$cache_dir" 2>/dev/null
+            chmod 700 "$cache_dir"
+            _tmpfs_set_cache_max_size "1g"
+            if nginx_test_reload; then
+                log_info "Đã hoàn nguyên về lưu trữ trên ổ đĩa SSD."
+            else
+                log_error "Đã gỡ RAM Disk nhưng Nginx chưa reload được - xem lỗi ở trên."
+            fi
             pause
             ;;
         *) return ;;
@@ -2022,13 +1527,12 @@ add_action('wp_footer', function() {
     <?php
 }, 999);
 
-// 2. Vô hiệu hóa WooCommerce Cart Fragments trên trang không phải Shop/Cart
+// 2. Vô hiệu hóa WooCommerce Cart Fragments trên trang KHÔNG thuộc cửa hàng
+//    (giữ nguyên ở Shop / danh mục / trang sản phẩm / Cart / Checkout / Tài khoản để mini-cart cập nhật đúng)
 add_action('wp_enqueue_scripts', function() {
-    if (function_exists('is_woocommerce')) {
-        if (!is_cart() && !is_checkout()) {
-            wp_dequeue_script('wc-cart-fragments');
-        }
-    }
+    if (!function_exists('is_woocommerce')) return;
+    if (is_woocommerce() || is_cart() || is_checkout() || is_account_page()) return;
+    wp_dequeue_script('wc-cart-fragments');
 }, 100);
 
 // 3. DNS Prefetch & Preconnect tự động
@@ -2038,7 +1542,9 @@ add_action('wp_head', function() {
     echo '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>' . "\n";
 }, 1);
 PHPBOOSTER
-            chown -R www-data:www-data "$mu_dir"
+            local booster_owner
+            booster_owner=$(site_owner "$site_root")
+            chown "$booster_owner:$booster_owner" "$mu_dir" "$booster_file" 2>/dev/null || true
             log_info "✅ Đã cài đặt VPS Speed Booster cho $domain!"
             pause
             ;;

@@ -45,7 +45,7 @@ _nginx_main_menu() {
     echo -e " 4.  🚀 Tối ưu WordPress Performance (FastCGI Cache, OPcache, TBT)"
     echo -e " 5.  🐘 Quản lý Phiên bản PHP (Cài đặt, Gỡ bỏ, php.ini Limits)"
     echo -e " 6.  🗃️  Quản lý Database (MariaDB, User, phpMyAdmin, Tối ưu DB)"
-    echo -e " 7.  ⚡ Quản lý Cache (Valkey, Redis, KeyDB, Memcached, FastCGI)"
+    echo -e " 7.  ⚡ Quản lý Cache (Valkey, Redis, OPcache, FastCGI)"
     echo -e " 8.  🔒 Quản lý SSL (Let's Encrypt, Auto-Renew, ZeroSSL, Cloudflare)"
     echo -e " 9.  💾 Sao lưu & Khôi phục (Backup Local/GDrive, Auto Backup Cron)"
     echo -e " 10. 🛡️  Bảo mật & Tường lửa (UFW/Firewalld, Fail2ban, WAF 7G/8G, SSH)"
@@ -56,9 +56,10 @@ _nginx_main_menu() {
     echo -e " 15. 🏥 Chẩn đoán Hệ thống (Health Check, Port đang mở, Hạn SSL)"
     echo -e " 16. 🛠️  Công cụ Bổ trợ & AppAdmin (Tối ưu ảnh WebP, HTTP Auth)"
     echo -e " 17. 🔄 Cập nhật VPS Manager (Đồng bộ từ GitHub)"
+    echo -e " 18. 🛟 Ổn định & Cảnh báo (Tự phục hồi dịch vụ, Slow log, Telegram, Auto-update)"
     echo -e " 0.  🚪 Thoát"
     echo -e "${BLUE}=================================================${NC}"
-    read -p "Nhập lựa chọn [0-17]: " choice
+    read -p "Nhập lựa chọn [0-18]: " choice
 
     case $choice in
         1)  _nginx_sub_menu ;;
@@ -78,6 +79,7 @@ _nginx_main_menu() {
         15) source "$ROOT_DIR/modules/diagnose.sh";              diagnose_system       ;;
         16) source "$ROOT_DIR/modules/appadmin.sh";              appadmin_menu         ;;
         17) source "$ROOT_DIR/modules/update.sh";                do_update             ;;
+        18) reliability_menu ;;
         0)  echo -e "${GREEN}Exiting... Goodbye!${NC}"; exit 0 ;;
         *)  echo -e "${RED}Lựa chọn không hợp lệ!${NC}"; pause ;;
     esac
@@ -95,7 +97,13 @@ main_menu() {
 
     # Lấy IP của VPS
     local vps_ip
-    vps_ip=$(curl -s -m 3 ifconfig.me 2>/dev/null || curl -s -m 3 ipinfo.io/ip 2>/dev/null || hostname -I | awk '{print $1}')
+    # IP lấy từ chính máy trước (không phụ thuộc mạng ngoài, menu mở tức thì); chỉ hỏi dịch vụ ngoài khi là IP nội bộ
+    vps_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+    if [[ -z "$vps_ip" || "$vps_ip" =~ ^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.) ]]; then
+        local pub_ip
+        pub_ip=$(curl -4 -s -m 3 ifconfig.me 2>/dev/null)
+        [[ "$pub_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] && vps_ip="$pub_ip"
+    fi
     [[ -z "$vps_ip" ]] && vps_ip="Unknown"
 
     while true; do
