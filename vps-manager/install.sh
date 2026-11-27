@@ -17,7 +17,12 @@ NC='\033[0m' # No Color
 
 # Check for root
 if [[ "$EUID" -ne 0 ]]; then
-  echo -e "${RED}Please run as root.${NC}"
+  # Gõ `vps` bằng user thường (vd: ubuntu): tự chạy lại qua sudo thay vì chỉ báo lỗi
+  if command -v sudo >/dev/null 2>&1 && [[ -f "$0" ]]; then
+    echo -e "${YELLOW}VPS Manager cần quyền root - đang chạy lại bằng sudo...${NC}"
+    exec sudo -- "$(readlink -f "$0")" "$@"
+  fi
+  echo -e "${RED}Cần quyền root. Hãy chạy: sudo vps${NC}"
   exit 1
 fi
 
