@@ -54,7 +54,9 @@ _zram_detect_os() {
 
 _zram_detect_state() {
     _zram_detect_os
-    if [[ -f "$ZRAM_CONFIG" ]] || swapon --show | grep -q zram 2>/dev/null; then
+    # Chỉ coi là BẬT khi kernel thực sự đang swap lên zram. File cấu hình còn sót lại sau một lần
+    # cài thất bại không có nghĩa là ZRAM đang chạy.
+    if grep -q '^/dev/zram' /proc/swaps 2>/dev/null; then
         ZRAM_STATE="ON"
     else
         ZRAM_STATE="OFF"
@@ -176,6 +178,19 @@ zram_install() {
             log_error "Không thể cài zram-tools! Kiểm tra kết nối mạng."
             pause; return 1
         fi
+        # Kernel "cloud/generic" của Ubuntu/Debian tách module zram sang gói linux-modules-extra.
+        # Thiếu module thì thử cài đúng gói của kernel đang chạy trước khi bỏ cuộc.
+        if ! modinfo zram &>/dev/null; then
+            log_info "  Kernel $(uname -r) chưa có module zram - đang cài linux-modules-extra..."
+            DEBIAN_FRONTEND=noninteractive apt-get install -y "linux-modules-extra-$(uname -r)" &>/dev/null || true
+            if ! modinfo zram &>/dev/null; then
+                log_warn "Kernel này không có module zram (không cài được linux-modules-extra-$(uname -r))."
+                log_warn "Bỏ qua ZRAM, giữ nguyên swap trên ổ đĩa. Có thể thử lại sau khi cập nhật kernel và reboot."
+                DEBIAN_FRONTEND=noninteractive apt-get purge -y zram-tools &>/dev/null || true
+                [[ "$mode" != "auto" ]] && pause
+                return 1
+            fi
+        fi
     else
         dnf install -y zram-generator &>/dev/null
         if [[ $? -ne 0 ]]; then
@@ -188,6 +203,8 @@ zram_install() {
         modprobe zram 2>/dev/null || true
     fi
     log_info "  ✓ Package đã cài"
+    # Chọn lại thuật toán sau khi module zram đã sẵn sàng (trước bước cài, kernel có thể chưa có module)
+    algo="$(_zram_best_algo)"
 
     # ── Bước 2: Ghi config ──
     if [[ "$ZRAM_OS" == "debian" ]]; then
@@ -236,7 +253,9 @@ EOF
     if [[ $rc -ne 0 ]] || ! grep -q '^/dev/zram' /proc/swaps 2>/dev/null; then
         log_error "ZRAM KHÔNG khởi động được (kernel có thể thiếu module zram). Kiểm tra: journalctl -u ${ZRAM_SVC}"
         log_warn "Giữ nguyên swap trên ổ đĩa hiện có, hoàn tác cấu hình ZRAM."
-        rm -f /etc/sysctl.d/99-vps-manager-zram.conf
+        rm -f /etc/sysctl.d/99-vps-manager-zram.conf "$ZRAM_CONFIG"
+        systemctl disable --now "$ZRAM_SVC" &>/dev/null || true
+        systemctl reset-failed "$ZRAM_SVC" &>/dev/null || true
         sysctl -w vm.swappiness=10 &>/dev/null || true
         [[ "$mode" != "auto" ]] && pause
         return 1
@@ -268,6 +287,7 @@ EOF
     echo -e "${GREEN}=================================================${NC}"
     zram_info
     [[ "$mode" != "auto" ]] && pause
+    return 0
 }
 
 # ────────────────────────────────────────────────────────────

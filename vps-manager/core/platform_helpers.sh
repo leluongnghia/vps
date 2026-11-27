@@ -65,6 +65,9 @@ php_fpm_restart_safe() {
         "$bin" -t 2>&1 | tail -5
         return 1
     fi
+    # Xoá trạng thái "start-limit-hit" nếu có: nhiều lần restart liên tiếp (do chính công cụ thực hiện)
+    # không được phép khiến systemd từ chối khởi động PHP-FPM.
+    systemctl reset-failed "$svc" 2>/dev/null
     if ! systemctl restart "$svc"; then
         log_error "Không restart được $svc. Kiểm tra: journalctl -u $svc -n 30"
         return 1

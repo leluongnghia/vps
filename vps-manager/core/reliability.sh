@@ -118,10 +118,9 @@ setup_service_resilience() {
         mkdir -p "$(dirname "$dropin")"
         {
             echo "# Managed by VPS-Manager: tự khởi động lại khi dịch vụ chết bất thường"
-            echo "[Unit]"
-            echo "StartLimitIntervalSec=300"
-            echo "StartLimitBurst=5"
-            echo ""
+            # KHÔNG đặt StartLimitIntervalSec/StartLimitBurst chặt hơn mặc định của systemd (5 lần/10 giây):
+            # giới hạn đó tính cả các lần công cụ chủ động restart (thêm site, đổi cấu hình...), đặt 5 lần/5 phút
+            # sẽ khiến systemd từ chối khởi động dịch vụ sau vài thao tác liên tiếp.
             echo "[Service]"
             echo "Restart=on-failure"
             echo "RestartSec=5s"
@@ -291,6 +290,11 @@ ${slow_file} {
     su ${owner:-mysql mysql}
 }
 EOF
+        # Debian/Ubuntu: file logrotate của gói mariadb đã bao /var/log/mysql/*.log -> khai báo lần nữa
+        # là "duplicate log entry". Khi đó gỡ file của mình, để gói mariadb xoay vòng log này.
+        if logrotate -d /etc/logrotate.conf 2>&1 | grep -q "vps-manager-dbslow.*duplicate log entry"; then
+            rm -f /etc/logrotate.d/vps-manager-dbslow
+        fi
     fi
     log_info "✓ Slow log PHP-FPM: /var/log/vps-php-slow-<tên pool>.log (request > 5 giây)"
     return 0
@@ -532,13 +536,16 @@ EOF
 
     # ── Khoá bí mật cho việc làm mới cache khi sửa bài ──
     # Request mang header X-VPSM-Refresh đúng khoá sẽ bỏ qua cache và GHI ĐÈ bản cache của URL đó.
-    if [[ ! -s "$VPSM_REFRESH_KEY_FILE" ]]; then
+    # Khoá dài ĐÚNG 32 ký tự hex (128 bit): khoá dài hơn vượt map_hash_bucket_size mặc định (64) của nginx
+    # và làm nginx -t lỗi "could not build map_hash".
+    local key=""
+    [[ -s "$VPSM_REFRESH_KEY_FILE" ]] && key=$(tr -d '[:space:]' < "$VPSM_REFRESH_KEY_FILE")
+    if ! [[ "$key" =~ ^[0-9a-f]{32}$ ]]; then
         mkdir -p "$VPSM_ETC"
-        ( umask 077; openssl rand -hex 24 > "$VPSM_REFRESH_KEY_FILE" )
+        ( umask 077; openssl rand -hex 16 > "$VPSM_REFRESH_KEY_FILE" )
+        key=$(tr -d '[:space:]' < "$VPSM_REFRESH_KEY_FILE")
     fi
-    local key
-    key=$(tr -d '[:space:]' < "$VPSM_REFRESH_KEY_FILE")
-    if [[ "$key" =~ ^[0-9a-f]{32,}$ ]] && ! grep -qs "\"$key\"" "$f_refresh"; then
+    if [[ "$key" =~ ^[0-9a-f]{32}$ ]] && ! grep -qs "\"$key\"" "$f_refresh"; then
         [[ -f "$f_refresh" ]] || created+=("$f_refresh")
         cat > "$f_refresh" <<EOF
 # Managed by VPS-Manager: làm mới FastCGI cache theo yêu cầu (xem mu-plugin vps-cache-refresh.php)
@@ -613,7 +620,7 @@ cache_refresh_install_plugin() {
     [[ -s "$VPSM_REFRESH_KEY_FILE" ]] || return 1
     local key owner dir file
     key=$(tr -d '[:space:]' < "$VPSM_REFRESH_KEY_FILE")
-    [[ "$key" =~ ^[0-9a-f]{32,}$ ]] || return 1
+    [[ "$key" =~ ^[0-9a-f]{32}$ ]] || return 1
     owner=$(site_owner "$root")
     dir="$root/wp-content/mu-plugins"
     file="$dir/vps-cache-refresh.php"

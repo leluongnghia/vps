@@ -358,7 +358,9 @@ _all_vhost_domains() {
     for conf in /etc/nginx/sites-available/*; do
         [[ -f "$conf" ]] || continue
         d=$(basename "$conf")
-        [[ "$d" == "default" || "$d" == "html" || "$d" == *.bak* ]] && continue
+        # 000-* là vhost nội bộ của công cụ (phpMyAdmin): WAF 7G/8G chặn các tham số chứa câu SQL
+        # nên áp vào đó sẽ làm phpMyAdmin không dùng được.
+        [[ "$d" == "default" || "$d" == "html" || "$d" == *.bak* || "$d" == 000-* ]] && continue
         echo "$d"
     done
 }

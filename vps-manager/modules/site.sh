@@ -1543,9 +1543,14 @@ clone_site() {
         echo -e "  ${YELLOW}⚠ Không có WP-CLI - bỏ qua Search-Replace trong nội dung.${NC}"
     fi
 
-    # Luôn dùng SQL trực tiếp để đảm bảo siteurl/home đúng 100% (chạy thẳng trên $new_db_name)
-    if mysql "$new_db_name" <<< "UPDATE \`${src_table_prefix}options\` SET option_value='https://${dest_domain}' WHERE option_name IN ('siteurl','home');" 2>/dev/null; then
-        echo -e "  ✅ siteurl/home đã cập nhật qua SQL (prefix: ${src_table_prefix})"
+    # Luôn dùng SQL trực tiếp để đảm bảo siteurl/home đúng 100% (chạy thẳng trên $new_db_name).
+    # Site mới CHƯA có SSL thì phải là http://, nếu ghi https:// WordPress sẽ chuyển hướng tới một
+    # cổng 443 chưa tồn tại và site không vào được cho tới khi cài SSL.
+    local dest_scheme="http"
+    grep -qE 'listen[[:space:]].*443' "/etc/nginx/sites-available/$dest_domain" 2>/dev/null && dest_scheme="https"
+    if mysql "$new_db_name" <<< "UPDATE \`${src_table_prefix}options\` SET option_value='${dest_scheme}://${dest_domain}' WHERE option_name IN ('siteurl','home');" 2>/dev/null; then
+        echo -e "  ✅ siteurl/home = ${dest_scheme}://${dest_domain} (prefix: ${src_table_prefix})"
+        [[ "$dest_scheme" == "http" ]] && echo -e "  ${YELLOW}Sau khi cài SSL, đổi sang https tại WP Admin → Settings → General.${NC}"
     else
         echo -e "  ${YELLOW}⚠ Không cập nhật được siteurl/home qua SQL.${NC}"
     fi

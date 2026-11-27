@@ -469,6 +469,10 @@ SOCKCONF
     # ── Systemd override: fix socket permissions sau mỗi lần start (kể cả reboot) ──
     # RuntimeDirectory bị systemd reset về default ownership mỗi lần start
     # → Dùng ExecStartPost để chown lại SAU khi service tạo socket
+    # KHÔNG dùng ExecStartPost=/bin/bash để chown socket: unit valkey/redis của Debian/Ubuntu chạy trong
+    # sandbox (NoExecPaths) nên không exec được bash -> service lỗi 203/EXEC và không bao giờ khởi động.
+    # Quyền truy cập được bảo đảm bằng: unixsocketperm 660 + www-data thuộc group của cache service.
+    # RuntimeDirectory chỉ để chắc chắn /run/<type> tồn tại sau reboot (đường dẫn socket nằm trong đó).
     for s_name in "${service_candidates[@]}"; do
         local override_dir="/etc/systemd/system/${s_name}.service.d"
         mkdir -p "$override_dir"
@@ -476,8 +480,6 @@ SOCKCONF
 [Service]
 RuntimeDirectory=${cache_type}
 RuntimeDirectoryMode=0755
-# Fix socket permissions sau khi start để www-data (PHP-FPM) có thể kết nối
-ExecStartPost=/bin/bash -c 'sleep 1; chown ${cache_type}:www-data ${socket_path} 2>/dev/null; chmod 660 ${socket_path} 2>/dev/null; chown ${cache_type}:www-data ${socket_dir} 2>/dev/null; chmod 750 ${socket_dir} 2>/dev/null; true'
 SYSOVERRIDE
     done
 
@@ -494,6 +496,7 @@ SYSOVERRIDE
 
     systemctl daemon-reload
     systemctl enable "${service_name}" 2>/dev/null || true
+    systemctl reset-failed "${service_name}" 2>/dev/null || true   # xoá trạng thái "start-limit-hit" của lần lỗi trước
     systemctl restart "${service_name}" 2>/dev/null || true
 
     # Đợi socket khởi tạo (tối đa 5s)

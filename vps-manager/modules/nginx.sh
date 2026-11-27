@@ -216,11 +216,13 @@ fix_nginx_config() {
                     base=$(basename "$f")
                     # Các vhost đều tham chiếu keys_zone WORDPRESS -> gỡ 2 file này là sập toàn bộ site
                     case "$base" in
-                        fastcgi_cache.conf|fastcgi-buffer.conf) continue ;;
+                        # File do VPS Manager quản lý và được các vhost tham chiếu (cache zone, biến làm mới cache,
+                        # vùng limit_req, map chặn quốc gia): gỡ chúng đi sẽ làm MỌI vhost lỗi theo.
+                        fastcgi_cache.conf|fastcgi-buffer.conf|vps-manager-*.conf|ddos_limit.conf|geoip_block.conf) continue ;;
                     esac
                     mv "$f" "$bk_dir/" && moved+=("$base")
                 done
-                log_info "Đã chuyển ${#moved[@]} file conf.d sang $bk_dir (giữ lại fastcgi_cache.conf, fastcgi-buffer.conf)."
+                log_info "Đã chuyển ${#moved[@]} file conf.d sang $bk_dir (giữ lại các file do VPS Manager quản lý)."
 
                 if nginx -t; then
                     systemctl reload nginx 2>/dev/null || systemctl restart nginx
