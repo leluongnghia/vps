@@ -858,6 +858,10 @@ opcache.max_wasted_percentage=5
 ; Code mới (cập nhật plugin/theme) có hiệu lực chậm nhất sau 60 giây, không cần restart PHP.
 opcache.validate_timestamps=1
 opcache.revalidate_freq=60
+; Chỉ script nằm dưới đường dẫn này mới được gọi opcache_reset()/opcache_invalidate().
+; OPcache dùng CHUNG cho mọi site của một phiên bản PHP: thiếu dòng này, chỉ cần một plugin gọi
+; opcache_reset() ở mỗi request là cache của TOÀN BỘ server bị xoá liên tục (mỗi trang chậm 1-2 giây).
+opcache.restrict_api=/usr/local/vps-manager
 opcache.save_comments=1
 opcache.jit=${jit_setting}
 opcache.jit_buffer_size=${jit_buffer}

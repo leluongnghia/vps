@@ -792,13 +792,16 @@ opcache_relax_revalidate() {
     local ini ver
     for ini in /etc/php/*/fpm/conf.d/99-vps-manager-opcache.ini /etc/php.d/99-vps-manager-opcache.ini; do
         [[ -f "$ini" ]] || continue
-        grep -qE '^opcache\.revalidate_freq=2$' "$ini" || continue
+        grep -qE '^opcache\.revalidate_freq=2$' "$ini" || ! grep -qE '^opcache\.restrict_api=' "$ini" || continue
         cp -p "$ini" "${ini}.bak_vpsm"
         sed -i -E 's/^opcache\.revalidate_freq=2$/opcache.revalidate_freq=60/' "$ini"
+        # Chặn plugin/theme của site gọi opcache_reset(): OPcache dùng chung cho mọi site,
+        # một plugin reset ở mỗi request sẽ làm cả server mất cache liên tục.
+        grep -qE '^opcache\.restrict_api=' "$ini" || echo 'opcache.restrict_api=/usr/local/vps-manager' >> "$ini"
         ver=$(echo "$ini" | grep -oE '[0-9]+\.[0-9]+' | head -1)
         if php_fpm_restart_safe "$ver"; then
             rm -f "${ini}.bak_vpsm"
-            log_info "✓ OPcache PHP ${ver:-mặc định}: revalidate_freq 2 → 60 giây."
+            log_info "✓ OPcache PHP ${ver:-mặc định}: kiểm tra file mỗi 60 giây, chặn site gọi opcache_reset()."
         else
             mv -f "${ini}.bak_vpsm" "$ini"
             systemctl restart "$(php_fpm_service "$ver")" 2>/dev/null
