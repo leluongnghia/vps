@@ -56,17 +56,24 @@ install_additional_php() {
     fi
 
     if [[ "$OS_FAMILY" == "rhel" ]]; then
-        local rhel_pkg="php${ver//./}-php-fpm"
-        if is_installed "$rhel_pkg"; then
+        # RHEL/Oracle Linux dùng Remi module stream: mỗi server chỉ chạy MỘT phiên bản PHP
+        # (cùng cách với bộ cài LEMP trong modules/lemp.sh).
+        local cur_ver
+        cur_ver=$(php_default_version)
+        if [[ "$cur_ver" == "$ver" ]] && is_installed php-fpm; then
             echo -e "${YELLOW}PHP $ver đã được cài đặt.${NC}"
             pause
             return
         fi
-        log_info "Đang cài đặt PHP $ver và các module phổ biến qua Remi..."
-        pkg_install "php${ver//./}-php-fpm" "php${ver//./}-php-mysqlnd" "php${ver//./}-php-common" "php${ver//./}-php-cli" "php${ver//./}-php-gd" "php${ver//./}-php-mbstring" "php${ver//./}-php-xml" "php${ver//./}-php-pecl-zip"
-        
-        systemctl enable "php${ver//./}-php-fpm"
-        systemctl start "php${ver//./}-php-fpm"
+        source "$(dirname "${BASH_SOURCE[0]}")/lemp.sh"
+        if ! install_php "$ver"; then
+            log_error "Cài đặt PHP $ver không thành công."
+            pause
+            return 1
+        fi
+        log_info "Cài đặt PHP $ver thành công."
+        pause
+        return
     else
         if is_installed "php$ver-fpm"; then
             echo -e "${YELLOW}PHP $ver đã được cài đặt.${NC}"
@@ -87,6 +94,12 @@ install_additional_php() {
         systemctl start php$ver-fpm 2>/dev/null || true
     fi
 
+    if [[ ! -f "$(php_ini_path "$ver")" ]]; then
+        log_error "Cài đặt PHP $ver THẤT BẠI (không thấy $(php_ini_path "$ver")). Kiểm tra kho gói PHP."
+        pause
+        return 1
+    fi
+
     # Áp cấu hình chuẩn upload & timeout cho phiên bản mới cài
     _apply_default_php_limits "$ver"
 
@@ -96,8 +109,8 @@ install_additional_php() {
 
 _apply_default_php_limits() {
     local ver="$1"
-    local ini_path="/etc/php/$ver/fpm/php.ini"
-    [[ "$OS_FAMILY" == "rhel" ]] && ini_path="/etc/opt/remi/php${ver//./}/php.ini"
+    local ini_path
+    ini_path=$(php_ini_path "$ver")
 
     if [[ -f "$ini_path" ]]; then
         sed -i -E "s/^[; ]*upload_max_filesize.*/upload_max_filesize = 128M/" "$ini_path"
@@ -105,14 +118,14 @@ _apply_default_php_limits() {
         sed -i -E "s/^[; ]*memory_limit.*/memory_limit = 256M/" "$ini_path"
         sed -i -E "s/^[; ]*max_execution_time.*/max_execution_time = 300/" "$ini_path"
         sed -i -E "s/^[; ]*max_input_vars.*/max_input_vars = 3000/" "$ini_path"
-        systemctl restart php$ver-fpm 2>/dev/null || systemctl restart php${ver//./}-php-fpm 2>/dev/null || true
+        php_fpm_restart_safe "$ver"
     fi
 }
 
 list_php_versions() {
     echo -e "${GREEN}Các phiên bản PHP đã cài đặt trên VPS:${NC}"
     if [[ "$OS_FAMILY" == "rhel" ]]; then
-        rpm -qa | grep -E "^php[0-9]+-php-fpm" | awk '{print $1}'
+        rpm -q php-fpm 2>/dev/null
     else
         dpkg --get-selections | grep -E "php[0-9]\.[0-9]-fpm" | awk '{print $1}'
     fi
@@ -137,13 +150,9 @@ tune_php_ini() {
         done
     fi
 
-    if [[ ${#available_vers[@]} -eq 0 ]]; then
-        # Check RHEL
-        for v in 74 80 81 82 83 84; do
-            if [[ -f "/etc/opt/remi/php$v/php.ini" ]]; then
-                available_vers+=("${v:0:1}.${v:1:1}")
-            fi
-        done
+    if [[ ${#available_vers[@]} -eq 0 ]] && [[ "$OS_FAMILY" == "rhel" ]] && [[ -f /etc/php.ini ]]; then
+        # RHEL/Oracle: 1 phiên bản PHP duy nhất, php.ini tại /etc/php.ini
+        available_vers+=("$(php_default_version)")
     fi
 
     if [[ ${#available_vers[@]} -eq 0 ]]; then
@@ -173,8 +182,8 @@ tune_php_ini() {
     fi
 
     # Display current settings from first selected version
-    local sample_ini="/etc/php/${target_vers[0]}/fpm/php.ini"
-    [[ "$OS_FAMILY" == "rhel" ]] && sample_ini="/etc/opt/remi/php${target_vers[0]//./}/php.ini"
+    local sample_ini
+    sample_ini=$(php_ini_path "${target_vers[0]}")
 
     echo ""
     echo -e "${CYAN}Thông số hiện tại (PHP ${target_vers[0]}):${NC}"
@@ -187,27 +196,46 @@ tune_php_ini() {
     read -p "max_execution_time (giây, ví dụ 300, 600) [Enter giữ nguyên]: " max_time
     read -p "max_input_vars (ví dụ 3000, 5000) [Enter giữ nguyên]: " max_vars
 
-    for v in "${target_vers[@]}"; do
-        local cur_ini="/etc/php/$v/fpm/php.ini"
-        local cur_svc="php$v-fpm"
-        if [[ "$OS_FAMILY" == "rhel" ]]; then
-            cur_ini="/etc/opt/remi/php${v//./}/php.ini"
-            cur_svc="php${v//./}-php-fpm"
+    # Kiểm tra định dạng trước khi ghi vào php.ini (giá trị sai sẽ làm PHP-FPM không khởi động)
+    local val
+    for val in "$up_size" "$post_size" "$mem_limit"; do
+        if [[ -n "$val" ]] && ! [[ "$val" =~ ^[0-9]+[KMG]?$ ]]; then
+            echo -e "${RED}Giá trị dung lượng không hợp lệ: '$val' (ví dụ đúng: 128M, 1G).${NC}"; pause; return 1
         fi
+    done
+    for val in "$max_time" "$max_vars"; do
+        if [[ -n "$val" ]] && ! [[ "$val" =~ ^[0-9]+$ ]]; then
+            echo -e "${RED}Giá trị phải là số nguyên: '$val'.${NC}"; pause; return 1
+        fi
+    done
+
+    local failed=0
+    for v in "${target_vers[@]}"; do
+        local cur_ini cur_svc
+        cur_ini=$(php_ini_path "$v")
+        cur_svc=$(php_fpm_service "$v")
 
         if [[ -f "$cur_ini" ]]; then
+            cp -p "$cur_ini" "${cur_ini}.bak_vpsm"
             [[ -n "$up_size" ]] && sed -i -E "s/^[; ]*upload_max_filesize.*/upload_max_filesize = $up_size/" "$cur_ini"
             [[ -n "$post_size" ]] && sed -i -E "s/^[; ]*post_max_size.*/post_max_size = $post_size/" "$cur_ini"
             [[ -n "$mem_limit" ]] && sed -i -E "s/^[; ]*memory_limit.*/memory_limit = $mem_limit/" "$cur_ini"
             [[ -n "$max_time" ]] && sed -i -E "s/^[; ]*max_execution_time.*/max_execution_time = $max_time/" "$cur_ini"
             [[ -n "$max_vars" ]] && sed -i -E "s/^[; ]*max_input_vars.*/max_input_vars = $max_vars/" "$cur_ini"
-            
-            systemctl restart "$cur_svc" 2>/dev/null || systemctl restart php-fpm 2>/dev/null || true
-            log_info "Đã cập nhật cấu hình và restart service: $cur_svc"
+
+            if php_fpm_restart_safe "$v"; then
+                rm -f "${cur_ini}.bak_vpsm"
+                log_info "Đã cập nhật cấu hình và restart service: $cur_svc"
+            else
+                mv -f "${cur_ini}.bak_vpsm" "$cur_ini"
+                systemctl restart "$cur_svc" 2>/dev/null
+                log_error "PHP $v: restart thất bại - đã khôi phục php.ini cũ."
+                failed=1
+            fi
         fi
     done
 
-    log_info "Hoàn tất tinh chỉnh php.ini!"
+    [[ $failed -eq 0 ]] && log_info "Hoàn tất tinh chỉnh php.ini!"
     pause
 }
 
@@ -216,6 +244,12 @@ uninstall_php_version() {
     echo -e "${BLUE}=================================================${NC}"
     echo -e "${RED}       🗑️  Gỡ cài đặt Phiên bản PHP${NC}"
     echo -e "${BLUE}=================================================${NC}"
+
+    if [[ "$OS_FAMILY" == "rhel" ]]; then
+        echo -e "${YELLOW}RHEL/Oracle Linux chỉ chạy một phiên bản PHP (module stream) - đây là PHP của mọi website, không gỡ qua menu này.${NC}"
+        echo -e "Đổi phiên bản: dnf module reset php -y && dnf module enable php:remi-<ver> -y && dnf distro-sync 'php*'"
+        pause; return
+    fi
 
     local installed_vers=()
     if [[ -d /etc/php ]]; then
@@ -267,13 +301,13 @@ uninstall_php_version() {
     systemctl disable php$target_ver-fpm 2>/dev/null || true
 
     log_info "Đang gỡ bỏ các gói liên quan đến PHP $target_ver..."
-    if [[ "$OS_FAMILY" == "rhel" ]]; then
-        dnf remove -y "php${target_ver//./}*" 2>/dev/null || true
-    else
-        DEBIAN_FRONTEND=noninteractive apt-get purge -y "php${target_ver}*" 2>/dev/null || true
-        apt-get autoremove -y 2>/dev/null || true
-        rm -rf "/etc/php/$target_ver" 2>/dev/null || true
+    if ! [[ "$target_ver" =~ ^[0-9]+\.[0-9]+$ ]]; then
+        log_error "Tên phiên bản không hợp lệ: '$target_ver' - dừng để tránh xoá nhầm."
+        pause; return 1
     fi
+    DEBIAN_FRONTEND=noninteractive apt-get purge -y "php${target_ver}-*" "php${target_ver}" 2>/dev/null || true
+    apt-get autoremove -y 2>/dev/null || true
+    rm -rf "/etc/php/$target_ver" 2>/dev/null || true
 
     log_info "Đã gỡ bỏ hoàn toàn PHP $target_ver khỏi hệ thống."
     pause

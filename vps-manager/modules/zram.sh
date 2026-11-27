@@ -54,7 +54,9 @@ _zram_detect_os() {
 
 _zram_detect_state() {
     _zram_detect_os
-    if [[ -f "$ZRAM_CONFIG" ]] || swapon --show | grep -q zram 2>/dev/null; then
+    # Chỉ coi là BẬT khi kernel thực sự đang swap lên zram. File cấu hình còn sót lại sau một lần
+    # cài thất bại không có nghĩa là ZRAM đang chạy.
+    if grep -q '^/dev/zram' /proc/swaps 2>/dev/null; then
         ZRAM_STATE="ON"
     else
         ZRAM_STATE="OFF"
@@ -176,6 +178,19 @@ zram_install() {
             log_error "Không thể cài zram-tools! Kiểm tra kết nối mạng."
             pause; return 1
         fi
+        # Kernel "cloud/generic" của Ubuntu/Debian tách module zram sang gói linux-modules-extra.
+        # Thiếu module thì thử cài đúng gói của kernel đang chạy trước khi bỏ cuộc.
+        if ! modinfo zram &>/dev/null; then
+            log_info "  Kernel $(uname -r) chưa có module zram - đang cài linux-modules-extra..."
+            DEBIAN_FRONTEND=noninteractive apt-get install -y "linux-modules-extra-$(uname -r)" &>/dev/null || true
+            if ! modinfo zram &>/dev/null; then
+                log_warn "Kernel này không có module zram (không cài được linux-modules-extra-$(uname -r))."
+                log_warn "Bỏ qua ZRAM, giữ nguyên swap trên ổ đĩa. Có thể thử lại sau khi cập nhật kernel và reboot."
+                DEBIAN_FRONTEND=noninteractive apt-get purge -y zram-tools &>/dev/null || true
+                [[ "$mode" != "auto" ]] && pause
+                return 1
+            fi
+        fi
     else
         dnf install -y zram-generator &>/dev/null
         if [[ $? -ne 0 ]]; then
@@ -188,6 +203,8 @@ zram_install() {
         modprobe zram 2>/dev/null || true
     fi
     log_info "  ✓ Package đã cài"
+    # Chọn lại thuật toán sau khi module zram đã sẵn sàng (trước bước cài, kernel có thể chưa có module)
+    algo="$(_zram_best_algo)"
 
     # ── Bước 2: Ghi config ──
     if [[ "$ZRAM_OS" == "debian" ]]; then
@@ -231,28 +248,38 @@ EOF
         rc=$?
     fi
 
-    if [[ $rc -ne 0 ]]; then
-        log_warn "ZRAM service khởi động có lỗi. Kiểm tra: journalctl -u ${ZRAM_SVC}"
-    else
-        log_info "  ✓ ZRAM đang hoạt động"
+    # Chỉ coi là thành công khi kernel THỰC SỰ đang swap lên zram
+    sleep 1
+    if [[ $rc -ne 0 ]] || ! grep -q '^/dev/zram' /proc/swaps 2>/dev/null; then
+        log_error "ZRAM KHÔNG khởi động được (kernel có thể thiếu module zram). Kiểm tra: journalctl -u ${ZRAM_SVC}"
+        log_warn "Giữ nguyên swap trên ổ đĩa hiện có, hoàn tác cấu hình ZRAM."
+        rm -f /etc/sysctl.d/99-vps-manager-zram.conf "$ZRAM_CONFIG"
+        systemctl disable --now "$ZRAM_SVC" &>/dev/null || true
+        systemctl reset-failed "$ZRAM_SVC" &>/dev/null || true
+        sysctl -w vm.swappiness=10 &>/dev/null || true
+        [[ "$mode" != "auto" ]] && pause
+        return 1
     fi
+    log_info "  ✓ ZRAM đang hoạt động"
 
-    # ── Bước 5: Dọn swap cũ trên ổ đĩa (ZRAM đã bật nên swapoff sẽ nén vào ZRAM an toàn) ──
+    # ── Bước 5: Dọn swap FILE cũ trên ổ đĩa (ZRAM đã bật nên swapoff sẽ nén vào ZRAM an toàn) ──
+    # Chỉ đụng tới các swap file do công cụ này tạo; KHÔNG động vào swap partition của nhà cung cấp.
     log_info "  Đang dọn swap file cũ trên ổ đĩa..."
     for old_swap in /swapfile /swap.img /var/swap.1; do
         if [[ -f "$old_swap" ]]; then
-            swapoff "$old_swap" 2>/dev/null || true
+            if grep -q "^${old_swap} " /proc/swaps 2>/dev/null && ! swapoff "$old_swap" 2>/dev/null; then
+                log_warn "    Không swapoff được $old_swap (RAM không đủ chỗ). Giữ lại file này."
+                continue
+            fi
             chattr -i "$old_swap" 2>/dev/null || true
             if rm -f "$old_swap" 2>/dev/null; then
+                sed -i "\|^${old_swap}[[:space:]]|d" /etc/fstab 2>/dev/null || true
                 log_info "    ✓ Đã xoá $old_swap"
             else
                 log_warn "    Không thể xoá $old_swap (file đang bận hoặc bị khoá). Sẽ xoá sau khi reboot."
             fi
         fi
     done
-    # Xoá entry trong fstab
-    sed -i -e '/swap.1/d' -e '/swapfile/d' -e '/swap.img/d' /etc/fstab 2>/dev/null || true
-    sed -i 's|^\(.*\s\+swap\s.*\)$|#\1|' /etc/fstab 2>/dev/null || true
 
     echo ""
     echo -e "${GREEN}=================================================${NC}"
@@ -260,6 +287,7 @@ EOF
     echo -e "${GREEN}=================================================${NC}"
     zram_info
     [[ "$mode" != "auto" ]] && pause
+    return 0
 }
 
 # ────────────────────────────────────────────────────────────
@@ -289,6 +317,24 @@ zram_uninstall() {
 
     log_info "Đang gỡ bỏ ZRAM..."
 
+    # Tạo swap file trên đĩa TRƯỚC khi tắt ZRAM, để dữ liệu đang nén trong ZRAM có chỗ chuyển sang
+    if ! grep -qE '^/(var/swap\.1|swapfile|swap\.img) ' /proc/swaps 2>/dev/null; then
+        log_info "Đang tạo swap file 1GB trên ổ đĩa trước khi tắt ZRAM..."
+        rm -f /var/swap.1
+        if dd if=/dev/zero of=/var/swap.1 bs=1M count=1024 status=none \
+            && chmod 600 /var/swap.1 && mkswap /var/swap.1 &>/dev/null && swapon /var/swap.1; then
+            grep -q '^/var/swap.1 ' /etc/fstab || echo '/var/swap.1 none swap defaults 0 0' >> /etc/fstab
+            log_info "  ✓ Swap file 1GB đã tạo"
+        else
+            rm -f /var/swap.1
+            log_warn "Không thể tạo swap file (có thể không đủ dung lượng ổ đĩa). Server sẽ không có swap sau khi tắt ZRAM."
+            if [[ "$mode" != "auto" ]]; then
+                read -p "Vẫn tiếp tục tắt ZRAM? [y/N]: " confirm2
+                [[ "${confirm2,,}" != "y" ]] && { echo -e "${YELLOW}Đã huỷ.${NC}"; pause; return 0; }
+            fi
+        fi
+    fi
+
     # Dừng service
     if [[ "$ZRAM_OS" == "debian" ]]; then
         systemctl stop zramswap &>/dev/null || true
@@ -305,30 +351,17 @@ zram_uninstall() {
     rm -f "$ZRAM_CONFIG"
     rm -f /etc/sysctl.d/99-vps-manager-zram.conf
 
-    # Restore swappiness mặc định
-    cat >> /etc/sysctl.d/101-sysctl.conf <<< "vm.swappiness = 10" 2>/dev/null || true
+    # Trả swappiness về giá trị trong cấu hình kernel chung (core/kernel_tuning.sh), mặc định 10
     sysctl -w vm.swappiness=10 &>/dev/null || true
 
     log_info "  ✓ ZRAM đã tắt"
 
-    # Tái tạo swap file 1GB dự phòng
-    log_info "Đang tạo lại swap file 1GB (backup an toàn)..."
-    swapoff -a 2>/dev/null || true
-    rm -f /var/swap.1 /swapfile /swap.img
-
-    if dd if=/dev/zero of=/var/swap.1 bs=1M count=1024 status=none; then
-        chmod 600 /var/swap.1
-        mkswap /var/swap.1 &>/dev/null
-        swapon /var/swap.1
-        # Thêm vào fstab
-        grep -q '/var/swap.1' /etc/fstab || echo '/var/swap.1 none swap defaults 0 0' >> /etc/fstab
-        log_info "  ✓ Swap file 1GB đã tạo"
-    else
-        log_warn "Không thể tạo swap file (có thể không đủ dung lượng ổ đĩa)"
-    fi
-
     systemctl daemon-reload
-    echo -e "${GREEN}Đã gỡ ZRAM và khôi phục swap file thành công.${NC}"
+    if swapon --show 2>/dev/null | grep -q .; then
+        echo -e "${GREEN}Đã gỡ ZRAM. Server đang dùng swap trên ổ đĩa.${NC}"
+    else
+        echo -e "${YELLOW}Đã gỡ ZRAM. LƯU Ý: server hiện KHÔNG có swap nào.${NC}"
+    fi
     [[ "$mode" != "auto" ]] && pause
 }
 

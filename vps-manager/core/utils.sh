@@ -15,6 +15,12 @@ fi
 if [[ -f "$UTILS_DIR/system_helpers.sh" ]]; then
     source "$UTILS_DIR/system_helpers.sh"
 fi
+if [[ -f "$UTILS_DIR/platform_helpers.sh" ]]; then
+    source "$UTILS_DIR/platform_helpers.sh"
+fi
+if [[ -f "$UTILS_DIR/reliability.sh" ]]; then
+    source "$UTILS_DIR/reliability.sh"
+fi
 
 # Colors
 RED='\033[0;31m'
@@ -82,34 +88,6 @@ detect_os() {
 # Run OS detection immediately
 detect_os
 
-# Web Server Detection
-# Returns: nginx | none
-detect_webserver() {
-    if systemctl is-active --quiet nginx 2>/dev/null; then
-        export WEB_SERVER_TYPE="nginx"
-    elif command -v nginx &>/dev/null && nginx -v &>/dev/null 2>&1; then
-        export WEB_SERVER_TYPE="nginx"
-    else
-        export WEB_SERVER_TYPE="none"
-    fi
-    echo "$WEB_SERVER_TYPE"
-}
-
-# Check if a specific web server is active
-require_webserver() {
-    local required=$1   # "nginx" or "openlitespeed"
-    detect_webserver >/dev/null
-    if [[ "$WEB_SERVER_TYPE" != "$required" ]]; then
-        log_error "Tính năng này yêu cầu $required, nhưng đang dùng: ${WEB_SERVER_TYPE:-none}"
-        pause
-        return 1
-    fi
-    return 0
-}
-
-# Run web server detection immediately
-detect_webserver >/dev/null 2>&1 || true
-
 # Wrapper for package installation
 pkg_install() {
     if [[ "$OS_FAMILY" == "debian" ]]; then
@@ -121,11 +99,6 @@ pkg_install() {
 
 pkg_update() {
     if [[ "$OS_FAMILY" == "debian" ]]; then
-        # Fix stale LiteSpeed GPG key error if left-over repo file exists on this server
-        if [[ -f /etc/apt/sources.list.d/lst_debian_repo.list ]]; then
-            wget -qO /etc/apt/trusted.gpg.d/lst_debian_repo.gpg http://rpms.litespeedtech.com/debian/lst_debian_repo.gpg 2>/dev/null || true
-            wget -qO - http://rpms.litespeedtech.com/debian/lst_repo.gpg 2>/dev/null | gpg --dearmor --yes -o /etc/apt/trusted.gpg.d/litespeed.gpg 2>/dev/null || true
-        fi
         apt-get update -qq || true
     elif [[ "$OS_FAMILY" == "rhel" ]]; then
         dnf makecache
@@ -143,7 +116,11 @@ is_installed() {
 
 # Pause function
 pause() {
-    read -p "Press [Enter] key to continue..."
+    # Không dừng chờ khi đang cài tự động hoặc khi không có bàn phím (curl | bash, cron)
+    if [[ -n "${VPSM_NONINTERACTIVE:-}" ]] || [[ ! -t 0 ]]; then
+        return 0
+    fi
+    read -r -p "Nhấn [Enter] để tiếp tục..."
 }
 
 # Note: spinner/show_progress is in core/system_helpers.sh

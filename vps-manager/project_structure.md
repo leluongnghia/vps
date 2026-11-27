@@ -1,4 +1,4 @@
-# 🗂️ Cấu trúc chi tiết Dự án VPS Manager (v1.9.1)
+# 🗂️ Cấu trúc chi tiết Dự án VPS Manager (v2.0.0)
 
 Tài liệu này mô tả chi tiết sơ đồ cấu trúc và vai trò của từng tệp tin trong bộ công cụ **VPS Manager** chạy trên môi trường Linux (Ubuntu/Debian/AlmaLinux/RHEL).
 
@@ -10,18 +10,21 @@ Tài liệu này mô tả chi tiết sơ đồ cấu trúc và vai trò của t�
 vps-manager/
 ├── install-nginx.sh            # Kịch bản cài đặt nhanh từ xa qua Nginx LEMP Stack
 ├── install.sh                  # Tệp khởi chạy chính & Menu điều phối của script
-├── VERSION                     # Lưu trữ thông tin phiên bản hiện tại (v1.9.1)
+├── VERSION                     # Lưu trữ thông tin phiên bản hiện tại (v2.0.0)
 ├── core/                       # Thư mục chứa các hàm tiện ích & nhân lõi hệ thống
 │   ├── kernel_tuning.sh        # Tối ưu hóa TCP/IP & Network Kernel (BBR, Somaxconn)
 │   ├── menu.sh                 # Thiết kế giao diện Menu chính tinh gọn của Terminal
 │   ├── mysql_helpers.sh        # Các hàm bổ trợ xử lý nhanh database
-│   ├── nginx_helpers.sh        # Các hàm bổ trợ xử lý nhanh vhost Nginx
-│   ├── system_helpers.sh       # Tiện ích phát hiện OS, quản lý gói phụ thuộc
+│   ├── nginx_helpers.sh        # Sửa vhost an toàn: backup, nginx -t, reload, tự hoàn tác khi lỗi
+│   ├── platform_helpers.sh     # Đường dẫn/service theo OS, SELinux, WP-CLI không chạy root, tải file có checksum
+│   ├── reliability.sh          # Tự phục hồi dịch vụ, auto-update bảo mật, slow log, cảnh báo Telegram, làm mới cache
+│   ├── stack_install.sh        # Cài toàn bộ LEMP stack (dùng chung cho install.sh và install-nginx.sh)
+│   ├── system_helpers.sh       # Khoá chống chạy song song, kiểm tra đĩa, dò PHP socket, validate domain
 │   └── utils.sh                # Hàm tiện ích dùng chung (Màu sắc, log, pause...)
 └── modules/                    # Thư mục chứa các mô-đun tính năng chính
     ├── appadmin.sh             # Quản lý bảo mật HTTP Basic Auth và tối ưu hóa ảnh WebP
     ├── backup.sh               # Xử lý sao lưu/khôi phục Local + Google Drive + Auto Backup Cron
-    ├── cache.sh                # Quản lý cài đặt & cấu hình Valkey / Redis / KeyDB / Memcached
+    ├── cache.sh                # Quản lý Object Cache (Valkey / Redis) & cache của WordPress
     ├── cron.sh                 # Quản lý hàng chờ tác vụ tự động Cronjob cho Server và WordPress
     ├── database.sh             # Quản lý Database MySQL, đổi pass, import/export và sửa lỗi mysqlcheck
     ├── diagnose.sh             # Kiểm tra sức khỏe hệ thống, Port đang mở, hạn SSL và phân tích log
@@ -48,7 +51,7 @@ vps-manager/
 ### 1. Thư mục Gốc (`/vps-manager/`)
 *   **`install-nginx.sh`**: Kịch bản cài đặt nhanh từ xa được tối ưu hóa cho Nginx. Cập nhật hệ thống, tải bộ cài từ GitHub về `/usr/local/vps-manager`, cấu hình đường dẫn và phân quyền chạy.
 *   **`install.sh`**: Tệp khởi chạy chính của script. Tự động kiểm tra quyền root, phát hiện hệ điều hành, nạp các biến môi trường và nạp các tệp bổ trợ từ `core/` và `modules/` để chạy Menu quản lý.
-*   **`VERSION`**: Tệp văn bản lưu số hiệu phiên bản hiện tại của bộ công cụ (hiện tại là `1.9.1`).
+*   **`VERSION`**: Tệp văn bản lưu số hiệu phiên bản hiện tại của bộ công cụ (hiện tại là `2.0.0`).
 
 ---
 
@@ -65,7 +68,7 @@ vps-manager/
 ### 3. Thư mục Mô-đun (`/modules/`)
 *   **`appadmin.sh`**: Tạo lớp bảo vệ mật khẩu cơ bản (HTTP Basic Auth) cho các thư mục nhạy cảm và công cụ nén tối ưu ảnh JPG/PNG/WebP.
 *   **`backup.sh`**: Quản lý sao lưu dữ liệu toàn diện (Local, Google Drive qua Rclone) và cấu hình tự động hóa lịch Backup qua Cronjob.
-*   **`cache.sh`**: Cài đặt và quản lý các công cụ lưu trữ bộ nhớ đệm trên RAM như Valkey, Redis, KeyDB và Memcached qua UNIX Socket.
+*   **`cache.sh`**: Quản lý Object Cache trên RAM (Valkey, hoặc Redis khi hệ điều hành chưa có gói Valkey, qua UNIX Socket) và cấu hình cache cho WordPress. Việc cài đặt server cache dùng một hàm duy nhất `_install_object_cache_nginx` trong `lemp.sh`.
 *   **`cron.sh`**: Quản lý dịch vụ lập lịch Cronjob trên Linux, Real WP-Cron cho WordPress và APRG SEO Cron.
 *   **`database.sh`**: Quản lý cơ sở dữ liệu MySQL, tạo/xóa DB/User, đổi pass, import/export và công cụ tối ưu & sửa chữa bảng `mysqlcheck`.
 *   **`diagnose.sh`**: Chẩn đoán toàn diện sức khỏe hệ thống, quét các Port mạng đang lắng nghe (`ss -tulpn`), quét thời hạn chứng chỉ SSL và phân tích log lỗi.

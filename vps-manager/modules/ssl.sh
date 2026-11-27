@@ -75,29 +75,122 @@ ssl_renew_one() {
     domain="$SELECTED_DOMAIN"
 
     log_info "Đang gia hạn SSL cho $domain..."
-    certbot renew --cert-name "$domain" --force-renewal
-    nginx -t && systemctl reload nginx
-    log_info "Hoàn tất gia hạn SSL cho $domain."
+    if ! certbot renew --cert-name "$domain" --force-renewal; then
+        log_error "Gia hạn SSL cho $domain THẤT BẠI. Xem: /var/log/letsencrypt/letsencrypt.log"
+        pause; return 1
+    fi
+    if nginx_test_reload; then
+        log_info "Hoàn tất gia hạn SSL cho $domain."
+    else
+        log_warn "Đã gia hạn chứng chỉ nhưng Nginx chưa reload được (config lỗi)."
+    fi
     pause
 }
 
 ssl_renew_all() {
     log_info "Đang gia hạn TẤT CẢ SSL..."
-    certbot renew
-    nginx -t && systemctl reload nginx
-    log_info "Hoàn tất gia hạn SSL."
+    local rc=0
+    certbot renew || rc=$?
+    nginx_test_reload || log_warn "Nginx chưa reload được (config lỗi)."
+    if [[ $rc -eq 0 ]]; then
+        log_info "Hoàn tất gia hạn SSL."
+    else
+        log_error "Có chứng chỉ gia hạn THẤT BẠI. Xem: /var/log/letsencrypt/letsencrypt.log"
+    fi
     pause
+}
+
+# Gỡ toàn bộ cấu hình SSL khỏi 1 vhost, đưa về HTTP (port 80).
+# Phải chạy TRƯỚC khi xoá chứng chỉ, nếu không vhost sẽ trỏ tới file đã mất
+# và lần reload/restart kế tiếp sẽ làm sập mọi site.
+_strip_ssl_from_vhost() {
+    local conf=$1
+    [[ -f "$conf" ]] || return 1
+    grep -qE 'listen[[:space:]].*443|ssl_certificate' "$conf" || return 0
+
+    local bak tmp
+    bak=$(backup_nginx_config "$conf")
+    tmp=$(mktemp) || return 1
+
+    awk '
+        function flush_block(   i, has80, is_redirect, has_content) {
+            has80 = 0; is_redirect = 0; has_content = 0
+            for (i = 1; i <= n; i++) {
+                if (buf[i] ~ /return[[:space:]]+404;[[:space:]]*#[[:space:]]*managed by Certbot/) is_redirect = 1
+                if (buf[i] ~ /return[[:space:]]+301[[:space:]]+https:\/\//) is_redirect = 1
+                if (buf[i] ~ /^[[:space:]]*(root|proxy_pass|fastcgi_pass)[[:space:]]/) has_content = 1
+            }
+            # Block chỉ dùng để redirect HTTP -> HTTPS: bỏ hẳn
+            if (is_redirect && !has_content) { n = 0; return }
+
+            # Bỏ các dòng SSL
+            m = 0
+            for (i = 1; i <= n; i++) {
+                line = buf[i]
+                if (line ~ /managed by Certbot/) continue
+                if (line ~ /^[[:space:]]*ssl_(certificate|certificate_key|protocols|ciphers|dhparam|prefer_server_ciphers|session_cache|session_timeout|trusted_certificate|stapling|stapling_verify)[[:space:]]/) continue
+                if (line ~ /^[[:space:]]*include[[:space:]].*options-ssl-nginx/) continue
+                if (line ~ /^[[:space:]]*http2[[:space:]]+on;/) continue
+                if (line ~ /^[[:space:]]*listen[[:space:]].*443/) continue
+                if (line ~ /^[[:space:]]*listen[[:space:]].*80/) has80 = 1
+                out[++m] = line
+            }
+            for (i = 1; i <= m; i++) {
+                print out[i]
+                if (i == 1 && !has80) {
+                    print "    listen 80;"
+                    print "    listen [::]:80;"
+                }
+            }
+            n = 0
+        }
+        {
+            if (depth == 0 && $0 ~ /^[[:space:]]*server[[:space:]]*\{/) { in_server = 1; n = 0 }
+            if (in_server) {
+                buf[++n] = $0
+            } else {
+                print
+            }
+            tmp_line = $0
+            opens = gsub(/\{/, "{", tmp_line)
+            closes = gsub(/\}/, "}", tmp_line)
+            depth += opens - closes
+            if (in_server && depth == 0) { flush_block(); in_server = 0 }
+        }
+        END { if (in_server && n > 0) for (i = 1; i <= n; i++) print buf[i] }
+    ' "$conf" > "$tmp"
+
+    if [[ ! -s "$tmp" ]] || ! grep -q "server_name" "$tmp"; then
+        rm -f "$tmp" "$bak"
+        log_error "Không tự gỡ được cấu hình SSL khỏi $(basename "$conf")."
+        return 1
+    fi
+
+    # Ghi đè nội dung (giữ nguyên inode/quyền/nhãn SELinux của file gốc)
+    cat "$tmp" > "$conf"
+    rm -f "$tmp"
+    nginx_commit "$conf" "$bak"
 }
 
 ssl_revoke() {
     source "$(dirname "${BASH_SOURCE[0]}")/site.sh"
     select_site || return
     domain="$SELECTED_DOMAIN"
+    local conf="/etc/nginx/sites-available/$domain"
 
+    echo -e "${YELLOW}Thao tác này sẽ đưa $domain về HTTP (port 80) rồi mới xoá chứng chỉ.${NC}"
     read -p "Xác nhận thu hồi SSL cho $domain? (y/n): " c
     if [[ "$c" == "y" ]]; then
-        certbot delete --cert-name "$domain"
-        log_info "Đã thu hồi SSL cho $domain."
+        # Gỡ SSL khỏi vhost TRƯỚC, chỉ xoá cert khi Nginx đã chạy ổn với config HTTP
+        if [[ -f "$conf" ]] && ! _strip_ssl_from_vhost "$conf"; then
+            log_error "Không gỡ được SSL khỏi vhost - GIỮ NGUYÊN chứng chỉ để tránh làm sập Nginx."
+            pause; return 1
+        fi
+        if certbot delete --cert-name "$domain" --non-interactive; then
+            log_info "Đã thu hồi SSL cho $domain (website hiện chạy HTTP)."
+        else
+            log_error "certbot delete thất bại. Vhost đã về HTTP, chứng chỉ vẫn còn trong /etc/letsencrypt."
+        fi
     fi
     pause
 }
@@ -215,7 +308,7 @@ ssl_auto_renew_setup() {
         echo ""
         read -p "Cập nhật lại lịch? (y/n): " c
         if [[ "$c" != "y" ]]; then pause; return; fi
-        crontab -l | grep -v "certbot" | crontab -
+        crontab_remove_containing "certbot renew"
     fi
 
     # ── Chọn lịch ──────────────────────────────────────────────
@@ -253,13 +346,54 @@ ssl_auto_renew_setup() {
     pause
 }
 
+# true nếu là domain gốc (apex) - chỉ domain gốc mới thêm www.
+# Nhận biết cả đuôi 2 cấp phổ biến (example.com.vn, example.co.uk...)
+_ssl_is_apex_domain() {
+    local domain="$1" dots
+    dots=$(printf '%s' "$domain" | tr -cd '.' | wc -c)
+    if [[ "$dots" -eq 1 ]]; then return 0; fi
+    if [[ "$dots" -eq 2 ]] && [[ "$domain" =~ \.(com|net|org|edu|gov|biz|info|name|pro|health|int|ac|co)\.[a-z]{2}$ ]]; then
+        return 0
+    fi
+    return 1
+}
+
 _ssl_server_names() {
     local domain="$1"
-    if [[ $(echo "$domain" | tr -cd '.' | wc -c) -eq 1 ]]; then
+    if _ssl_is_apex_domain "$domain"; then
         echo "$domain www.$domain"
     else
         echo "$domain"
     fi
+}
+
+# Danh sách domain sẽ xin chứng chỉ: domain chính, www (nếu là domain gốc VÀ www có DNS),
+# cùng các alias đang khai báo trong vhost. In mỗi domain 1 dòng.
+_ssl_cert_domains() {
+    local domain="$1" conf="/etc/nginx/sites-available/$1" d
+    echo "$domain"
+    if _ssl_is_apex_domain "$domain"; then
+        if getent ahosts "www.$domain" &>/dev/null; then
+            echo "www.$domain"
+        else
+            log_warn "www.$domain chưa có bản ghi DNS - bỏ qua www khi xin chứng chỉ." >&2
+        fi
+    fi
+    # Alias (parked domain) trong server_name
+    if [[ -f "$conf" ]]; then
+        for d in $(grep -m1 -E '^[[:space:]]*server_name[[:space:]]' "$conf" | sed -E 's/^[[:space:]]*server_name[[:space:]]+//; s/;.*$//'); do
+            [[ "$d" == "$domain" || "$d" == "www.$domain" || "$d" == "_" ]] && continue
+            [[ "$d" =~ ^[a-zA-Z0-9.-]+$ ]] || continue
+            getent ahosts "$d" &>/dev/null && echo "$d"
+        done
+    fi
+}
+
+# nginx >= 1.25.1 dùng directive "http2 on;", bản cũ hơn dùng "listen 443 ssl http2;"
+_nginx_has_http2_directive() {
+    local v
+    v=$(nginx -v 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+    [[ -n "$v" ]] && [[ "$(printf '%s\n' "1.25.1" "$v" | sort -V | head -1)" == "1.25.1" ]]
 }
 
 _apply_manual_ssl_nginx_config() {
@@ -274,12 +408,22 @@ _apply_manual_ssl_nginx_config() {
         return 1
     fi
 
-    local backup="${conf_file}.bak.$(date +%s)"
-    cp "$conf_file" "$backup"
+    local backup
+    backup=$(backup_nginx_config "$conf_file")
 
     if ! grep -qE 'listen[[:space:]].*443' "$conf_file"; then
-        sed -i 's/listen 80;/listen 443 ssl;\n    http2 on;/g' "$conf_file"
-        sed -i 's/listen \[::\]:80;/listen [::]:443 ssl;\n    http2 on;/g' "$conf_file"
+        if _nginx_has_http2_directive; then
+            # "http2 on;" chỉ được xuất hiện MỘT lần trong mỗi server block
+            sed -i 's/listen \[::\]:80;/listen [::]:443 ssl;/g' "$conf_file"
+            if grep -qE '^[[:space:]]*http2[[:space:]]+on;' "$conf_file"; then
+                sed -i 's/listen 80;/listen 443 ssl;/g' "$conf_file"
+            else
+                sed -i 's/listen 80;/listen 443 ssl;\n    http2 on;/g' "$conf_file"
+            fi
+        else
+            sed -i 's/listen 80;/listen 443 ssl http2;/g' "$conf_file"
+            sed -i 's/listen \[::\]:80;/listen [::]:443 ssl http2;/g' "$conf_file"
+        fi
     fi
 
     local tmp_file
@@ -316,30 +460,32 @@ _apply_manual_ssl_nginx_config() {
             }
         }
     ' "$conf_file" > "$tmp_file"
-    mv "$tmp_file" "$conf_file"
+    # Ghi đè nội dung thay vì mv: giữ quyền + nhãn SELinux của file trong /etc/nginx
+    cat "$tmp_file" > "$conf_file"
+    rm -f "$tmp_file"
 
     if ! grep -Fq 'return 301 https://$host$request_uri;' "$conf_file"; then
+        # server_name của block redirect lấy đúng theo vhost hiện tại (giữ cả alias)
+        local names
+        names=$(grep -m1 -E '^[[:space:]]*server_name[[:space:]]' "$conf_file" | sed -E 's/^[[:space:]]*server_name[[:space:]]+//; s/;.*$//')
+        [[ -z "$names" ]] && names=$(_ssl_server_names "$domain")
         tmp_file=$(mktemp)
         cat <<EOF > "$tmp_file"
 server {
     listen 80;
-    server_name $(_ssl_server_names "$domain");
+    listen [::]:80;
+    server_name $names;
     return 301 https://\$host\$request_uri;
 }
 EOF
         cat "$conf_file" >> "$tmp_file"
-        mv "$tmp_file" "$conf_file"
+        cat "$tmp_file" > "$conf_file"
+        rm -f "$tmp_file"
     fi
+    selinux_restore "$conf_file"
 
-    if nginx -t; then
-        systemctl reload nginx
-        rm -f "$backup"
-        return 0
-    fi
-
-    mv "$backup" "$conf_file"
-    nginx -t
-    return 1
+    # Test -> reload; lỗi thì tự khôi phục bản backup
+    nginx_commit "$conf_file" "$backup"
 }
 
 
@@ -365,14 +511,16 @@ install_ssl() {
     echo -e "3. ZeroSSL (Sử dụng acme.sh)"
     read -p "Lựa chọn [1-3]: " ssl_type
 
+    local ssl_rc=0
     case $ssl_type in
-        1) install_letsencrypt "$domain" ;;
-        2) install_cloudflare_ssl "$domain" ;;
-        3) install_zerossl "$domain" ;;
-        *) echo -e "${RED}Lựa chọn mặc định Let's Encrypt...${NC}"; install_letsencrypt "$domain" ;;
+        1) install_letsencrypt "$domain" || ssl_rc=1 ;;
+        2) install_cloudflare_ssl "$domain" || ssl_rc=1 ;;
+        3) install_zerossl "$domain" || ssl_rc=1 ;;
+        *) echo -e "${RED}Lựa chọn mặc định Let's Encrypt...${NC}"; install_letsencrypt "$domain" || ssl_rc=1 ;;
     esac
-    
+
     if [[ -z "$1" ]]; then pause; fi
+    return $ssl_rc
 }
 
 install_letsencrypt() {
@@ -383,62 +531,124 @@ install_letsencrypt() {
         pkg_install certbot python3-certbot-nginx
     fi
 
-    log_info "Đang yêu cầu chứng chỉ SSL cho $domain..."
-    # Subdomain (>1 dấu chấm) thì không thêm www. vì thường không có DNS cho www.subdomain
-    local certbot_domains="-d \"$domain\""
-    if [[ $(echo "$domain" | tr -cd '.' | wc -c) -eq 1 ]]; then
-        certbot_domains="-d \"$domain\" -d \"www.$domain\""
+    if ! validate_domain "$domain"; then
+        return 1
     fi
-    eval certbot --nginx $certbot_domains --non-interactive --agree-tos --register-unsafely-without-email --redirect
 
-    if [[ $? -eq 0 ]]; then
+    log_info "Đang yêu cầu chứng chỉ SSL cho $domain..."
+    # Subdomain không thêm www. (thường không có DNS cho www.subdomain); www chỉ thêm khi đã có DNS
+    local certbot_args=() d
+    while IFS= read -r d; do
+        [[ -n "$d" ]] && certbot_args+=(-d "$d")
+    done < <(_ssl_cert_domains "$domain")
+
+    if certbot --nginx "${certbot_args[@]}" --cert-name "$domain" --expand --keep-until-expiring \
+        --non-interactive --agree-tos --register-unsafely-without-email --redirect; then
         echo -e "${GREEN}Cài đặt SSL Let's Encrypt thành công!${NC}"
+        return 0
     else
         echo -e "${RED}Lỗi: Kiểm tra lại DNS hoặc Port 80.${NC}"
+        return 1
     fi
+}
+
+# Email dùng để đăng ký tài khoản ACME (ZeroSSL bắt buộc email thật). Lưu lại để dùng lần sau.
+_ssl_acme_email() {
+    local store="$HOME/.vps-manager/acme_email" email=""
+    [[ -f "$store" ]] && email=$(head -n1 "$store" 2>/dev/null)
+    if [[ ! "$email" =~ ^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$ ]] || [[ "$email" == *@example.com ]]; then
+        read -p "Nhập email để đăng ký tài khoản ZeroSSL: " email >&2
+        if [[ ! "$email" =~ ^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$ ]] || [[ "$email" == *@example.com ]]; then
+            return 1
+        fi
+        mkdir -p "$(dirname "$store")"
+        echo "$email" > "$store"
+        chmod 600 "$store"
+    fi
+    echo "$email"
 }
 
 install_zerossl() {
     local domain=$1
     log_info "Đang cài đặt acme.sh cho ZeroSSL..."
     
-    # Install acme.sh
-    if [[ ! -f ~/.acme.sh/acme.sh ]]; then
-        curl https://get.acme.sh | sh -s email=my@example.com
+    if ! validate_domain "$domain"; then
+        return 1
     fi
-    
+
+    local acme_email
+    if ! acme_email=$(_ssl_acme_email); then
+        echo -e "${RED}Email không hợp lệ. Hủy cài ZeroSSL.${NC}"
+        return 1
+    fi
+
+    # Install acme.sh (tải về file tạm rồi mới chạy, không pipe thẳng vào shell)
+    if [[ ! -f ~/.acme.sh/acme.sh ]]; then
+        local acme_installer
+        acme_installer=$(mktemp)
+        if ! safe_download "https://get.acme.sh" "$acme_installer"; then
+            rm -f "$acme_installer"
+            return 1
+        fi
+        sh "$acme_installer" "email=$acme_email"
+        rm -f "$acme_installer"
+        if [[ ! -f ~/.acme.sh/acme.sh ]]; then
+            log_error "Cài acme.sh thất bại."
+            return 1
+        fi
+    fi
+
     # Register ZeroSSL
-    ~/.acme.sh/acme.sh --register-account -m my@example.com --server zerossl
-    
+    if ! ~/.acme.sh/acme.sh --register-account -m "$acme_email" --server zerossl; then
+        log_error "Đăng ký tài khoản ZeroSSL thất bại (email: $acme_email)."
+        rm -f "$HOME/.vps-manager/acme_email"
+        return 1
+    fi
+
     log_info "Đang request chứng chỉ ZeroSSL cho $domain..."
-    
+
     # Issue cert (using webroot mode /var/www/$domain/public_html or nginx mode)
     # Nginx mode is easier if nginx is running
-    local acme_domains="-d \"$domain\""
-    if [[ $(echo "$domain" | tr -cd '.' | wc -c) -eq 1 ]]; then
-        acme_domains="-d \"$domain\" -d \"www.$domain\""
-    fi
-    eval ~/.acme.sh/acme.sh --issue --nginx $acme_domains --server zerossl
-    
-    if [[ $? -ne 0 ]]; then
+    local acme_args=() d
+    while IFS= read -r d; do
+        [[ -n "$d" ]] && acme_args+=(-d "$d")
+    done < <(_ssl_cert_domains "$domain")
+
+    local acme_rc=0
+    ~/.acme.sh/acme.sh --issue --nginx "${acme_args[@]}" --server zerossl || acme_rc=$?
+
+    # acme.sh trả về 2 khi chứng chỉ còn hạn và được bỏ qua (không phải lỗi)
+    if [[ $acme_rc -ne 0 && $acme_rc -ne 2 ]]; then
         echo -e "${RED}Lỗi cấp chứng chỉ ZeroSSL. Kiểm tra DNS!${NC}"
-        return
+        return 1
     fi
-    
+
     # Install cert to nginx location
     mkdir -p "/etc/nginx/ssl/$domain"
-    
-    ~/.acme.sh/acme.sh --install-cert -d "$domain" \
+    chmod 700 "/etc/nginx/ssl/$domain"
+
+    if ! ~/.acme.sh/acme.sh --install-cert -d "$domain" \
         --key-file       "/etc/nginx/ssl/$domain/server.key"  \
         --fullchain-file "/etc/nginx/ssl/$domain/server.crt" \
-        --reloadcmd     "service nginx force-reload"
-        
+        --reloadcmd     "systemctl reload nginx" \
+        || [[ ! -s "/etc/nginx/ssl/$domain/server.crt" ]]; then
+        # reloadcmd có thể lỗi ở lần đầu (vhost chưa trỏ tới cert) - chỉ coi là lỗi khi không có file cert
+        if [[ ! -s "/etc/nginx/ssl/$domain/server.crt" || ! -s "/etc/nginx/ssl/$domain/server.key" ]]; then
+            log_error "Không cài được chứng chỉ vào /etc/nginx/ssl/$domain."
+            return 1
+        fi
+    fi
+    chmod 600 "/etc/nginx/ssl/$domain/server.key" 2>/dev/null
+    selinux_restore "/etc/nginx/ssl/$domain"
+
     log_info "Đang cấu hình Nginx..."
 
     if _apply_manual_ssl_nginx_config "$domain" "/etc/nginx/ssl/$domain/server.crt" "/etc/nginx/ssl/$domain/server.key"; then
         echo -e "${GREEN}Cài đặt ZeroSSL thành công!${NC}"
+        return 0
     else
         echo -e "${RED}Cấu hình Nginx SSL thất bại. Đã khôi phục file backup.${NC}"
+        return 1
     fi
 }
 
@@ -447,22 +657,59 @@ install_cloudflare_ssl() {
     echo -e "${YELLOW}=== Cài đặt Cloudflare Origin SSL ===${NC}"
     echo -e "Bạn cần tạo chứng chỉ trong Cloudflare Dashboard > SSL/TLS > Origin Server"
     
-    mkdir -p "/etc/nginx/ssl/$domain"
-    
+    if ! validate_domain "$domain"; then
+        return 1
+    fi
+
+    local ssl_dir="/etc/nginx/ssl/$domain"
+    mkdir -p "$ssl_dir"
+    chmod 700 "$ssl_dir"
+
+    # Ghi ra file tạm trước, chỉ thay file đang dùng khi cert + key hợp lệ và khớp nhau
+    local new_crt="$ssl_dir/origin.crt.new" new_key="$ssl_dir/origin.key.new"
+    ( umask 077; : > "$new_crt"; : > "$new_key" )
+
     echo -e "Dán nội dung CERTIFICATE (dòng bắt đầu -----BEGIN CERTIFICATE-----):"
     echo -e "(Sau khi dán xong, nhấn Enter, rồi nhấn Ctrl+D)"
-    cat > "/etc/nginx/ssl/$domain/origin.crt"
-    
+    cat > "$new_crt"
+
     echo -e "Dán nội dung PRIVATE KEY (dòng bắt đầu -----BEGIN PRIVATE KEY-----):"
     echo -e "(Sau khi dán xong, nhấn Enter, rồi nhấn Ctrl+D)"
-    cat > "/etc/nginx/ssl/$domain/origin.key"
-    
+    cat > "$new_key"
+    chmod 600 "$new_key"
+
+    if ! openssl x509 -noout -in "$new_crt" 2>/dev/null; then
+        echo -e "${RED}CERTIFICATE không hợp lệ. Hủy, giữ nguyên cấu hình hiện tại.${NC}"
+        rm -f "$new_crt" "$new_key"
+        return 1
+    fi
+    if ! openssl pkey -noout -in "$new_key" 2>/dev/null; then
+        echo -e "${RED}PRIVATE KEY không hợp lệ. Hủy, giữ nguyên cấu hình hiện tại.${NC}"
+        rm -f "$new_crt" "$new_key"
+        return 1
+    fi
+    local crt_pub key_pub
+    crt_pub=$(openssl x509 -noout -pubkey -in "$new_crt" 2>/dev/null | openssl sha256 2>/dev/null)
+    key_pub=$(openssl pkey -pubout -in "$new_key" 2>/dev/null | openssl sha256 2>/dev/null)
+    if [[ -z "$crt_pub" || "$crt_pub" != "$key_pub" ]]; then
+        echo -e "${RED}CERTIFICATE và PRIVATE KEY không khớp nhau. Hủy.${NC}"
+        rm -f "$new_crt" "$new_key"
+        return 1
+    fi
+    mv -f "$new_crt" "$ssl_dir/origin.crt"
+    mv -f "$new_key" "$ssl_dir/origin.key"
+    chmod 644 "$ssl_dir/origin.crt"
+    chmod 600 "$ssl_dir/origin.key"
+    selinux_restore "$ssl_dir"
+
     log_info "Đang cấu hình Nginx sử dụng Cloudflare SSL..."
     
     if _apply_manual_ssl_nginx_config "$domain" "/etc/nginx/ssl/$domain/origin.crt" "/etc/nginx/ssl/$domain/origin.key" "ssl_ciphers HIGH:!aNULL:!MD5;"; then
         echo -e "${GREEN}Đã cài đặt Cloudflare Origin SSL thành công!${NC}"
         echo -e "Lưu ý: Trên Cloudflare hãy chọn chế độ SSL là 'Full (Strict)'"
+        return 0
     else
         echo -e "${RED}Cấu hình Nginx SSL thất bại. Đã khôi phục file backup.${NC}"
+        return 1
     fi
 }

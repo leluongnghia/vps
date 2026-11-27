@@ -1,6 +1,6 @@
 # 🖥️ VPS Manager — Quản lý VPS Tự động (Premium Grade Nginx Stack)
 
-[![Version](https://img.shields.io/badge/Version-1.6.7-brightgreen.svg)](#)
+[![Version](https://img.shields.io/badge/Version-2.0.0-brightgreen.svg)](#)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Shell: Bash](https://img.shields.io/badge/Shell-Bash-blue.svg)](https://www.gnu.org/software/bash/)
 [![OS](https://img.shields.io/badge/OS-Ubuntu%20%7C%20Debian%20%7C%20AlmaLinux-orange.svg)](#)
@@ -70,13 +70,13 @@ bash <(curl -s https://raw.githubusercontent.com/leluongnghia/vps/main/vps-manag
 
 ---
 
-## 🗂️ Cấu trúc dự án v1.6.7
+## 🗂️ Cấu trúc dự án v2.0.0
 
 ```
 vps-manager/
 ├── install-nginx.sh        # Lệnh cài đặt nhanh Nginx Stack từ xa
 ├── install.sh              # File thực thi cài đặt & Menu khởi tạo
-├── VERSION                 # Tệp lưu trữ phiên bản hiện tại (v1.6.7)
+├── VERSION                 # Tệp lưu trữ phiên bản hiện tại (v2.0.0)
 ├── core/                   # Thư mục các hàm nhân lõi của hệ thống
 │   ├── kernel_tuning.sh    # Tối ưu hóa thông số nhân Kernel TCP
 │   ├── menu.sh             # Menu quản lý vps tập trung
@@ -104,7 +104,7 @@ VPS Manager is a professional, high-performance Bash script to automate and opti
 bash <(curl -s https://raw.githubusercontent.com/leluongnghia/vps/main/vps-manager/install-nginx.sh)
 ```
 
-### Key Features (v1.6.7)
+### Key Features (v2.0.0)
 - **100% Nginx Standardized:** Cleaned up and completely removed OpenLiteSpeed to focus purely on high-performance Nginx.
 - **Kernel & Network Tuning:** Auto-configures TCP BBR, disables THP, sets CPU governor to performance, and boosts file descriptor limits.
 - **2-Layer Cache Architecture:** Integrates L1 Nginx FastCGI micro-cache with L2 Valkey/Redis Object Cache over Unix Socket.

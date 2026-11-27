@@ -37,10 +37,22 @@ setup_http_auth() {
         fi
     fi
     
+    if ! [[ "$user" =~ ^[A-Za-z0-9._-]{1,64}$ ]]; then
+        echo -e "${RED}Username chỉ gồm chữ, số, dấu chấm, gạch dưới, gạch ngang.${NC}"; pause; return
+    fi
+
     mkdir -p /etc/nginx/auth
-    htpasswd -c /etc/nginx/auth/.htpasswd "$user"
-    
-    log_info "Đã tạo file auth tại /etc/nginx/auth/.htpasswd."
+    # -c tạo mới (và XOÁ sạch) file -> chỉ dùng khi file chưa tồn tại, để không mất các user đã có
+    local htp_flags=""
+    [[ -f /etc/nginx/auth/.htpasswd ]] || htp_flags="-c"
+    if ! htpasswd $htp_flags /etc/nginx/auth/.htpasswd "$user"; then
+        log_error "Tạo tài khoản thất bại."
+        pause; return 1
+    fi
+    chown root:"$(nginx_worker_user)" /etc/nginx/auth/.htpasswd 2>/dev/null
+    chmod 640 /etc/nginx/auth/.htpasswd
+
+    log_info "Đã lưu tài khoản '$user' vào /etc/nginx/auth/.htpasswd."
     echo -e "${YELLOW}Để áp dụng, cấu hình sau có thể được include vào Nginx location cần bảo vệ:"
     echo -e "    auth_basic \"Restricted Area\";"
     echo -e "    auth_basic_user_file /etc/nginx/auth/.htpasswd;${NC}"
@@ -176,16 +188,4 @@ _img_install_tools() {
         # RHEL fallback
         command -v cwebp &>/dev/null || $PM libwebp-tools &>/dev/null
     fi
-}
-
-update_system() {
-    log_info "Đang cập nhật hệ thống..."
-    apt-get update
-    apt-get upgrade -y
-    
-    log_info "Đang update script..."
-    cd /root/vps-manager && git pull 2>/dev/null || echo "Git pull skipped."
-    
-    log_info "Update hoàn tất."
-    pause
 }

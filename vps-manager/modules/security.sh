@@ -16,7 +16,7 @@ security_menu() {
         echo -e "6.  Cấu hình Chống DDoS cơ bản (Nginx Rate Limit)"
         echo -e "7.  🛡️  7G Firewall (WAF đầy đủ - khuyên dùng)"
         echo -e "8.  🛡️  8G Firewall (WAF nâng cao - tích hợp 7G)"
-        echo -e "9.  🌍 Chặn IP theo Quốc gia (GeoIP Block)"
+        echo -e "9.  🌍 Chặn theo Quốc gia (qua Cloudflare CF-IPCountry)"
         echo -e "10. 🔒 Bảo mật PHP (Disable Dangerous Functions)"
         echo -e "11. 🛡️  Kiểm tra & Vá lỗi Bảo mật (Nginx Rift - CVE-2026-42945)"
         echo -e "0.  Quay lại Menu chính"
@@ -48,67 +48,65 @@ secure_php() {
     # List of dangerous functions (excluding curl_exec, curl_multi_exec, parse_ini_file to prevent breaking WordPress)
     local funcs="exec,passthru,shell_exec,system,proc_open,popen,show_source"
     
-    # Apply to all php.ini versions
-    for ver in 8.1 8.2 8.3 8.4; do
-        local ini="/etc/php/$ver/fpm/php.ini"
-        if [[ -f "$ini" ]]; then
-            # Handle: uncommented line, commented line, or missing line
-            if grep -q "^disable_functions" "$ini"; then
-                sed -i "s|^disable_functions.*|disable_functions = $funcs|" "$ini"
-            elif grep -q "^;disable_functions" "$ini"; then
-                sed -i "s|^;disable_functions.*|disable_functions = $funcs|" "$ini"
-            else
-                echo "disable_functions = $funcs" >> "$ini"
-            fi
-            log_info "Đã update disable_functions cho PHP $ver"
-            systemctl restart php$ver-fpm 2>/dev/null || true
+    # Áp dụng cho mọi php.ini của FPM: Debian (/etc/php/X.Y/fpm) và RHEL (/etc/php.ini)
+    local ini ver applied=0
+    for ini in /etc/php/*/fpm/php.ini /etc/php.ini; do
+        [[ -f "$ini" ]] || continue
+        # Handle: uncommented line, commented line, or missing line
+        if grep -q "^disable_functions" "$ini"; then
+            sed -i "s|^disable_functions.*|disable_functions = $funcs|" "$ini"
+        elif grep -q "^;disable_functions" "$ini"; then
+            sed -i "s|^;disable_functions.*|disable_functions = $funcs|" "$ini"
+        else
+            echo "disable_functions = $funcs" >> "$ini"
+        fi
+        ver=$(echo "$ini" | grep -oE '[0-9]+\.[0-9]+' | head -1)
+        if php_fpm_restart_safe "$ver"; then
+            log_info "Đã update disable_functions: $ini"
+            applied=$((applied + 1))
         fi
     done
+    [[ $applied -eq 0 ]] && log_warn "Không tìm thấy php.ini nào của PHP-FPM để cấu hình."
     if [[ -z "$1" ]]; then pause; fi
 }
 
-setup_firewall() {
-    log_info "Đang cấu hình Firewall & Fail2ban..."
-    if [[ "$OS_FAMILY" == "rhel" ]]; then
-        pkg_install firewalld fail2ban epel-release
-        
-        systemctl enable firewalld
-        systemctl start firewalld
-        
-        firewall-cmd --permanent --add-service=ssh
-        firewall-cmd --permanent --add-service=http
-        firewall-cmd --permanent --add-service=https
-        firewall-cmd --reload
-        
-        # Configure Fail2ban
-        cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.local
-        
-        # Enable SSH protection
-        cat >> /etc/fail2ban/jail.local <<EOF
-[sshd]
-enabled = true
-port = ssh
-filter = sshd
-logpath = /var/log/secure
-maxretry = 3
-bantime = 3600
-EOF
+# ── SSH helpers ───────────────────────────────────────────────────────────────
+
+# Các cổng sshd đang cấu hình (mỗi cổng 1 dòng)
+_ssh_ports() {
+    local p
+    p=$(sshd -T 2>/dev/null | awk '$1=="port"{print $2}')
+    if [[ -z "$p" ]]; then
+        p=$(grep -hE "^[[:space:]]*Port[[:space:]]+[0-9]+" /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf 2>/dev/null | awk '{print $2}')
+    fi
+    [[ -z "$p" ]] && p=22
+    echo "$p" | sort -un
+}
+
+_port_listening() {
+    ss -tlnH 2>/dev/null | awk '{print $4}' | grep -qE "[:.]$1\$"
+}
+
+# Restart sshd đúng cách trên cả Debian/Ubuntu (ssh, có thể socket-activated) và RHEL (sshd)
+_ssh_restart() {
+    systemctl daemon-reload
+    if systemctl is-active --quiet ssh.socket 2>/dev/null; then
+        systemctl restart ssh.socket
+    fi
+    if systemctl list-unit-files ssh.service 2>/dev/null | grep -q '^ssh\.service'; then
+        systemctl restart ssh
     else
-        pkg_install ufw fail2ban
-        
-        # Configure UFW
-        ufw default deny incoming
-        ufw default allow outgoing
-        ufw allow ssh
-        ufw allow 80/tcp
-        ufw allow 443/tcp
-        
-        # Enable UFW
-        echo "y" | ufw enable
-        
-        # Configure Fail2ban
-        # Configure Fail2ban override
-        cat > /etc/fail2ban/jail.local <<EOF
+        systemctl restart sshd
+    fi
+}
+
+# Ghi cấu hình fail2ban vào file riêng (không copy jail.conf -> không bị trùng section khi chạy lại)
+_write_fail2ban_jail() {
+    local ports
+    ports=$(_ssh_ports | paste -sd, -)
+    mkdir -p /etc/fail2ban/jail.d
+    cat > /etc/fail2ban/jail.d/vps-manager.local <<EOF
+# Managed by VPS-Manager
 [DEFAULT]
 bantime = 3600
 findtime = 600
@@ -116,61 +114,166 @@ maxretry = 5
 
 [sshd]
 enabled = true
-port = ssh
+port = ${ports}
 maxretry = 3
 bantime = 3600
 EOF
+    if [[ "$OS_FAMILY" == "rhel" ]]; then
+        echo "backend = systemd" >> /etc/fail2ban/jail.d/vps-manager.local
+    fi
+    # Gỡ section [sshd] do phiên bản cũ của script nối thêm vào jail.local (gây lỗi trùng section)
+    if [[ -f /etc/fail2ban/jail.local ]] && [[ $(grep -c '^\[sshd\]' /etc/fail2ban/jail.local) -gt 1 ]]; then
+        mv /etc/fail2ban/jail.local "/etc/fail2ban/jail.local.bak_$(date +%s)"
+        log_warn "jail.local cũ bị trùng section [sshd] - đã chuyển thành file .bak"
+    fi
+}
+
+setup_firewall() {
+    log_info "Đang cấu hình Firewall & Fail2ban..."
+
+    # Cổng SSH THỰC TẾ đang dùng - phải mở trước khi bật tường lửa để không tự khoá mình
+    local ssh_ports p
+    ssh_ports=$(_ssh_ports)
+    log_info "Cổng SSH đang dùng: $(echo $ssh_ports)"
+
+    if [[ "$OS_FAMILY" == "rhel" ]]; then
+        # fail2ban nằm trong EPEL -> bật EPEL trước, cài riêng để firewalld không bị kéo theo khi lỗi
+        pkg_install firewalld
+        pkg_install epel-release &>/dev/null || true
+        pkg_install fail2ban || log_warn "Không cài được fail2ban (cần EPEL)."
+
+        systemctl enable firewalld
+        systemctl start firewalld
+
+        firewall-cmd --permanent --add-service=ssh
+        for p in $ssh_ports; do
+            firewall-cmd --permanent --add-port="${p}/tcp"
+        done
+        firewall-cmd --permanent --add-service=http
+        firewall-cmd --permanent --add-service=https
+        firewall-cmd --reload
+    else
+        pkg_install ufw fail2ban
+
+        # Configure UFW
+        ufw default deny incoming
+        ufw default allow outgoing
+        for p in $ssh_ports; do
+            ufw allow "${p}/tcp"
+        done
+        ufw allow 80/tcp
+        ufw allow 443/tcp
+
+        # Enable UFW
+        echo "y" | ufw enable
     fi
 
-    systemctl restart fail2ban
-    systemctl enable fail2ban
-    log_info "Tường lửa & Fail2ban đã được cài đặt."
+    if command -v fail2ban-client &>/dev/null; then
+        _write_fail2ban_jail
+        systemctl enable fail2ban &>/dev/null
+        if systemctl restart fail2ban; then
+            log_info "Tường lửa & Fail2ban đã được cài đặt."
+        else
+            log_error "Fail2ban không khởi động được. Kiểm tra: journalctl -u fail2ban -n 30"
+        fi
+    else
+        log_info "Tường lửa đã được cài đặt (không có Fail2ban)."
+    fi
     if [[ -z "$1" ]]; then pause; fi
 }
 
 change_ssh_port() {
-    # Get current SSH port
-    current_port=$(grep -E "^Port " /etc/ssh/sshd_config | awk '{print $2}')
-    current_port=${current_port:-22}
-    echo -e "${YELLOW}Port SSH hiện tại: ${current_port}${NC}"
-    
+    local current_ports current_port new_port p
+    current_ports=$(_ssh_ports)
+    current_port=$(echo "$current_ports" | head -1)
+    echo -e "${YELLOW}Port SSH hiện tại: $(echo $current_ports)${NC}"
+
     read -p "Nhập cổng SSH mới (1024-65535): " new_port
     if [[ ! "$new_port" =~ ^[0-9]+$ ]] || [[ "$new_port" -lt 1024 ]] || [[ "$new_port" -gt 65535 ]]; then
         echo -e "${RED}Cổng không hợp lệ!${NC}"
         pause; return
     fi
-    
-    # Update sshd_config
-    if grep -q "^Port" /etc/ssh/sshd_config; then
-        sed -i "s/^Port .*/Port $new_port/" /etc/ssh/sshd_config
-    else
-        echo "Port $new_port" >> /etc/ssh/sshd_config
+    if echo "$current_ports" | grep -qx "$new_port"; then
+        echo -e "${YELLOW}SSH đã dùng cổng $new_port rồi.${NC}"
+        pause; return
     fi
-    
-    # UFW / Firewalld: allow new port FIRST, then remove old
+    if _port_listening "$new_port"; then
+        echo -e "${RED}Cổng $new_port đang được dịch vụ khác sử dụng!${NC}"
+        pause; return
+    fi
+
+    # 1. SELinux: sshd chỉ bind được cổng lạ khi cổng đó có nhãn ssh_port_t
+    if selinux_active; then
+        command -v semanage &>/dev/null || pkg_install policycoreutils-python-utils &>/dev/null
+        if ! semanage port -a -t ssh_port_t -p tcp "$new_port" 2>/dev/null \
+            && ! semanage port -m -t ssh_port_t -p tcp "$new_port" 2>/dev/null; then
+            log_error "Không gán được nhãn SELinux ssh_port_t cho cổng $new_port. Huỷ đổi cổng."
+            pause; return 1
+        fi
+    fi
+
+    # 2. Mở cổng mới trên tường lửa TRƯỚC (chưa đóng cổng cũ)
     if [[ "$OS_FAMILY" == "rhel" ]]; then
-        firewall-cmd --permanent --add-port=${new_port}/tcp
-        if [[ "$current_port" != "$new_port" ]] && [[ "$current_port" != "22" ]]; then
-            firewall-cmd --permanent --remove-port=${current_port}/tcp 2>/dev/null
-        elif [[ "$current_port" == "22" ]]; then
-            firewall-cmd --permanent --remove-service=ssh 2>/dev/null
-            firewall-cmd --permanent --remove-port=22/tcp 2>/dev/null
+        if systemctl is-active --quiet firewalld; then
+            firewall-cmd --permanent --add-port="${new_port}/tcp"
+            firewall-cmd --reload
         fi
-        firewall-cmd --reload
-    else
-        ufw allow $new_port/tcp
-        if [[ "$current_port" != "$new_port" ]] && [[ "$current_port" != "22" ]]; then
-            ufw delete allow $current_port/tcp 2>/dev/null
-        elif [[ "$current_port" == "22" ]]; then
-            ufw delete allow ssh 2>/dev/null
-            ufw delete allow 22/tcp 2>/dev/null
-        fi
+    elif command -v ufw &>/dev/null; then
+        ufw allow "${new_port}/tcp"
     fi
-    
-    systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null
-    
-    log_info "Đã đổi Port SSH sang $new_port. Kết nối lại với port mới!"
-    echo -e "${YELLOW}Lưu ý: ssh -p $new_port root@<IP_VPS>${NC}"
+
+    # 3. Sửa sshd_config (có backup), kiểm tra cú pháp rồi mới restart
+    local cfg="/etc/ssh/sshd_config"
+    local bak="${cfg}.bak_$(date +%s)"
+    cp -p "$cfg" "$bak"
+    sed -i -E '/^[[:space:]]*Port[[:space:]]+[0-9]+/d' "$cfg"
+    # Đặt Port ở đầu file để không rơi vào trong khối Match
+    sed -i "1i Port $new_port" "$cfg"
+
+    if ! sshd -t 2>/dev/null; then
+        log_error "sshd_config có lỗi sau khi sửa - đã hoàn tác, cổng SSH KHÔNG đổi."
+        sshd -t
+        cp -p "$bak" "$cfg"
+        pause; return 1
+    fi
+
+    _ssh_restart
+    sleep 2
+
+    # 4. Chỉ đóng cổng cũ khi sshd ĐÃ nghe trên cổng mới
+    if ! _port_listening "$new_port"; then
+        log_error "sshd KHÔNG nghe trên cổng $new_port sau khi restart - đang hoàn tác."
+        cp -p "$bak" "$cfg"
+        _ssh_restart
+        log_warn "Đã khôi phục cấu hình cũ. Cổng SSH vẫn là: $(echo $current_ports)"
+        pause; return 1
+    fi
+
+    for p in $current_ports; do
+        [[ "$p" == "$new_port" ]] && continue
+        if [[ "$OS_FAMILY" == "rhel" ]]; then
+            if systemctl is-active --quiet firewalld; then
+                firewall-cmd --permanent --remove-port="${p}/tcp" &>/dev/null
+                [[ "$p" == "22" ]] && firewall-cmd --permanent --remove-service=ssh &>/dev/null
+            fi
+        elif command -v ufw &>/dev/null; then
+            ufw delete allow "${p}/tcp" &>/dev/null
+            [[ "$p" == "22" ]] && ufw delete allow ssh &>/dev/null
+        fi
+    done
+    [[ "$OS_FAMILY" == "rhel" ]] && systemctl is-active --quiet firewalld && firewall-cmd --reload
+
+    # 5. Fail2ban phải theo cổng mới
+    if command -v fail2ban-client &>/dev/null; then
+        _write_fail2ban_jail
+        systemctl restart fail2ban &>/dev/null
+    fi
+
+    log_info "Đã đổi Port SSH sang $new_port (đã kiểm tra sshd đang nghe trên cổng mới)."
+    echo -e "${YELLOW}QUAN TRỌNG: GIỮ NGUYÊN phiên SSH này, mở một cửa sổ khác và thử:${NC}"
+    echo -e "${YELLOW}    ssh -p $new_port root@<IP_VPS>${NC}"
+    echo -e "${YELLOW}Nếu VPS có tường lửa của nhà cung cấp (Security Group), hãy mở cổng $new_port ở đó.${NC}"
+    echo -e "Backup cấu hình cũ: $bak"
     pause
 }
 
@@ -194,15 +297,72 @@ set_max_auth_tries() {
     read -p "Nhập số lần thử login tối đa (ví dụ 3): " tries
     if [[ ! "$tries" =~ ^[0-9]+$ ]]; then return; fi
     
-    if grep -q "MaxAuthTries" /etc/ssh/sshd_config; then
-        sed -i "s/.*MaxAuthTries.*/MaxAuthTries $tries/" /etc/ssh/sshd_config
-    else
-        echo "MaxAuthTries $tries" >> /etc/ssh/sshd_config
+    if [[ "$tries" -lt 1 || "$tries" -gt 20 ]]; then
+        echo -e "${RED}Giá trị không hợp lệ (1-20).${NC}"; pause; return
     fi
-    
-    systemctl restart ssh
-    log_info "Đã thiết lập MaxAuthTries = $tries"
+
+    local cfg="/etc/ssh/sshd_config"
+    local bak="${cfg}.bak_$(date +%s)"
+    cp -p "$cfg" "$bak"
+    sed -i -E '/^[#[:space:]]*MaxAuthTries[[:space:]]/d' "$cfg"
+    # Đặt ở đầu file để không rơi vào trong khối Match
+    sed -i "1i MaxAuthTries $tries" "$cfg"
+
+    if ! sshd -t 2>/dev/null; then
+        log_error "sshd_config có lỗi sau khi sửa - đã hoàn tác."
+        cp -p "$bak" "$cfg"
+        pause; return 1
+    fi
+
+    if _ssh_restart; then
+        rm -f "$bak"
+        log_info "Đã thiết lập MaxAuthTries = $tries"
+    else
+        log_error "Không restart được SSH. Backup cấu hình cũ: $bak"
+    fi
     pause
+}
+
+# Sửa nhiều vhost cùng lúc với rollback toàn bộ nếu nginx -t lỗi.
+# Dùng: _vhost_batch_edit <hàm_sửa> <domain...>   (hàm_sửa nhận 1 tham số: đường dẫn conf)
+_vhost_batch_edit() {
+    local fn=$1; shift
+    local -a confs=() baks=()
+    local d conf bak i
+    for d in "$@"; do
+        conf="/etc/nginx/sites-available/$d"
+        [[ -f "$conf" ]] || continue
+        bak=$(backup_nginx_config "$conf")
+        confs+=("$conf"); baks+=("$bak")
+        "$fn" "$conf"
+    done
+    [[ ${#confs[@]} -eq 0 ]] && { log_warn "Không có vhost nào để sửa."; return 1; }
+
+    local out
+    if out=$(nginx -t 2>&1); then
+        systemctl reload nginx
+        for bak in "${baks[@]}"; do rm -f "$bak"; done
+        return 0
+    fi
+    log_error "Nginx config có lỗi - đang hoàn tác toàn bộ thay đổi:"
+    echo "$out" | tail -8
+    for i in "${!confs[@]}"; do
+        [[ -f "${baks[$i]}" ]] && mv -f "${baks[$i]}" "${confs[$i]}"
+    done
+    return 1
+}
+
+# Danh sách domain có vhost (bỏ default/html và các file backup)
+_all_vhost_domains() {
+    local conf d
+    for conf in /etc/nginx/sites-available/*; do
+        [[ -f "$conf" ]] || continue
+        d=$(basename "$conf")
+        # 000-* là vhost nội bộ của công cụ (phpMyAdmin): WAF 7G/8G chặn các tham số chứa câu SQL
+        # nên áp vào đó sẽ làm phpMyAdmin không dùng được.
+        [[ "$d" == "default" || "$d" == "html" || "$d" == *.bak* || "$d" == 000-* ]] && continue
+        echo "$d"
+    done
 }
 
 setup_nginx_dos() {
@@ -219,41 +379,65 @@ EOF
     echo -e "0. Không, chỉ tạo Zone (Cần Config tay)"
     read -p "Chọn: " c
     
-    if [[ "$c" == "0" ]]; then return; fi
-    
-    # Function to apply limit
-    apply_limit() {
-        local domain=$1
-        local conf="/etc/nginx/sites-available/$domain"
-        if [[ -f "$conf" ]]; then
-            if ! grep -q "limit_req zone=one" "$conf"; then
-                # Insert after server_name
-                sed -i "/server_name/a \    limit_req zone=one burst=20 nodelay;" "$conf"
-                log_info "Đã áp dụng cho $domain"
-            else
-                log_warn "$domain đã có cấu hình limit."
-            fi
+    if [[ "$c" == "0" ]]; then nginx_test_reload; pause; return; fi
+
+    # Hàm sửa 1 vhost (nhận đường dẫn conf)
+    _apply_limit_conf() {
+        local conf=$1
+        if ! grep -q "limit_req zone=one" "$conf"; then
+            # Insert after server_name
+            sed -i "/server_name/a \    limit_req zone=one burst=20 nodelay;" "$conf"
+        fi
+        # limit_req đặt trong server block sẽ che limit_req cấp http -> phải khai báo lại giới hạn wp-login tại đây
+        if grep -qs 'zone=vpsm_wplogin' /etc/nginx/conf.d/vps-manager-wplogin.conf \
+            && ! grep -q "limit_req zone=vpsm_wplogin" "$conf"; then
+            sed -i "/server_name/a \    limit_req zone=vpsm_wplogin burst=10 nodelay;" "$conf"
         fi
     }
-    
+
     if [[ "$c" == "1" ]]; then
-        for conf in /etc/nginx/sites-available/*; do
-            d=$(basename "$conf")
-            if [[ "$d" != "default" && "$d" != "html" ]]; then
-                apply_limit "$d"
-            fi
-        done
-        nginx -t && systemctl reload nginx
-        log_info "Đã áp dụng Rate Limit cho toàn bộ website."
-        
+        if _vhost_batch_edit _apply_limit_conf $(_all_vhost_domains); then
+            log_info "Đã áp dụng Rate Limit cho toàn bộ website."
+        else
+            log_error "Áp dụng Rate Limit THẤT BẠI - cấu hình các website giữ nguyên."
+        fi
     elif [[ "$c" == "2" ]]; then
         source "$(dirname "${BASH_SOURCE[0]}")/site.sh"
         select_site || return
-        apply_limit "$SELECTED_DOMAIN"
-        nginx -t && systemctl reload nginx
-        log_info "Đã áp dụng Rate Limit cho $SELECTED_DOMAIN."
+        if _vhost_batch_edit _apply_limit_conf "$SELECTED_DOMAIN"; then
+            log_info "Đã áp dụng Rate Limit cho $SELECTED_DOMAIN."
+        else
+            log_error "Áp dụng Rate Limit THẤT BẠI - cấu hình giữ nguyên."
+        fi
     fi
     pause
+}
+
+# Kiểm tra 1 file WAF snippet có được nginx chấp nhận không, bằng 1 config thử độc lập
+# (không đụng tới config đang chạy). Trả về 1 nếu snippet lỗi.
+_waf_snippet_valid() {
+    local snippet=$1 tmp rc
+    tmp=$(mktemp -d) || return 1
+    cat > "$tmp/nginx.conf" <<EOF
+pid $tmp/nginx.pid;
+error_log $tmp/error.log;
+events {}
+http {
+    access_log off;
+    server {
+        listen 127.0.0.1:65500;
+        include $snippet;
+    }
+}
+EOF
+    nginx -t -c "$tmp/nginx.conf" &>"$tmp/out"
+    rc=$?
+    if [[ $rc -ne 0 ]]; then
+        log_error "Snippet $(basename "$snippet") bị nginx từ chối:"
+        grep -v "test failed" "$tmp/out" | tail -5
+    fi
+    rm -rf "$tmp"
+    return $rc
 }
 
 setup_7g_firewall() {
@@ -271,7 +455,7 @@ setup_7g_firewall() {
 set $7g_block 0;
 
 # Block malicious query strings
-if ($query_string ~* "(eval\()|(javascript:)|(base64_encode)|(GLOBALS|REQUEST)(=|\[|%)|(union.*select)|(concat.*()|(benchmark\()|(from.*information_schema)|(sleep\()|(into.*outfile)|(load_file\()|(0x[0-9a-f]{2}){10,}|(\\|\.\.\.|\.\./|~|`|<|>|\|)") {
+if ($query_string ~* "(eval\()|(javascript:)|(base64_encode)|(GLOBALS|REQUEST)(=|\[|%)|(union.*select)|(concat.*\()|(benchmark\()|(from.*information_schema)|(sleep\()|(into.*outfile)|(load_file\()|(0x[0-9a-f]{2}){10,}|(\\|\.\.\.|\.\./|~|`|<|>|\|)") {
     set $7g_block 1;
 }
 if ($query_string ~* "(<|%3C).*script.*(>|%3E)") {
@@ -288,7 +472,7 @@ if ($query_string ~* "(\%00|\%0A|\%0D|\%27|\%3C|\%3E|\%00)") {
 }
 
 # 7G:[REQUEST URI]
-if ($request_uri ~* "(eval\()|(javascript:)|(base64_encode)|(union.*select)|(concat.*()|(sleep\()|(0x[0-9a-f]{2}){10,}") {
+if ($request_uri ~* "(eval\()|(javascript:)|(base64_encode)|(union.*select)|(concat.*\()|(sleep\()|(0x[0-9a-f]{2}){10,}") {
     set $7g_block 6;
 }
 if ($request_uri ~* "(\.php/|/xmlrpc\.php.*methodCall|wp-config\.php|etc/passwd|boot\.ini|self/environ)") {
@@ -301,7 +485,9 @@ if ($request_method !~ ^(GET|HEAD|POST|PUT|DELETE|OPTIONS)$) {
 }
 
 # 7G:[USER AGENT]
-if ($http_user_agent ~* "(bot|crawl|archiver|spider|libwww|wget|python|scan|hack|inject|sqlmap|nikto|h4x0r|masscan|ZmEu|dirbuster|nmap|curl/7\.[0-3])") {
+# Chỉ chặn công cụ tấn công/quét. KHÔNG chặn chung "bot|crawl|spider|wget|python|curl"
+# vì sẽ chặn luôn Googlebot/Bingbot và cron wget của chính server.
+if ($http_user_agent ~* "(archiver|libwww-perl|sqlmap|nikto|h4x0r|masscan|ZmEu|dirbuster|nmap|acunetix|nessus|wpscan|havij|zgrab)") {
     set $7g_block 9;
 }
 
@@ -332,6 +518,13 @@ WAF_EOF
     echo -e "2. Chọn website cụ thể"
     echo -e "0. Chỉ tạo file rule (cần include tay)"
     read -p "Chọn: " c
+
+    # Kiểm tra rule hợp lệ TRƯỚC khi để lại trên đĩa: site.sh tự include 7g.conf vào vhost mới nếu file tồn tại
+    if ! _waf_snippet_valid "$waf_file"; then
+        rm -f "$waf_file"
+        log_error "7G WAF KHÔNG được cài (rule lỗi cú pháp). Cấu hình các website giữ nguyên."
+        pause; return 1
+    fi
 
     [[ "$c" == "0" ]] && { log_info "File rule tại: $waf_file"; pause; return; }
 
@@ -369,7 +562,7 @@ if ($query_string ~* "(document\.cookie|document\.write|window\.location|parent\
     set $8g_block 2;
 }
 # Block common Web shells
-if ($query_string ~* "(c99|r57|shell|passthru|phpinfo|base64_decode|str_rot13|gzuncompress)") {
+if ($query_string ~* "(\bc99\b|\br57\b|c99shell|shell_exec|passthru|base64_decode|str_rot13|gzuncompress)") {
     set $8g_block 3;
 }
 # 8G: Advanced UA blocking (AI/Scraper bots)
@@ -392,6 +585,12 @@ WAF_EOF
     echo -e "0. Chỉ tạo file rule"
     read -p "Chọn: " c
 
+    if ! _waf_snippet_valid "$waf_file"; then
+        rm -f "$waf_file"
+        log_error "8G WAF KHÔNG được cài (rule lỗi cú pháp). Cấu hình các website giữ nguyên."
+        pause; return 1
+    fi
+
     [[ "$c" == "0" ]] && { log_info "File rule tại: $waf_file"; pause; return; }
 
     # Bỏ 7G nếu đã có, thay bằng 8G (đã include 7G)
@@ -401,90 +600,63 @@ WAF_EOF
 
 # Helper: Áp dụng 1 snippet vào 1 Nginx vhost cụ thể
 # $1: domain  $2: snippet_file  $3: include_line  $4: old_snippet (optional)
+# (dùng biến _SNIP_* vì được gọi qua _vhost_batch_edit với 1 tham số là đường dẫn conf)
 _do_apply_snippet() {
-    local domain=$1
-    local snippet_file=$2
-    local include_line=$3
-    local old_snippet="${4:-}"
-    local conf="/etc/nginx/sites-available/$domain"
+    local conf=$1
+    local snippet_file=$_SNIP_FILE
+    local include_line=$_SNIP_INCLUDE
+    local old_snippet="${_SNIP_OLD:-}"
     [[ ! -f "$conf" ]] && return
 
     # Xóa snippet cũ nếu được chỉ định
     if [[ -n "$old_snippet" ]]; then
-        sed -i "/include.*${old_snippet}/d" "$conf" 2>/dev/null
+        sed -i "\|include[[:space:]].*/${old_snippet};|d" "$conf" 2>/dev/null
     fi
 
-    if ! grep -q "$snippet_file" "$conf"; then
+    if ! grep -qF "/${snippet_file};" "$conf"; then
+        # Chỉ chèn sau dòng server_name ĐẦU TIÊN của mỗi server block có root/proxy (tránh block redirect)
         sed -i "/server_name/a\\    ${include_line}" "$conf"
-        log_info "Đã kích hoạt $snippet_file cho $domain"
-    else
-        log_warn "$domain đã có $snippet_file."
     fi
 }
 
-# Helper: Áp dụng snippet vào Nginx vhost(s)
+# Helper: Áp dụng snippet vào Nginx vhost(s) - rollback toàn bộ nếu nginx -t lỗi
 # $1: snippet filename  $2: include directive  $3: choice (1=all,2=select)  $4: old snippet to remove (optional)
 _apply_nginx_snippet() {
     local snippet_file="$1"
     local include_line="$2"
     local choice="$3"
     local old_snippet="${4:-}"
+    _SNIP_FILE="$snippet_file"; _SNIP_INCLUDE="$include_line"; _SNIP_OLD="$old_snippet"
 
     if [[ "$choice" == "1" ]]; then
-        for conf in /etc/nginx/sites-available/*; do
-            local d
-            d=$(basename "$conf")
-            [[ "$d" == "default" || "$d" == "html" ]] && continue
-            _do_apply_snippet "$d" "$snippet_file" "$include_line" "$old_snippet"
-        done
-        nginx -t && systemctl reload nginx
-        log_info "Đã áp dụng ${snippet_file} cho toàn bộ website."
+        if _vhost_batch_edit _do_apply_snippet $(_all_vhost_domains); then
+            log_info "Đã áp dụng ${snippet_file} cho toàn bộ website."
+        else
+            log_error "Áp dụng ${snippet_file} THẤT BẠI - cấu hình các website giữ nguyên."
+            return 1
+        fi
     elif [[ "$choice" == "2" ]]; then
         source "$(dirname "${BASH_SOURCE[0]}")/site.sh"
         select_site || return
-        _do_apply_snippet "$SELECTED_DOMAIN" "$snippet_file" "$include_line" "$old_snippet"
-        nginx -t && systemctl reload nginx
-        log_info "Đã áp dụng ${snippet_file} cho ${SELECTED_DOMAIN}."
+        if _vhost_batch_edit _do_apply_snippet "$SELECTED_DOMAIN"; then
+            log_info "Đã áp dụng ${snippet_file} cho ${SELECTED_DOMAIN}."
+        else
+            log_error "Áp dụng ${snippet_file} THẤT BẠI - cấu hình giữ nguyên."
+            return 1
+        fi
     fi
 }
 
 
 setup_geoip_block() {
-    log_info "Cấu hình GeoIP Block (chặn IP theo quốc gia)..."
+    log_info "Cấu hình chặn theo quốc gia (dựa trên header CF-IPCountry của Cloudflare)..."
 
-    # Kiểm tra ngx_http_geoip2_module
-    if ! nginx -V 2>&1 | grep -q "geoip2\|geoip"; then
-        echo -e "${YELLOW}Nginx chưa có GeoIP module. Đang cài libnginx-mod-http-geoip2...${NC}"
-        if [[ "$OS_FAMILY" == "debian" ]]; then
-            DEBIAN_FRONTEND=noninteractive apt-get install -y libnginx-mod-http-geoip2 geoipupdate 2>/dev/null || {
-                DEBIAN_FRONTEND=noninteractive apt-get install -y libnginx-mod-http-geoip 2>/dev/null
-            }
-        else
-            dnf install -y nginx-mod-http-geoip2 GeoIP GeoIP-devel 2>/dev/null
-        fi
-    fi
-
-    # Cài mmdb-bin / geoipupdate để có database
-    if ! command -v geoiplookup &>/dev/null && ! command -v mmdblookup &>/dev/null; then
-        if [[ "$OS_FAMILY" == "debian" ]]; then
-            DEBIAN_FRONTEND=noninteractive apt-get install -y mmdb-bin geoip-bin 2>/dev/null
-        fi
-    fi
-
-    # Tải GeoLite2-Country database (không cần API key cho GeoLite2 cũ)
-    local geoip_dir="/etc/nginx/geoip"
-    mkdir -p "$geoip_dir"
-    if [[ ! -f "${geoip_dir}/GeoLite2-Country.mmdb" ]]; then
-        log_info "Đang tải GeoLite2 Country database..."
-        # Dùng bản mirror public của GeoLite2
-        local db_url="https://github.com/P3TERX/GeoLite.mmdb/raw/download/GeoLite2-Country.mmdb"
-        curl -fsSL -o "${geoip_dir}/GeoLite2-Country.mmdb" "$db_url" || \
-        wget -qO "${geoip_dir}/GeoLite2-Country.mmdb" "$db_url" || {
-            log_error "Không thể tải GeoLite2 database. Kiểm tra kết nối mạng."
-            pause; return
-        }
-        log_info "GeoLite2 database đã tải về: ${geoip_dir}/GeoLite2-Country.mmdb"
-    fi
+    # Tính năng này đọc header CF-IPCountry do Cloudflare gắn vào request, KHÔNG dùng database GeoIP.
+    echo -e "${YELLOW}LƯU Ý:${NC}"
+    echo -e "  • Chỉ có tác dụng với website đang chạy qua Cloudflare (bật proxy - đám mây cam)."
+    echo -e "  • Request đi thẳng vào IP của VPS (không qua Cloudflare) sẽ KHÔNG bị chặn."
+    echo -e "    → Nên chỉ cho phép dải IP Cloudflare truy cập cổng 80/443 trên tường lửa."
+    echo ""
 
     # Hỏi user chọn quốc gia cần block
     echo -e "${YELLOW}Danh sách code quốc gia cần BLOCK (ISO 3166-1 alpha-2):${NC}"
@@ -493,50 +665,59 @@ setup_geoip_block() {
     read -p "Nhập danh sách quốc gia block: " country_list
     [[ -z "$country_list" ]] && { log_warn "Không có quốc gia nào được nhập."; pause; return; }
 
-    # Tạo cấu hình GeoIP
+    local code valid_codes=""
+    for code in $country_list; do
+        code=$(echo "$code" | tr '[:lower:]' '[:upper:]')
+        if [[ "$code" =~ ^[A-Z]{2}$ ]]; then
+            valid_codes+="$code "
+        else
+            log_warn "Bỏ qua mã không hợp lệ: $code"
+        fi
+    done
+    [[ -z "$valid_codes" ]] && { log_error "Không có mã quốc gia hợp lệ nào."; pause; return; }
+    country_list="${valid_codes% }"
+
+    # Tạo cấu hình map
     local geoip_conf="/etc/nginx/conf.d/geoip_block.conf"
     {
-        echo "# GeoIP Block - Tạo bởi VPS Manager"
+        echo "# Country Block (Cloudflare CF-IPCountry) - Tạo bởi VPS Manager"
         echo "map \$http_cf_ipcountry \$is_blocked_country {"
         echo "    default 0;"
         for code in $country_list; do
-            code=$(echo "$code" | tr '[:lower:]' '[:upper:]')
             echo "    $code 1;"
         done
         echo "}"
-        echo ""
-        echo "# Whitelist Search Engine Crawlers (Google, Facebook, Bing...)"
-        echo "map \$http_user_agent \$is_search_bot {"
-        echo "    default 0;"
-        echo "    \"~*(Googlebot|bingbot|facebookexternalhit|Facebot|Twitterbot|Applebot|DuckDuckBot|YandexBot)\" 1;"
-        echo "}"
     } > "$geoip_conf"
 
-    # Tạo snippet để include trong server block
+    # Snippet để include trong server block.
+    # Không whitelist theo User-Agent: UA giả mạo được nên whitelist đó chính là lỗ hổng vượt chặn.
     cat > /etc/nginx/snippets/geoip_block.conf <<'GEOF'
-# Block countries defined in geoip_block.conf
-set $country_block_flag 0;
+# Block countries defined in conf.d/geoip_block.conf (Cloudflare CF-IPCountry)
 if ($is_blocked_country) {
-    set $country_block_flag 1;
-}
-if ($is_search_bot) {
-    set $country_block_flag 0;
-}
-if ($country_block_flag = 1) {
-    return 403 "Access Denied: Your country ($http_cf_ipcountry) is restricted from accessing this website.";
+    return 403;
 }
 GEOF
 
-    echo -e "${YELLOW}Áp dụng GeoIP Block cho website:${NC}"
+    # File map trong conf.d được nạp ngay ở lần reload tới -> phải hợp lệ trước khi đi tiếp
+    if ! nginx -t &>/dev/null; then
+        log_error "Cấu hình chặn quốc gia bị nginx từ chối - đã gỡ bỏ:"
+        nginx -t 2>&1 | tail -5
+        rm -f "$geoip_conf" /etc/nginx/snippets/geoip_block.conf
+        pause; return 1
+    fi
+
+    echo -e "${YELLOW}Áp dụng chặn quốc gia cho website:${NC}"
     echo -e "1. Áp dụng cho TẤT CẢ website"
     echo -e "2. Chọn website cụ thể"
     echo -e "0. Chỉ tạo config (apply tay)"
     read -p "Chọn: " c
 
-    [[ "$c" != "0" ]] && _apply_nginx_snippet "geoip_block.conf" "include /etc/nginx/snippets/geoip_block.conf;" "$c"
-
-    nginx -t && systemctl reload nginx && log_info "\u2705 GeoIP Block \u0111\u00e3 \u0111\u01b0\u1ee3c c\u1ea5u h\u00ecnh!"
-    echo -e "${YELLOW}Qu\u1ed1c gia b\u1ecb block: ${country_list}${NC}"
+    if [[ "$c" == "0" ]]; then
+        nginx_test_reload
+        log_info "Đã tạo config. Thêm dòng sau vào server block: include /etc/nginx/snippets/geoip_block.conf;"
+    elif _apply_nginx_snippet "geoip_block.conf" "include /etc/nginx/snippets/geoip_block.conf;" "$c"; then
+        log_info "✅ Đã cấu hình chặn quốc gia: ${country_list}"
+    fi
     pause
 }
 

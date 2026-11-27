@@ -74,9 +74,15 @@ EOF
             sed -i '/http {/a \    client_max_body_size 128M;' /etc/nginx/nginx.conf
         fi
         
+        # SELinux (RHEL/Oracle): cho nginx/php-fpm đọc-ghi /var/www và proxy tới app
+        selinux_allow_web
+
         systemctl enable nginx
-        systemctl start nginx
-        log_info "Nginx (Mainline) installed successfully."
+        if systemctl start nginx; then
+            log_info "Nginx (Mainline) installed successfully."
+        else
+            log_error "Nginx đã cài nhưng KHÔNG khởi động được. Kiểm tra: nginx -t ; journalctl -u nginx -n 30"
+        fi
     fi
 
     # Auto-harden nginx.conf sau khi cài (idempotent)
@@ -92,6 +98,10 @@ _configure_nginx_global() {
 
     log_info "Đang tối ưu hóa nginx.conf (Performance + Security)..."
 
+    # Backup để hoàn tác nếu nginx -t lỗi sau khi chỉnh
+    local nginx_conf_bak="${nginx_conf}.bak_vpsm_$$"
+    cp -p "$nginx_conf" "$nginx_conf_bak"
+
     # ── worker_processes auto ──────────────────────────────
     sed -i 's/^worker_processes.*/worker_processes auto;/' "$nginx_conf" 2>/dev/null || true
 
@@ -104,7 +114,8 @@ _configure_nginx_global() {
     fi
 
     # ── Gzip toàn cầu ─────────────────────────────────────
-    if ! grep -q "vps-manager-gzip" "$nginx_conf"; then
+    # nginx.conf của distro thường đã có "gzip on;" -> chèn thêm sẽ thành directive trùng lặp
+    if ! grep -q "vps-manager-gzip" "$nginx_conf" && ! grep -qE "^[[:space:]]*gzip[[:space:]]+on;" "$nginx_conf"; then
         local gzip_block
         gzip_block='
     # vps-manager-gzip
@@ -149,9 +160,11 @@ SECEOF
 
     # ── WordPress Security Locations snippet ──────────────
     local wp_sec_conf="/etc/nginx/snippets/wp-security.conf"
-    if [[ ! -f "$wp_sec_conf" ]]; then
+    # Ghi lại khi file chưa có HOẶC còn là bản cũ (không có dấu rev2)
+    if [[ ! -f "$wp_sec_conf" ]] || ! grep -q "wp-security-rev2" "$wp_sec_conf"; then
         cat > "$wp_sec_conf" << 'WPSEC'
-# VPS Manager - WordPress Security Locations
+# VPS Manager - WordPress Security Locations (wp-security-rev2)
+# File này phải được include TRƯỚC "location ~ \.php$" trong server block thì các luật chặn PHP mới có tác dụng.
 # Chặn truy cập các file nhạy cảm
 location ~* /xmlrpc\.php$ {
     deny all;
@@ -168,10 +181,12 @@ location ~* \.(bak|conf|dist|fla|inc|ini|log|sql|swp|tar|gz|zip)$ {
 }
 # Chặn PHP trong uploads/ (ngăn web shell)
 location ~* /(?:uploads|files)/.*\.php$ { deny all; }
-# Bảo vệ wp-includes
-location ~* /wp-includes/.*\.php$ {
-    deny all;
-}
+# Bảo vệ wp-includes (bộ luật chuẩn của WordPress: chặn gọi trực tiếp file PHP nội bộ,
+# nhưng KHÔNG chặn wp-includes/js/tinymce/wp-tinymce.php mà trình soạn thảo cần)
+location ~* ^/wp-admin/includes/ { deny all; }
+location ~* ^/wp-includes/[^/]+\.php$ { deny all; }
+location ~* ^/wp-includes/js/tinymce/langs/.+\.php$ { deny all; }
+location ~* ^/wp-includes/theme-compat/ { deny all; }
 WPSEC
         log_info "✓ Tạo wp-security.conf snippet"
     fi
@@ -192,9 +207,12 @@ FCEOF
     # ── Kiểm tra & reload ─────────────────────────────────
     if nginx -t 2>/dev/null; then
         systemctl reload nginx 2>/dev/null || true
+        rm -f "$nginx_conf_bak"
         log_info "✓ nginx.conf đã được tối ưu và reload thành công"
     else
-        log_warn "⚠ nginx.conf có lỗi sau khi chỉnh. Kiểm tra: nginx -t"
+        log_warn "⚠ nginx.conf có lỗi sau khi chỉnh - đã khôi phục bản trước đó:"
+        nginx -t 2>&1 | tail -5
+        mv -f "$nginx_conf_bak" "$nginx_conf"
     fi
 }
 
@@ -215,25 +233,24 @@ install_mariadb() {
     db_admin_pass=$(openssl rand -base64 32 | tr -dc 'a-zA-Z0-9' | head -c 32)
 
     # Bảo mật: Cấu hình user admin wpdbadmin và bảo vệ user root
-    mariadb <<SQLEOF 2>/dev/null || mysql <<SQLEOF2 2>/dev/null
-use mysql;
+    local db_client="mariadb"
+    command -v mariadb &>/dev/null || db_client="mysql"
+    if ! $db_client <<SQLEOF
 FLUSH PRIVILEGES;
 CREATE USER IF NOT EXISTS 'wpdbadmin'@'localhost' IDENTIFIED BY '${db_admin_pass}';
 GRANT ALL PRIVILEGES ON *.* TO 'wpdbadmin'@'localhost' WITH GRANT OPTION;
 ALTER USER 'root'@'localhost' IDENTIFIED BY '${db_admin_pass}';
 DROP USER IF EXISTS ''@'localhost';
 DROP DATABASE IF EXISTS test;
-DELETE FROM mysql.db WHERE Db='test' OR Db='test_%';
+DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';
 FLUSH PRIVILEGES;
 SQLEOF
-use mysql;
-CREATE USER IF NOT EXISTS 'wpdbadmin'@'localhost' IDENTIFIED BY '${db_admin_pass}';
-GRANT ALL PRIVILEGES ON *.* TO 'wpdbadmin'@'localhost' WITH GRANT OPTION;
-ALTER USER 'root'@'localhost' IDENTIFIED BY '${db_admin_pass}';
-DELETE FROM mysql.user WHERE User='';
-DROP DATABASE IF EXISTS test;
-FLUSH PRIVILEGES;
-SQLEOF2
+    then
+        # Không ghi ~/.my.cnf với mật khẩu CHƯA được đặt - nếu ghi, mọi lệnh mysql sau đó sẽ bị từ chối
+        log_error "Không thiết lập được mật khẩu cho MariaDB. Root vẫn đăng nhập bằng unix_socket (không mật khẩu)."
+        _tune_mariadb_config
+        return 1
+    fi
 
     # Ghi credentials cho cả root và wpdbadmin
     cat > /root/.my.cnf <<MYCNF
@@ -250,60 +267,55 @@ password = ${db_admin_pass}
 MYCNF
     chmod 600 /root/.my.cnf
 
-    # Áp tuning config theo RAM
+    # Áp tuning config theo RAM (hàm này tự restart và tự hoàn tác nếu MariaDB không lên)
     _tune_mariadb_config
-    systemctl restart mariadb
 
     log_info "MariaDB installed and secured! (User: wpdbadmin)"
 }
 
+# Ghi tuning vào 1 file drop-in riêng (không nối vào my.cnf), restart và hoàn tác nếu MariaDB không khởi động.
 _tune_mariadb_config() {
-    local mycnf="/etc/mysql/my.cnf"
-    [[ ! -f "$mycnf" ]] && mycnf="/etc/my.cnf"
-    [[ ! -f "$mycnf" ]] && { log_warn "Không tìm thấy my.cnf. Bỏ qua tuning."; return; }
+    local conf_dir svc
+    conf_dir=$(mariadb_conf_dir) || { log_warn "Không tìm thấy thư mục cấu hình MariaDB. Bỏ qua tuning."; return 0; }
+    svc=$(mariadb_service_name)
+    local tune_file="${conf_dir}/50-vps-manager.cnf"
 
-    if grep -q "vps-manager-db-tuning" "$mycnf" 2>/dev/null; then
-        log_info "MariaDB đã được tối ưu từ trước."; return 0
+    if [[ -f "$tune_file" ]]; then
+        log_info "MariaDB đã được tối ưu từ trước ($tune_file)."; return 0
+    fi
+    # Bản cũ của script nối thẳng vào my.cnf - đã có thì không ghi thêm lần nữa
+    if grep -qs "vps-manager-db-tuning" /etc/mysql/my.cnf /etc/my.cnf; then
+        log_info "MariaDB đã được tối ưu từ trước (trong my.cnf)."; return 0
     fi
 
-    local total_ram_mb cpu_cores
+    local total_ram_mb
     total_ram_mb=$(free -m | awk '/^Mem:/{print $2}')
-    cpu_cores=$(grep -c ^processor /proc/cpuinfo 2>/dev/null || echo 2)
+    [[ -z "$total_ram_mb" ]] && total_ram_mb=1024
+    # InnoDB 25% RAM: phần còn lại dành cho PHP-FPM (~40%), object cache và hệ điều hành.
     local innodb_buffer=$(( total_ram_mb / 4 ))
-    local key_buffer=$(( total_ram_mb / 8 ))
     local db_table_size=$(( total_ram_mb / 128 ))
     local max_connections=$(( total_ram_mb / 50 ))
 
-    # Tuning bảo thủ cho VPS nhỏ để tránh OOM khi PHP-FPM tăng tải.
-    [[ "$innodb_buffer" -lt 48 ]] && innodb_buffer=48
-    [[ "$key_buffer" -lt 16 ]] && key_buffer=16
+    [[ "$innodb_buffer" -lt 64 ]] && innodb_buffer=64
     [[ "$db_table_size" -lt 16 ]] && db_table_size=16
     [[ "$db_table_size" -gt 64 ]] && db_table_size=64
     [[ "$max_connections" -lt 30 ]] && max_connections=30
     [[ "$max_connections" -gt 150 ]] && max_connections=150
 
-    # Query cache: tắt nếu > 2 CPU (MariaDB 10.8+ đã deprecated)
-    local query_cache_conf="query_cache_type = 0
-query_cache_size = 0"
-    if [[ "$cpu_cores" -le 2 ]]; then
-        query_cache_conf="query_cache_type = 1
-query_cache_limit = 2M
-query_cache_min_res_unit = 2k
-query_cache_size = 50M"
-    fi
-
-    cat >> "$mycnf" <<DBCONF
-
-# vps-manager-db-tuning (Premium-grade, RAM-auto-scaled)
+    # key_buffer_size chỉ phục vụ bảng MyISAM; WordPress dùng InnoDB nên giữ nhỏ cố định.
+    # Query cache tắt hẳn: đã deprecated, gây tranh chấp khoá, và object cache (Valkey/Redis) làm tốt hơn.
+    cat > "$tune_file" <<DBCONF
+# vps-manager-db-tuning (tự tính theo RAM: ${total_ram_mb}MB)
 [mysqld]
-key_buffer_size         = ${key_buffer}M
-table_cache             = 2000
+key_buffer_size         = 16M
+table_open_cache        = 2000
 innodb_buffer_pool_size = ${innodb_buffer}M
 max_connections         = ${max_connections}
-${query_cache_conf}
+query_cache_type        = 0
+query_cache_size        = 0
 tmp_table_size          = ${db_table_size}M
 max_heap_table_size     = ${db_table_size}M
-thread_cache_size       = 81
+thread_cache_size       = 32
 max_allowed_packet      = 64M
 wait_timeout            = 60
 interactive_timeout     = 60
@@ -314,7 +326,14 @@ innodb_flush_method     = O_DIRECT
 innodb_file_per_table   = 1
 DBCONF
 
-    log_info "MariaDB tuning: RAM=${total_ram_mb}MB, InnoDB=${innodb_buffer}M, MaxConn=${max_connections}"
+    if systemctl restart "$svc" && systemctl is-active --quiet "$svc"; then
+        log_info "MariaDB tuning: RAM=${total_ram_mb}MB, InnoDB=${innodb_buffer}M, MaxConn=${max_connections}"
+    else
+        log_error "MariaDB không khởi động được với cấu hình tuning - đang hoàn tác."
+        rm -f "$tune_file"
+        systemctl restart "$svc"
+        return 1
+    fi
 }
 
 # ==============================================================================
@@ -324,7 +343,16 @@ DBCONF
 # ==============================================================================
 
 _install_object_cache_nginx() {
-    local cache_type="${1:-valkey}"  # valkey | redis | keydb
+    # valkey | redis
+    # - Valkey: mặc định. Mã nguồn mở (BSD), do Linux Foundation duy trì, tương thích hoàn toàn giao thức Redis,
+    #   có sẵn trong kho Ubuntu 24.04+, Debian 13+, EPEL 9 và là bản thay thế Redis chính thức trên RHEL 10.
+    # - Redis: dùng khi hệ điều hành chưa có gói Valkey (Ubuntu 22.04, Debian 12) - hàm này tự lùi về Redis.
+    # - KeyDB đã bị loại: không có trong kho mặc định của Debian/Ubuntu/EPEL và dự án gần như ngừng phát hành.
+    local cache_type="${1:-valkey}"
+    if [[ "$cache_type" != "valkey" && "$cache_type" != "redis" ]]; then
+        log_error "Loại object cache không hỗ trợ: '$cache_type' (chỉ valkey hoặc redis)."
+        return 1
+    fi
 
     log_info "═══════════════════════════════════════════════════"
     log_info "  Cài đặt Object Cache L2: ${cache_type} (Unix Socket)"
@@ -345,26 +373,28 @@ _install_object_cache_nginx() {
             socket_dir="/var/run/valkey"
             socket_path="${socket_dir}/valkey.sock"
             ;;
-        keydb)
-            conf_file="/etc/keydb/keydb.conf"
-            socket_dir="/var/run/keydb"
-            socket_path="${socket_dir}/keydb.sock"
-            ;;
     esac
 
     # ── Cài đặt gói ──
     if [[ "$OS_FAMILY" == "debian" ]]; then
         case "$cache_type" in
             redis)   DEBIAN_FRONTEND=noninteractive apt-get install -y redis-server &>/dev/null ;;
-            valkey)  DEBIAN_FRONTEND=noninteractive apt-get install -y valkey &>/dev/null ;;
-            keydb)   DEBIAN_FRONTEND=noninteractive apt-get install -y keydb &>/dev/null ;;
+            # Tên gói là valkey-server trên Debian/Ubuntu; "valkey" giữ lại cho kho nào đặt tên như vậy
+            valkey)  DEBIAN_FRONTEND=noninteractive apt-get install -y valkey-server &>/dev/null || \
+                     DEBIAN_FRONTEND=noninteractive apt-get install -y valkey &>/dev/null ;;
         esac
     else
         case "$cache_type" in
             redis)  dnf install -y redis &>/dev/null ;;
             valkey) dnf install -y valkey &>/dev/null ;;
-            keydb)  dnf install -y keydb &>/dev/null ;;
         esac
+    fi
+
+    # Hệ điều hành chưa có gói Valkey -> tự lùi về Redis (cùng giao thức, cùng plugin WordPress)
+    if [[ "$cache_type" == "valkey" && ! -f "$conf_file" ]]; then
+        log_warn "Kho gói của hệ điều hành này chưa có Valkey. Chuyển sang cài Redis (tương thích hoàn toàn)."
+        _install_object_cache_nginx redis
+        return $?
     fi
 
     local service_candidate actual_service=""
@@ -372,7 +402,6 @@ _install_object_cache_nginx() {
     case "$cache_type" in
         redis) service_candidates=(redis-server redis) ;;
         valkey) service_candidates=(valkey-server valkey) ;;
-        keydb) service_candidates=(keydb-server keydb) ;;
     esac
     for service_candidate in "${service_candidates[@]}"; do
         if systemctl list-unit-files "${service_candidate}.service" 2>/dev/null | grep -q "^${service_candidate}\.service" || [[ -f "/lib/systemd/system/${service_candidate}.service" ]] || [[ -f "/etc/systemd/system/${service_candidate}.service" ]]; then
@@ -424,7 +453,6 @@ maxmemory ${maxmem_mb}mb
 maxmemory-policy allkeys-lfu
 save ""
 appendonly no
-activedefrag yes
 tcp-keepalive 60
 SOCKCONF
         fi
@@ -441,6 +469,10 @@ SOCKCONF
     # ── Systemd override: fix socket permissions sau mỗi lần start (kể cả reboot) ──
     # RuntimeDirectory bị systemd reset về default ownership mỗi lần start
     # → Dùng ExecStartPost để chown lại SAU khi service tạo socket
+    # KHÔNG dùng ExecStartPost=/bin/bash để chown socket: unit valkey/redis của Debian/Ubuntu chạy trong
+    # sandbox (NoExecPaths) nên không exec được bash -> service lỗi 203/EXEC và không bao giờ khởi động.
+    # Quyền truy cập được bảo đảm bằng: unixsocketperm 660 + www-data thuộc group của cache service.
+    # RuntimeDirectory chỉ để chắc chắn /run/<type> tồn tại sau reboot (đường dẫn socket nằm trong đó).
     for s_name in "${service_candidates[@]}"; do
         local override_dir="/etc/systemd/system/${s_name}.service.d"
         mkdir -p "$override_dir"
@@ -448,8 +480,6 @@ SOCKCONF
 [Service]
 RuntimeDirectory=${cache_type}
 RuntimeDirectoryMode=0755
-# Fix socket permissions sau khi start để www-data (PHP-FPM) có thể kết nối
-ExecStartPost=/bin/bash -c 'sleep 1; chown ${cache_type}:www-data ${socket_path} 2>/dev/null; chmod 660 ${socket_path} 2>/dev/null; chown ${cache_type}:www-data ${socket_dir} 2>/dev/null; chmod 750 ${socket_dir} 2>/dev/null; true'
 SYSOVERRIDE
     done
 
@@ -466,6 +496,7 @@ SYSOVERRIDE
 
     systemctl daemon-reload
     systemctl enable "${service_name}" 2>/dev/null || true
+    systemctl reset-failed "${service_name}" 2>/dev/null || true   # xoá trạng thái "start-limit-hit" của lần lỗi trước
     systemctl restart "${service_name}" 2>/dev/null || true
 
     # Đợi socket khởi tạo (tối đa 5s)
@@ -473,6 +504,12 @@ SYSOVERRIDE
     while [[ ! -S "$socket_path" ]] && [[ $waited -lt 5 ]]; do
         sleep 1; waited=$((waited+1))
     done
+
+    if ! systemctl is-active --quiet "${service_name}" || [[ ! -S "$socket_path" ]]; then
+        log_error "${cache_type} KHÔNG khởi động được hoặc không tạo socket ${socket_path}."
+        log_error "Kiểm tra: journalctl -u ${service_name} -n 30. Chưa ghi cấu hình cache cho các website."
+        return 1
+    fi
 
     # ── Fix quyền socket sau khi service tạo ra ──────────
     # socket owner: cache_user:www-data, mode 660 → PHP-FPM (www-data) đọc được
@@ -482,31 +519,25 @@ SYSOVERRIDE
         log_info "✓ Socket permissions: ${cache_user}:www-data 660"
     fi
 
-    # ── Restart PHP-FPM SAU khi thay đổi group ───────────
-    # Process PHP-FPM cũ không có group www-data mới → PHẢI restart để kế thừa
-    for phpver in 8.4 8.3 8.2 8.1; do
-        if systemctl is-active --quiet "php${phpver}-fpm" 2>/dev/null; then
-            systemctl restart "php${phpver}-fpm" 2>/dev/null || true
-            log_info "✓ Restarted php${phpver}-fpm (kế thừa group ${cache_group})"
-        fi
-    done
-
-    # ── Cài PHP Redis extension ──
+    # ── Cài PHP Redis extension, rồi restart PHP-FPM ──
+    # Restart là BẮT BUỘC: process PHP-FPM cũ chưa có group của cache service và chưa nạp extension.
     log_info "Cài đặt PHP Redis extension..."
     if [[ "$OS_FAMILY" == "debian" ]]; then
-        for phpver in 8.3 8.2 8.1 8.4; do
-            if [[ -f "/etc/php/${phpver}/fpm/php.ini" ]]; then
-                DEBIAN_FRONTEND=noninteractive apt-get install -y "php${phpver}-redis" &>/dev/null || true
-                phpenmod -v "$phpver" redis 2>/dev/null || true
-                systemctl restart "php${phpver}-fpm" 2>/dev/null || true
-                log_info "✓ PHP ${phpver}-redis extension đã bật"
-            fi
+        local ini phpver
+        for ini in /etc/php/*/fpm/php.ini; do
+            [[ -f "$ini" ]] || continue
+            phpver=$(echo "$ini" | grep -oE '[0-9]+\.[0-9]+' | head -1)
+            DEBIAN_FRONTEND=noninteractive apt-get install -y "php${phpver}-redis" &>/dev/null || \
+                log_warn "Không cài được php${phpver}-redis"
+            phpenmod -v "$phpver" redis 2>/dev/null || true
+            php_fpm_restart_safe "$phpver" && log_info "✓ PHP ${phpver}: redis extension đã bật, FPM đã restart"
         done
     else
-        for phpver in 83 82 81; do
-            dnf install -y "php${phpver}-php-redis" &>/dev/null || \
-            dnf install -y "php-redis" &>/dev/null || true
-        done
+        # RHEL/Oracle (Remi module stream): 1 phiên bản PHP, gói extension là php-pecl-redis*
+        dnf install -y php-pecl-redis6 &>/dev/null || dnf install -y php-pecl-redis5 &>/dev/null || \
+            dnf install -y php-pecl-redis &>/dev/null || dnf install -y php-redis &>/dev/null || \
+            log_warn "Không cài được PHP redis extension (php-pecl-redis)."
+        php_fpm_restart_safe && log_info "✓ PHP redis extension đã cài, php-fpm đã restart"
     fi
 
     # ── Verify socket hoạt động ──
@@ -524,8 +555,7 @@ SYSOVERRIDE
     echo ""
     echo "  define('WP_REDIS_SCHEME', 'unix');"
     echo "  define('WP_REDIS_PATH',   '${socket_path}');"
-    echo "  define('WP_REDIS_DATABASE', 0);  // Tăng số này cho mỗi site"
-    echo "  define('WP_CACHE_KEY_SALT', 'tensite:');"
+    echo "  define('WP_CACHE_KEY_SALT', 'tensite:');  // Mỗi site 1 salt khác nhau"
     echo ""
     echo -e "${CYAN}  Plugin đề xuất: Redis Cache by Till Krüss${NC}"
     echo -e "${CYAN}  (Tương thích với Redis, Valkey, KeyDB)${NC}"
@@ -562,20 +592,24 @@ install_php() {
             --max-time 5)
 
         if [[ "$ppa_check" == "200" ]]; then
-            local ppa_list="/etc/apt/sources.list.d/ondrej-ubuntu-php.list"
-            echo "deb [trusted=yes] https://ppa.launchpadcontent.net/ondrej/php/ubuntu ${codename} main" > "$ppa_list"
-            pkg_update > /dev/null 2>&1
+            # add-apt-repository tự lấy khoá ký của PPA từ Launchpad -> gói PHP được kiểm tra chữ ký.
+            # KHÔNG dùng [trusted=yes]: tuỳ chọn đó tắt hẳn việc kiểm tra chữ ký gói.
+            if add-apt-repository -y ppa:ondrej/php > /dev/null 2>&1; then
+                pkg_update > /dev/null 2>&1
+            else
+                log_warn "Không thêm được PPA ondrej/php (có chữ ký). Sử dụng PHP gốc của hệ điều hành..."
+            fi
         else
             log_warn "PPA ondrej/php không hỗ trợ '${codename}'. Sử dụng PHP gốc của Ubuntu..."
         fi
     fi
 
-    local primary_ver="8.3"
+    local primary_ver="8.4"
     
     if [[ -n "$1" ]]; then
         primary_ver="$1"
     else
-        echo -e "${YELLOW}Cài đặt PHP (Mặc định: PHP 8.3)${NC}"
+        echo -e "${YELLOW}Cài đặt PHP (Mặc định: PHP 8.4)${NC}"
     fi
 
     _install_single_php "$primary_ver"
@@ -584,7 +618,9 @@ install_php() {
     if [[ -z "$1" ]]; then
         echo ""
         read -p "Bạn có muốn cài thêm phiên bản PHP phụ không? [y/N]: " install_more
-        if [[ "$install_more" == "y" || "$install_more" == "Y" ]]; then
+        if [[ "$OS_FAMILY" == "rhel" ]] && [[ "$install_more" == "y" || "$install_more" == "Y" ]]; then
+            log_warn "Trên RHEL/Oracle Linux (Remi module stream) chỉ chạy được MỘT phiên bản PHP. Bỏ qua cài PHP phụ."
+        elif [[ "$install_more" == "y" || "$install_more" == "Y" ]]; then
             echo -e "Chọn phiên bản PHP muốn cài thêm:"
             echo -e "1. PHP 8.1"
             echo -e "2. PHP 8.2"
@@ -604,11 +640,32 @@ install_php() {
 _install_single_php() {
     local ver=$1
     log_info "Installing PHP $ver..."
+    # Ngân sách tiến trình PHP-FPM cho pool mặc định (~40% RAM, 64MB/tiến trình, xem core/platform_helpers.sh)
+    local calc_children
+    calc_children=$(php_fpm_children_budget)
+    local spare_start=$(( calc_children / 4 )); [[ "$spare_start" -lt 2 ]] && spare_start=2
+    local spare_min=$(( calc_children / 6 ));  [[ "$spare_min" -lt 1 ]] && spare_min=1
+    local spare_max=$(( calc_children / 2 ));  [[ "$spare_max" -lt "$spare_start" ]] && spare_max=$spare_start
+
     if [[ "$OS_FAMILY" == "rhel" ]]; then
-        dnf module enable php:remi-$ver -y >/dev/null 2>&1
-        pkg_install php-fpm php-mysqlnd php-common php-cli \
+        # Module stream chỉ cho phép 1 phiên bản PHP: phải reset trước khi enable stream khác
+        local cur_ver=""
+        command -v php &>/dev/null && cur_ver=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null)
+        if [[ -n "$cur_ver" && "$cur_ver" != "$ver" ]]; then
+            log_error "Server đang chạy PHP $cur_ver. RHEL/Oracle Linux chỉ hỗ trợ 1 phiên bản PHP (module stream)."
+            log_error "Muốn đổi sang PHP $ver: dnf module reset php -y && dnf module enable php:remi-$ver -y && dnf distro-sync 'php*'"
+            return 1
+        fi
+        if ! dnf module enable "php:remi-$ver" -y >/dev/null 2>&1; then
+            log_error "Không enable được module php:remi-$ver. Kiểm tra repo Remi: dnf module list php"
+            return 1
+        fi
+        if ! pkg_install php-fpm php-mysqlnd php-common php-cli \
             php-curl php-xml php-mbstring php-zip php-bcmath \
-            php-intl php-gd php-pecl-imagick
+            php-intl php-gd php-pecl-imagick; then
+            log_error "Cài đặt PHP $ver THẤT BẠI."
+            return 1
+        fi
 
         local php_ini="/etc/php.ini"
         if [[ -f "$php_ini" ]]; then
@@ -620,16 +677,40 @@ _install_single_php() {
         fi
 
         local pool_conf="/etc/php-fpm.d/www.conf"
-        if [[ -f "$pool_conf" ]]; then
-            sed -i -E 's/^[; ]*user = .*/user = nginx/' "$pool_conf"
-            sed -i -E 's/^[; ]*group = .*/group = nginx/' "$pool_conf"
-            sed -i -E 's/^[; ]*listen\.owner = .*/listen.owner = nginx/' "$pool_conf"
-            sed -i -E 's/^[; ]*listen\.group = .*/listen.group = nginx/' "$pool_conf"
-            sed -i -E 's/^[; ]*listen\.mode = .*/listen.mode = 0660/' "$pool_conf"
+        # PHP chạy bằng www-data - CÙNG user sở hữu /var/www - để WordPress upload/cập nhật được.
+        # nginx (đã ở trong group www-data, xem install_nginx) kết nối socket qua quyền group 0660.
+        groupadd -f www-data 2>/dev/null || true
+        id -u www-data &>/dev/null || useradd -r -g www-data -s /sbin/nologin -d /var/www www-data 2>/dev/null || true
+        if id -u nginx &>/dev/null && ! id -nG nginx | grep -qw www-data; then
+            usermod -aG www-data nginx 2>/dev/null || true
+            systemctl is-active --quiet nginx && systemctl restart nginx   # worker phải khởi động lại mới nhận group mới
         fi
+        if [[ -f "$pool_conf" ]]; then
+            sed -i -E 's/^[; ]*user = .*/user = www-data/' "$pool_conf"
+            sed -i -E 's/^[; ]*group = .*/group = www-data/' "$pool_conf"
+            sed -i -E 's/^[; ]*listen\.owner = .*/listen.owner = www-data/' "$pool_conf"
+            sed -i -E 's/^[; ]*listen\.group = .*/listen.group = www-data/' "$pool_conf"
+            sed -i -E 's/^[; ]*listen\.mode = .*/listen.mode = 0660/' "$pool_conf"
+            # listen.acl_users/acl_groups (mặc định của RHEL) ghi đè owner/group/mode -> phải tắt
+            sed -i -E 's/^(listen\.acl_(users|groups)[[:space:]]*=.*)/;\1/' "$pool_conf"
+            sed -i -E "s/^[; ]*pm\.max_children.*/pm.max_children = $calc_children/" "$pool_conf"
+            sed -i -E "s/^[; ]*pm\.start_servers.*/pm.start_servers = $spare_start/" "$pool_conf"
+            sed -i -E "s/^[; ]*pm\.min_spare_servers.*/pm.min_spare_servers = $spare_min/" "$pool_conf"
+            sed -i -E "s/^[; ]*pm\.max_spare_servers.*/pm.max_spare_servers = $spare_max/" "$pool_conf"
+            sed -i -E "s/^[; ]*pm\.max_requests.*/pm.max_requests = 1000/" "$pool_conf"
+        fi
+        # Thư mục session/opcache của gói RHEL thuộc group apache -> chuyển cho www-data
+        local d
+        for d in /var/lib/php/session /var/lib/php/wsdlcache /var/lib/php/opcache; do
+            [[ -d "$d" ]] && chown root:www-data "$d" && chmod 770 "$d"
+        done
+        selinux_allow_web
 
         systemctl enable php-fpm >/dev/null 2>&1
-        systemctl start php-fpm >/dev/null 2>&1
+        if ! php_fpm_restart_safe "$ver"; then
+            log_error "PHP-FPM không khởi động được sau khi cấu hình."
+            return 1
+        fi
     else
         pkg_install php$ver php$ver-fpm php$ver-mysql php$ver-common php$ver-cli \
             php$ver-curl php$ver-xml php$ver-mbstring php$ver-zip php$ver-bcmath \
@@ -655,29 +736,32 @@ _install_single_php() {
         fi
 
         # Fix 502 Bad Gateway & Auto-tune PHP-FPM pool for 524 Timeout prevention
-        usermod -aG www-data nginx 2>/dev/null || true
-        usermod -aG nginx www-data 2>/dev/null || true
+        # nginx worker (user "nginx" của gói nginx.org) phải thuộc group www-data để mở socket 0660.
+        # Worker chỉ nhận group mới sau khi restart -> restart nginx nếu vừa thêm group.
+        if id -u nginx &>/dev/null && ! id -nG nginx | grep -qw www-data; then
+            usermod -aG www-data nginx 2>/dev/null || true
+            systemctl is-active --quiet nginx && systemctl restart nginx
+        fi
         chmod 755 /run/php 2>/dev/null || true
-        
-        local total_ram_mb calc_children
-        total_ram_mb=$(free -m | awk '/^Mem:/{print $2}')
-        [ -z "$total_ram_mb" ] && total_ram_mb=1024
-        calc_children=$(( total_ram_mb / 50 ))
-        [ "$calc_children" -lt 10 ] && calc_children=10
-        [ "$calc_children" -gt 100 ] && calc_children=100
 
         local pool_conf="/etc/php/$actual_ver/fpm/pool.d/www.conf"
         if [[ -f "$pool_conf" ]]; then
-            sed -i -E "s/^[; ]*listen\.mode.*/listen.mode = 0666/" "$pool_conf"
+            # 0660 (không phải 0666): chỉ www-data và group www-data (có nginx) được gọi PHP qua socket
+            sed -i -E "s/^[; ]*listen\.owner.*/listen.owner = www-data/" "$pool_conf"
+            sed -i -E "s/^[; ]*listen\.group.*/listen.group = www-data/" "$pool_conf"
+            sed -i -E "s/^[; ]*listen\.mode.*/listen.mode = 0660/" "$pool_conf"
             sed -i -E "s/^[; ]*pm\.max_children.*/pm.max_children = $calc_children/" "$pool_conf"
-            sed -i -E "s/^[; ]*pm\.start_servers.*/pm.start_servers = $(( calc_children / 4 ))/" "$pool_conf"
-            sed -i -E "s/^[; ]*pm\.min_spare_servers.*/pm.min_spare_servers = $(( calc_children / 6 ))/" "$pool_conf"
-            sed -i -E "s/^[; ]*pm\.max_spare_servers.*/pm.max_spare_servers = $(( calc_children / 2 ))/" "$pool_conf"
+            sed -i -E "s/^[; ]*pm\.start_servers.*/pm.start_servers = $spare_start/" "$pool_conf"
+            sed -i -E "s/^[; ]*pm\.min_spare_servers.*/pm.min_spare_servers = $spare_min/" "$pool_conf"
+            sed -i -E "s/^[; ]*pm\.max_spare_servers.*/pm.max_spare_servers = $spare_max/" "$pool_conf"
             sed -i -E "s/^[; ]*pm\.max_requests.*/pm.max_requests = 1000/" "$pool_conf"
         fi
 
         systemctl enable php$actual_ver-fpm >/dev/null 2>&1 || systemctl enable php-fpm >/dev/null 2>&1
-        systemctl start php$actual_ver-fpm >/dev/null 2>&1 || systemctl start php-fpm >/dev/null 2>&1
+        if ! php_fpm_restart_safe "$actual_ver"; then
+            log_error "PHP-FPM $actual_ver không khởi động được sau khi cấu hình."
+            return 1
+        fi
 
         # Verify & auto-fix DOM/XML symlinks cho cả FPM và CLI
         _fix_php_ext_symlinks "$actual_ver"

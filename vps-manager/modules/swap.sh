@@ -48,32 +48,60 @@ create_swap() {
         read -p "Nhập dung lượng Swap (MB) (ví dụ 1024, 2048): " size
     fi
     
+    if ! valid_uint "$size" || [[ "$size" -lt 64 ]] || [[ "$size" -gt 65536 ]]; then
+        echo -e "${RED}Dung lượng không hợp lệ (nhập số MB, từ 64 đến 65536).${NC}"
+        if [[ -z "$1" ]]; then pause; fi
+        return 1
+    fi
+
     if [[ -f /swapfile ]]; then
         echo -e "${RED}Swapfile đã tồn tại! Vui lòng xóa trước.${NC}"
         if [[ -z "$1" ]]; then pause; fi
         return
     fi
-    
+
+    if ! check_disk_space / $(( size + 512 )); then
+        if [[ -z "$1" ]]; then pause; fi
+        return 1
+    fi
+
     log_info "Đang tạo Swapfile ${size}MB..."
-    fallocate -l ${size}M /swapfile
-    chmod 600 /swapfile
-    mkswap /swapfile
-    swapon /swapfile
-    
+    # fallocate không dùng được cho swap trên một số filesystem (btrfs, xfs cũ) -> fallback dd
+    if ! fallocate -l "${size}M" /swapfile 2>/dev/null; then
+        dd if=/dev/zero of=/swapfile bs=1M count="$size" status=none
+    fi
+    if ! { chmod 600 /swapfile && mkswap /swapfile >/dev/null && swapon /swapfile; }; then
+        log_error "Tạo Swap THẤT BẠI. Đã dọn file /swapfile."
+        swapoff /swapfile 2>/dev/null
+        rm -f /swapfile
+        if [[ -z "$1" ]]; then pause; fi
+        return 1
+    fi
+
     # Add to fstab
-    if ! grep -q "/swapfile" /etc/fstab; then
+    if ! grep -q "^/swapfile[[:space:]]" /etc/fstab; then
         echo "/swapfile none swap sw 0 0" >> /etc/fstab
     fi
-    
+
     log_info "Tạo Swap thành công."
     if [[ -z "$1" ]]; then pause; fi
 }
 
 remove_swap() {
-    log_info "Đang xóa Swap..."
-    swapoff -a
-    rm -f /swapfile
-    sed -i '/\/swapfile/d' /etc/fstab
-    log_info "Đã xóa Swap."
+    # Chỉ gỡ các swap FILE do công cụ này tạo; không tắt ZRAM hay swap partition
+    local found=0 f
+    for f in /swapfile /var/swap.1; do
+        [[ -f "$f" ]] || continue
+        found=1
+        log_info "Đang xóa $f..."
+        if grep -q "^${f} " /proc/swaps 2>/dev/null && ! swapoff "$f"; then
+            log_error "Không swapoff được $f (RAM không đủ chỗ chứa dữ liệu đang swap). Giữ nguyên."
+            continue
+        fi
+        rm -f "$f"
+        sed -i "\|^${f}[[:space:]]|d" /etc/fstab
+        log_info "Đã xóa $f."
+    done
+    [[ $found -eq 0 ]] && echo -e "${YELLOW}Không có file swap nào trên ổ đĩa.${NC}"
     pause
 }

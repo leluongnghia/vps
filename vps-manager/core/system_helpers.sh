@@ -27,7 +27,10 @@ acquire_lock() {
     fi
 
     echo $$ > "$LOCK_FILE"
-    trap "rm -f $LOCK_FILE" EXIT INT TERM
+    # EXIT dọn file khoá; INT/TERM phải THOÁT hẳn (nếu chỉ xoá file rồi chạy tiếp thì mất khoá mà script vẫn chạy)
+    trap 'rm -f "$LOCK_FILE"' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
     return 0
 }
 
@@ -45,45 +48,6 @@ check_disk_space() {
     fi
     
     return 0
-}
-
-# Execute command with timeout
-run_with_timeout() {
-    local timeout_sec=$1
-    shift
-    local cmd="$@"
-    
-    if command -v timeout &>/dev/null; then
-        timeout "$timeout_sec" bash -c "$cmd"
-        local exit_code=$?
-        if [[ $exit_code -eq 124 ]]; then
-            log_error "Command timed out after ${timeout_sec}s"
-            return 1
-        fi
-        return $exit_code
-    else
-        # Fallback if timeout command not available
-        eval "$cmd"
-    fi
-}
-
-# Show progress spinner for long operations
-show_progress() {
-    local pid=$1
-    local message=${2:-"Processing"}
-    local delay=0.1
-    local spinstr='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
-    
-    echo -n "$message "
-    while kill -0 "$pid" 2>/dev/null; do
-        local temp=${spinstr#?}
-        printf "[%c]" "$spinstr"
-        spinstr=$temp${spinstr%"$temp"}
-        sleep $delay
-        printf "\b\b\b"
-    done
-    printf "   \b\b\b"
-    echo ""
 }
 
 # Dynamic PHP version detection
@@ -131,33 +95,5 @@ validate_domain() {
     return 0
 }
 
-# Sanitize user input
-sanitize_input() {
-    local input=$1
-    # Remove dangerous characters
-    echo "$input" | sed 's/[;&|`$(){}]//g'
-}
-
-# Enable EPEL & PowerTools/CRB on AlmaLinux / Rocky / RHEL
-enable_alma_repos() {
-    if [[ "$OS_FAMILY" != "rhel" ]]; then return 0; fi
-
-    log_info "Bật EPEL & CRB repo cho AlmaLinux/Rocky..."
-
-    # EPEL
-    if ! rpm -q epel-release &>/dev/null; then
-        dnf install -y epel-release &>/dev/null
-    fi
-
-    # CRB (CodeReady Builder) — tên khác nhau tuỳ distro
-    if dnf repolist 2>/dev/null | grep -qi "crb"; then
-        dnf config-manager --set-enabled crb &>/dev/null
-    elif dnf repolist 2>/dev/null | grep -qi "powertools"; then
-        dnf config-manager --set-enabled powertools &>/dev/null
-    fi
-
-    dnf makecache &>/dev/null
-    log_info "EPEL & CRB đã được kích hoạt."
-}
 
 

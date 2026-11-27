@@ -72,33 +72,40 @@ set_cpu_performance_governor() {
 tune_kernel_tcp() {
     local sysctl_file="/etc/sysctl.d/101-vps-manager.conf"
 
-    if [[ -f "$sysctl_file" ]] && grep -q "vps-manager" "$sysctl_file" 2>/dev/null; then
+    # Đánh dấu phiên bản bộ tham số: khi bộ tham số thay đổi, server cũ được ghi lại file thay vì bỏ qua
+    local tuning_rev="vps-manager-sysctl-rev2"
+    if [[ -f "$sysctl_file" ]] && grep -q "$tuning_rev" "$sysctl_file" 2>/dev/null; then
         log_info "Kernel TCP đã được tối ưu từ trước. Bỏ qua."
         return 0
     fi
 
     log_info "Áp dụng tối ưu Kernel TCP/Network..."
 
+    # vm.min_free_kbytes theo RAM (~1.5%, 16MB..64MB): 64MB cố định là quá nhiều với VPS 512MB-1GB
+    local ram_kb min_free_kb
+    ram_kb=$(awk '/^MemTotal:/{print $2}' /proc/meminfo 2>/dev/null)
+    [[ -z "$ram_kb" ]] && ram_kb=1048576
+    min_free_kb=$(( ram_kb * 15 / 1000 ))
+    [[ "$min_free_kb" -lt 16384 ]] && min_free_kb=16384
+    [[ "$min_free_kb" -gt 65536 ]] && min_free_kb=65536
+
     # Tính hashsize = nf_conntrack_max / 4 (524288 / 4 = 131072)
     if [[ ! -f /proc/user_beancounters ]]; then  # Bỏ qua nếu là OpenVZ (ảo hóa 1 phần)
         if [[ -d /etc/sysctl.d ]]; then
 
             echo 131072 > /sys/module/nf_conntrack/parameters/hashsize 2>/dev/null || true
+            # modprobe.d giữ hashsize qua các lần reboot (không cần /etc/rc.local)
             if [[ ! -f /etc/modprobe.d/nf_conntrack.conf ]]; then
                 echo 'options nf_conntrack hashsize=131072' > /etc/modprobe.d/nf_conntrack.conf
             fi
 
-            # Ghi hashsize vào rc.local để bền vĩnh
-            if ! grep -q "nf_conntrack/parameters/hashsize" /etc/rc.local 2>/dev/null; then
-                echo "echo 131072 > /sys/module/nf_conntrack/parameters/hashsize" >> /etc/rc.local
-            fi
-
-            cat > "$sysctl_file" << 'EOF'
+            cat > "$sysctl_file" << EOF
 # vps-manager — Kernel TCP/Network Optimization
-# Tham khảo: Premium guidelines
+# ${tuning_rev}
 
 # Process & File
-kernel.pid_max = 65536
+# (không đặt kernel.pid_max / net.core.optmem_max / tcp_limit_output_bytes:
+#  giá trị mặc định của kernel hiện đại cao hơn các con số từng ghi ở đây)
 kernel.printk = 4 1 1 7
 fs.nr_open = 12000000
 fs.file-max = 9000000
@@ -110,7 +117,6 @@ net.ipv4.tcp_rmem = 8192 87380 16777216
 net.ipv4.tcp_wmem = 8192 65536 16777216
 net.core.netdev_max_backlog = 65536
 net.core.somaxconn = 65535
-net.core.optmem_max = 8192
 
 # TCP performance
 net.ipv4.tcp_fin_timeout = 10
@@ -123,7 +129,6 @@ net.ipv4.tcp_syn_retries = 3
 net.ipv4.tcp_synack_retries = 2
 net.ipv4.tcp_max_tw_buckets = 1440000
 net.ipv4.tcp_slow_start_after_idle = 0
-net.ipv4.tcp_limit_output_bytes = 65536
 net.ipv4.tcp_rfc1337 = 1
 net.ipv4.ip_local_port_range = 1024 65535
 
@@ -133,12 +138,11 @@ net.ipv4.tcp_congestion_control = bbr
 net.ipv4.tcp_fastopen = 3
 
 # Memory management
+# (khi bật ZRAM, /etc/sysctl.d/99-vps-manager-zram.conf nạp sau file này và đặt swappiness = 100)
 vm.swappiness = 10
-vm.min_free_kbytes = 65536
-vm.vfs_cache_pressure = 150
+vm.min_free_kbytes = ${min_free_kb}
 
 # conntrack
-net.netfilter.nf_conntrack_helper = 0
 net.nf_conntrack_max = 524288
 net.netfilter.nf_conntrack_tcp_timeout_established = 28800
 net.netfilter.nf_conntrack_generic_timeout = 60
@@ -201,10 +205,15 @@ EOF
     # Áp dụng ngay trong session hiện tại
     ulimit -n 524288 2>/dev/null || true
 
-    # Ghi vào rc.local để bền vĩnh
-    if ! grep -q "ulimit -n 524288" /etc/rc.local 2>/dev/null; then
-        echo "ulimit -n 524288" >> /etc/rc.local 2>/dev/null || true
-    fi
+    # limits.conf chỉ áp dụng cho phiên đăng nhập (PAM). Service do systemd chạy cần LimitNOFILE riêng.
+    local svc
+    for svc in nginx mariadb; do
+        if systemctl list-unit-files "${svc}.service" 2>/dev/null | grep -q "^${svc}\.service"; then
+            mkdir -p "/etc/systemd/system/${svc}.service.d"
+            printf '[Service]\nLimitNOFILE=524288\n' > "/etc/systemd/system/${svc}.service.d/vps-manager-limits.conf"
+        fi
+    done
+    systemctl daemon-reload 2>/dev/null || true
 
     # /etc/security/limits.d/20-nproc.conf cho RHEL-based
     if [[ -f /etc/security/limits.d/20-nproc.conf ]]; then
@@ -231,27 +240,22 @@ calc_mariadb_tuning_params() {
     local cpu_cores
     cpu_cores=$(grep -c ^processor /proc/cpuinfo 2>/dev/null || echo 2)
 
-    # Innodb buffer: 25% RAM
+    # Cùng công thức với _tune_mariadb_config trong modules/lemp.sh (một nguồn số liệu duy nhất):
+    # InnoDB 25% RAM; phần còn lại dành cho PHP-FPM (~40%), object cache và hệ điều hành.
     local innodb_buffer=$(( total_ram_mb / 4 ))
-    local key_buffer=$(( total_ram_mb / 8 ))
-    local db_table_size=$(( total_ram_mb / 64 ))
-    local max_connections=$(( total_ram_mb / 32 ))
-    local max_allowed_packet=64
+    local key_buffer=16          # chỉ phục vụ MyISAM; WordPress dùng InnoDB
+    local db_table_size=$(( total_ram_mb / 128 ))
+    local max_connections=$(( total_ram_mb / 50 ))
 
-    # Giữ cấu hình bảo thủ cho VPS nhỏ để tránh OOM khi PHP-FPM tăng tải.
-    [[ "$innodb_buffer" -lt 48 ]] && innodb_buffer=48
-    [[ "$key_buffer" -lt 16 ]] && key_buffer=16
-    [[ "$db_table_size" -lt 32 ]] && db_table_size=32
+    [[ "$innodb_buffer" -lt 64 ]] && innodb_buffer=64
+    [[ "$db_table_size" -lt 16 ]] && db_table_size=16
     [[ "$db_table_size" -gt 64 ]] && db_table_size=64
-    [[ "$max_connections" -lt 60 ]] && max_connections=60
-    [[ "$max_connections" -gt 200 ]] && max_connections=200
+    [[ "$max_connections" -lt 30 ]] && max_connections=30
+    [[ "$max_connections" -gt 150 ]] && max_connections=150
 
-    # query_cache: tắt nếu > 2 CPU (MariaDB 10.8+ deprecated)
+    # Query cache tắt hẳn: đã deprecated, gây tranh chấp khoá; object cache (Valkey/Redis) làm tốt hơn.
     local query_cache_type=0
     local query_cache_size=0
-    if [[ "$cpu_cores" -le 2 ]]; then
-        query_cache_type=1; query_cache_size="50M"
-    fi
 
     export DB_INNODB_BUFFER="${innodb_buffer}M"
     export DB_KEY_BUFFER="${key_buffer}M"
